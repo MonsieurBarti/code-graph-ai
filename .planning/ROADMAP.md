@@ -99,7 +99,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation & Core Parsing | 3/3 | Complete   | 2026-02-22 |
+| 1. Foundation & Core Parsing | 3/3 | Complete    | 2026-02-22 |
 | 2. Import Resolution & Graph Completion | 0/TBD | Not started | - |
 | 3. Query Engine & CLI | 0/TBD | Not started | - |
 | 4. MCP Integration | 0/TBD | Not started | - |
