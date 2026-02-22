@@ -19,6 +19,17 @@ pub struct IndexStats {
     pub skipped: usize,
     /// Wall-clock time for the indexing run in seconds.
     pub elapsed_secs: f64,
+    // Resolution metrics (Phase 2)
+    /// Number of imports successfully resolved to a local indexed file.
+    pub resolved_imports: usize,
+    /// Number of imports that could not be resolved to any target.
+    pub unresolved_imports: usize,
+    /// Number of imports resolved to external packages (node_modules).
+    pub external_packages: usize,
+    /// Number of imports classified as Node.js built-in modules.
+    pub builtin_modules: usize,
+    /// Number of symbol-level relationship edges added (Calls, Extends, Implements, TypeRef).
+    pub relationship_edges: usize,
 }
 
 /// Print a summary of the indexing run.
@@ -56,6 +67,16 @@ pub fn print_summary(stats: &IndexStats, json: bool) {
         stats.components, stats.methods, stats.properties,
     );
     println!("  {} imports, {} exports", stats.imports, stats.exports);
+
+    // Resolution section.
+    println!(
+        "  Resolved {} imports ({} external, {} unresolved, {} builtins)",
+        stats.resolved_imports,
+        stats.external_packages,
+        stats.unresolved_imports,
+        stats.builtin_modules,
+    );
+    println!("  Added {} relationship edges", stats.relationship_edges);
 
     if stats.skipped > 0 {
         eprintln!("  {} files skipped (parse errors)", stats.skipped);

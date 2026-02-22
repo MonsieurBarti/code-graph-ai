@@ -7,6 +7,7 @@ mod resolver;
 mod walker;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
@@ -15,6 +16,7 @@ use cli::{Cli, Commands};
 use config::CodeGraphConfig;
 use graph::{CodeGraph, node::SymbolKind};
 use output::{IndexStats, print_summary};
+use parser::ParseResult;
 use walker::walk_project;
 
 fn main() -> Result<()> {
@@ -38,6 +40,9 @@ fn main() -> Result<()> {
             let mut total_imports: usize = 0;
             let mut total_exports: usize = 0;
             let mut skipped: usize = 0;
+
+            // Parse results map — retained for the resolution step.
+            let mut parse_results: HashMap<PathBuf, ParseResult> = HashMap::new();
 
             // 5. Parse each file (serial — parallel is Phase 6).
             for file_path in &files {
@@ -65,7 +70,7 @@ fn main() -> Result<()> {
                     _ => "unknown",
                 };
 
-                // Parse: tree-sitter + symbol/import/export extraction.
+                // Parse: tree-sitter + symbol/import/export/relationship extraction.
                 let result = match parser::parse_file(file_path, &source) {
                     Ok(r) => r,
                     Err(e) => {
@@ -101,9 +106,29 @@ fn main() -> Result<()> {
                         file_path.display()
                     );
                 }
+
+                // Store parse result for the resolution pass.
+                parse_results.insert(file_path.clone(), result);
             }
 
-            // 6. Compute stats from graph.
+            // 6. Resolve imports, barrel chains, and symbol relationships.
+            let resolve_stats = resolver::resolve_all(&mut graph, &path, &parse_results, verbose);
+
+            if verbose {
+                eprintln!(
+                    "  Resolution: {} resolved, {} external, {} unresolved, {} builtins",
+                    resolve_stats.resolved,
+                    resolve_stats.external,
+                    resolve_stats.unresolved,
+                    resolve_stats.builtin,
+                );
+                eprintln!(
+                    "  Relationships: {} edges added",
+                    resolve_stats.relationships_added
+                );
+            }
+
+            // 7. Compute stats from graph.
             let elapsed_secs = start.elapsed().as_secs_f64();
             let breakdown: HashMap<SymbolKind, usize> = graph.symbols_by_kind();
 
@@ -122,9 +147,14 @@ fn main() -> Result<()> {
                 exports: total_exports,
                 skipped,
                 elapsed_secs,
+                resolved_imports: resolve_stats.resolved,
+                unresolved_imports: resolve_stats.unresolved,
+                external_packages: resolve_stats.external,
+                builtin_modules: resolve_stats.builtin,
+                relationship_edges: resolve_stats.relationships_added,
             };
 
-            // 7. Print summary.
+            // 8. Print summary.
             print_summary(&stats, json);
         }
     }
