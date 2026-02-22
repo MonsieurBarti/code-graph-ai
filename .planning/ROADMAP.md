@@ -12,7 +12,7 @@ Code-Graph is built in six phases that follow the natural dependency order of th
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Foundation & Core Parsing** - Rust scaffold, tree-sitter parsing, symbol extraction, and an in-memory graph
+- [x] **Phase 1: Foundation & Core Parsing** - Rust scaffold, tree-sitter parsing, symbol extraction, and an in-memory graph (completed 2026-02-22)
 - [ ] **Phase 2: Import Resolution & Graph Completion** - Full import resolution (tsconfig paths, barrel files, monorepo workspaces) and complete symbol-level graph
 - [ ] **Phase 3: Query Engine & CLI** - All graph queries (definition, references, impact, circular deps, context) exposed via CLI commands
 - [ ] **Phase 4: MCP Integration** - rmcp stdio server exposing graph tools to Claude Code with token-optimized responses
@@ -31,7 +31,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. The tool extracts functions, classes, interfaces, type aliases, enums, and exported variables from each file
   4. The tool extracts ESM imports, CJS require calls, and dynamic imports with string literals from each file
   5. The tool extracts named exports, default exports, and re-exports from each file
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 Plans:
 - [ ] 01-01-PLAN.md — Project scaffold, CLI, config, and file walker (PARS-01)
 - [ ] 01-02-PLAN.md — Parser infrastructure, graph structures, and symbol extraction (PARS-02)
@@ -99,7 +99,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation & Core Parsing | 2/3 | In Progress|  |
+| 1. Foundation & Core Parsing | 3/3 | Complete   | 2026-02-22 |
 | 2. Import Resolution & Graph Completion | 0/TBD | Not started | - |
 | 3. Query Engine & CLI | 0/TBD | Not started | - |
 | 4. MCP Integration | 0/TBD | Not started | - |

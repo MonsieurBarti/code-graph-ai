@@ -9,8 +9,8 @@
 
 - [x] **PARS-01**: Tool can index all .ts/.tsx/.js/.jsx files in a project, respecting .gitignore
 - [x] **PARS-02**: Tool extracts symbols from each file: functions, classes, interfaces, type aliases, enums, and exported variables
-- [ ] **PARS-03**: Tool extracts all import statements (ESM import, CJS require, dynamic import with string literal)
-- [ ] **PARS-04**: Tool extracts export statements (named exports, default exports, re-exports)
+- [x] **PARS-03**: Tool extracts all import statements (ESM import, CJS require, dynamic import with string literal)
+- [x] **PARS-04**: Tool extracts export statements (named exports, default exports, re-exports)
 - [ ] **PARS-05**: Tool resolves TypeScript path aliases from tsconfig.json (paths, baseUrl, extends chains)
 - [ ] **PARS-06**: Tool resolves barrel file imports to the actual defining file (symbol-level resolution through index.ts)
 - [ ] **PARS-07**: Tool resolves monorepo workspace packages to local paths (package.json workspaces)
@@ -85,8 +85,8 @@
 |-------------|-------|--------|
 | PARS-01 | Phase 1 | Complete |
 | PARS-02 | Phase 1 | Complete |
-| PARS-03 | Phase 1 | Pending |
-| PARS-04 | Phase 1 | Pending |
+| PARS-03 | Phase 1 | Complete |
+| PARS-04 | Phase 1 | Complete |
 | PARS-05 | Phase 2 | Pending |
 | PARS-06 | Phase 2 | Pending |
 | PARS-07 | Phase 2 | Pending |
