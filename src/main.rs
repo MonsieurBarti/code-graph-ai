@@ -1,5 +1,6 @@
 mod cli;
 mod config;
+mod graph;
 mod walker;
 
 use anyhow::Result;
