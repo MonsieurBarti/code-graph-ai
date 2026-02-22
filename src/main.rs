@@ -1,6 +1,7 @@
 mod cli;
 mod config;
 mod graph;
+mod parser;
 mod walker;
 
 use anyhow::Result;
