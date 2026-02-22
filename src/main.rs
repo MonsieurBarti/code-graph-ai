@@ -3,6 +3,7 @@ mod config;
 mod graph;
 mod output;
 mod parser;
+mod query;
 mod resolver;
 mod walker;
 
@@ -18,6 +19,76 @@ use graph::{CodeGraph, node::SymbolKind};
 use output::{IndexStats, print_summary};
 use parser::ParseResult;
 use walker::walk_project;
+
+/// Build the code graph for a project at `path` by walking, parsing, and resolving all files.
+///
+/// This is the shared pipeline used by all query subcommands. The Index command has its own
+/// inline copy so it can also compute detailed stats without a second pass.
+fn build_graph(path: &PathBuf, verbose: bool) -> Result<CodeGraph> {
+    let config = CodeGraphConfig::load(path);
+    let files = walk_project(path, &config, verbose)?;
+
+    let mut graph = CodeGraph::new();
+    let mut parse_results: HashMap<PathBuf, ParseResult> = HashMap::new();
+
+    for file_path in &files {
+        let source = match std::fs::read(file_path) {
+            Ok(s) => s,
+            Err(e) => {
+                if verbose {
+                    eprintln!("skip: {}: {}", file_path.display(), e);
+                }
+                continue;
+            }
+        };
+
+        let language_str = match file_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+        {
+            "ts" => "typescript",
+            "tsx" => "tsx",
+            "js" | "jsx" => "javascript",
+            _ => "unknown",
+        };
+
+        let result = match parser::parse_file(file_path, &source) {
+            Ok(r) => r,
+            Err(e) => {
+                if verbose {
+                    eprintln!("skip: {}: {}", file_path.display(), e);
+                }
+                continue;
+            }
+        };
+
+        let file_idx = graph.add_file(file_path.clone(), language_str);
+
+        for (symbol, children) in &result.symbols {
+            let sym_idx = graph.add_symbol(file_idx, symbol.clone());
+            for child in children {
+                graph.add_child_symbol(sym_idx, child.clone());
+            }
+        }
+
+        if verbose {
+            eprintln!(
+                "  {} symbols, {} imports, {} exports from {}",
+                result.symbols.len(),
+                result.imports.len(),
+                result.exports.len(),
+                file_path.display()
+            );
+        }
+
+        parse_results.insert(file_path.clone(), result);
+    }
+
+    resolver::resolve_all(&mut graph, path, &parse_results, verbose);
+
+    Ok(graph)
+}
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -156,6 +227,98 @@ fn main() -> Result<()> {
 
             // 8. Print summary.
             print_summary(&stats, json);
+        }
+
+        Commands::Find {
+            path,
+            symbol,
+            case_insensitive,
+            kind,
+            file,
+            format,
+        } => {
+            // Validate regex FIRST before the expensive index pipeline (Research Pitfall 4).
+            regex::RegexBuilder::new(&symbol)
+                .case_insensitive(case_insensitive)
+                .build()
+                .map_err(|e| anyhow::anyhow!("invalid symbol pattern '{}': {}", symbol, e))?;
+
+            let graph = build_graph(&path, false)?;
+            let results = query::find::find_symbol(
+                &graph,
+                &symbol,
+                case_insensitive,
+                &kind,
+                file.as_deref(),
+                &path,
+            )?;
+
+            if results.is_empty() {
+                eprintln!("no symbols matching '{}' found", symbol);
+                std::process::exit(1);
+            }
+
+            query::output::format_find_results(&results, &format, &path);
+        }
+
+        Commands::Stats { path, format } => {
+            let graph = build_graph(&path, false)?;
+            let stats = query::stats::project_stats(&graph);
+            query::output::format_stats(&stats, &format);
+        }
+
+        Commands::Refs {
+            path,
+            symbol,
+            case_insensitive: _,
+            kind: _,
+            file: _,
+            format: _,
+        } => {
+            // Validate regex before indexing.
+            regex::RegexBuilder::new(&symbol)
+                .case_insensitive(false)
+                .build()
+                .map_err(|e| anyhow::anyhow!("invalid symbol pattern '{}': {}", symbol, e))?;
+
+            let _graph = build_graph(&path, false)?;
+            todo!("Phase 3 Plan 02/03")
+        }
+
+        Commands::Impact {
+            path,
+            symbol,
+            case_insensitive: _,
+            tree: _,
+            format: _,
+        } => {
+            regex::RegexBuilder::new(&symbol)
+                .case_insensitive(false)
+                .build()
+                .map_err(|e| anyhow::anyhow!("invalid symbol pattern '{}': {}", symbol, e))?;
+
+            let _graph = build_graph(&path, false)?;
+            todo!("Phase 3 Plan 02/03")
+        }
+
+        Commands::Circular { path, format: _ } => {
+            let _graph = build_graph(&path, false)?;
+            todo!("Phase 3 Plan 02/03")
+        }
+
+        Commands::Context {
+            path,
+            symbol,
+            case_insensitive: _,
+            format: _,
+        } => {
+            regex::RegexBuilder::new(&symbol)
+                .case_insensitive(false)
+                .build()
+                .map_err(|e| anyhow::anyhow!("invalid symbol pattern '{}': {}", symbol, e))?;
+
+            let _graph = build_graph(&path, false)?;
+            todo!("Phase 3 Plan 02/03")
         }
     }
 
