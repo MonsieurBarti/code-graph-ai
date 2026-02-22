@@ -1,10 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use regex::RegexBuilder;
 
-use crate::graph::{CodeGraph, node::{GraphNode, SymbolKind}};
+use crate::graph::{CodeGraph, edge::EdgeKind, node::{GraphNode, SymbolKind}};
 
 /// A single matching symbol definition returned by `find_symbol`.
 #[derive(Debug)]
@@ -31,6 +32,44 @@ pub fn kind_to_str(kind: &SymbolKind) -> &'static str {
         SymbolKind::Method => "method",
         SymbolKind::Property => "property",
     }
+}
+
+/// Find the parent file node of a symbol via a `Contains` edge.
+///
+/// `Contains` edges go FILE -> SYMBOL (outgoing from file, incoming to symbol).
+/// We must filter specifically to `EdgeKind::Contains` because other edges (e.g. `Calls`)
+/// also arrive at symbol nodes with a File as source.
+fn find_containing_file(graph: &CodeGraph, sym_idx: petgraph::stable_graph::NodeIndex) -> Option<crate::graph::node::FileInfo> {
+    graph
+        .graph
+        .edges_directed(sym_idx, Direction::Incoming)
+        .find_map(|edge_ref| {
+            if matches!(edge_ref.weight(), EdgeKind::Contains) {
+                let source = edge_ref.source();
+                if let GraphNode::File(ref fi) = graph.graph[source] {
+                    return Some(fi.clone());
+                }
+            }
+            None
+        })
+}
+
+/// Find the containing file of a child symbol (one that has a ChildOf edge to its parent symbol).
+///
+/// ChildOf edges go CHILD -> PARENT (outgoing from child). So we traverse Outgoing to get
+/// the parent symbol, then use `find_containing_file` on the parent.
+fn find_containing_file_of_child(graph: &CodeGraph, child_idx: petgraph::stable_graph::NodeIndex) -> Option<crate::graph::node::FileInfo> {
+    graph
+        .graph
+        .edges_directed(child_idx, Direction::Outgoing)
+        .find_map(|edge_ref| {
+            if matches!(edge_ref.weight(), EdgeKind::ChildOf) {
+                let parent_sym_idx = edge_ref.target();
+                find_containing_file(graph, parent_sym_idx)
+            } else {
+                None
+            }
+        })
 }
 
 /// Find symbols in `graph` matching the given regex `pattern`.
@@ -77,44 +116,14 @@ pub fn find_symbol(
                 }
             }
 
-            // Find parent file via Incoming edge from a File node.
-            let file_info = graph
-                .graph
-                .neighbors_directed(sym_idx, Direction::Incoming)
-                .find_map(|neighbor| {
-                    if let GraphNode::File(ref fi) = graph.graph[neighbor] {
-                        Some(fi.clone())
-                    } else {
-                        None
-                    }
-                });
+            // Find parent file via Contains edge (not just any incoming file neighbor).
+            // Falls back to ChildOf -> Contains for child symbols.
+            let file_info = find_containing_file(graph, sym_idx)
+                .or_else(|| find_containing_file_of_child(graph, sym_idx));
 
             let file_info = match file_info {
                 Some(fi) => fi,
-                None => {
-                    // Child symbol — find grandparent file via parent symbol's Incoming edge.
-                    // ChildOf edges go child -> parent (outgoing from child). So look Outgoing
-                    // for the parent symbol, then Incoming on it for the file.
-                    let parent_file = graph
-                        .graph
-                        .neighbors_directed(sym_idx, Direction::Outgoing)
-                        .find_map(|parent_sym_idx| {
-                            graph
-                                .graph
-                                .neighbors_directed(parent_sym_idx, Direction::Incoming)
-                                .find_map(|neighbor| {
-                                    if let GraphNode::File(ref fi) = graph.graph[neighbor] {
-                                        Some(fi.clone())
-                                    } else {
-                                        None
-                                    }
-                                })
-                        });
-                    match parent_file {
-                        Some(fi) => fi,
-                        None => continue, // Cannot locate file — skip.
-                    }
-                }
+                None => continue, // Cannot locate file — skip.
             };
 
             // File filter: match relative path prefix.
@@ -245,5 +254,37 @@ mod tests {
         let (graph, root) = make_graph_with_symbols();
         let err = find_symbol(&graph, "[unclosed", false, &[], None, &root);
         assert!(err.is_err(), "invalid regex should return an error");
+    }
+
+    #[test]
+    fn test_calls_edge_does_not_affect_parent_file_lookup() {
+        // Regression test: Calls edges (File -> Symbol) must not be confused with Contains edges.
+        let root = PathBuf::from("/proj");
+        let mut graph = CodeGraph::new();
+
+        let f1 = graph.add_file(root.join("src/greet.ts"), "typescript");
+        let greet_sym = graph.add_symbol(
+            f1,
+            SymbolInfo {
+                name: "greet".into(),
+                kind: SymbolKind::Function,
+                line: 1,
+                col: 16,
+                is_exported: true,
+                is_default: false,
+            },
+        );
+
+        // Simulate a Calls edge from main.ts (file) to greet (symbol), as the resolver does.
+        let f2 = graph.add_file(root.join("src/main.ts"), "typescript");
+        graph.add_calls_edge(f2, greet_sym);
+
+        let results = find_symbol(&graph, "greet", false, &[], None, &root).unwrap();
+        assert_eq!(results.len(), 1, "should find exactly one definition");
+        assert_eq!(
+            results[0].file_path,
+            root.join("src/greet.ts"),
+            "greet should be in greet.ts, not main.ts"
+        );
     }
 }
