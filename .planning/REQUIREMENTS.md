@@ -97,16 +97,16 @@
 | QURY-03 | Phase 3 | Pending |
 | QURY-04 | Phase 3 | Pending |
 | QURY-05 | Phase 3 | Pending |
+| INTG-06 | Phase 3 | Pending |
 | INTG-01 | Phase 4 | Pending |
 | INTG-02 | Phase 4 | Pending |
 | INTG-03 | Phase 4 | Pending |
 | INTG-04 | Phase 5 | Pending |
 | INTG-05 | Phase 5 | Pending |
-| INTG-06 | Phase 3 | Pending |
+| PERF-04 | Phase 5 | Pending |
 | PERF-01 | Phase 6 | Pending |
 | PERF-02 | Phase 6 | Pending |
 | PERF-03 | Phase 6 | Pending |
-| PERF-04 | Phase 5 | Pending |
 | DIST-01 | Phase 6 | Pending |
 | DIST-02 | Phase 6 | Pending |
 
@@ -117,4 +117,4 @@
 
 ---
 *Requirements defined: 2026-02-22*
-*Last updated: 2026-02-22 after initial definition*
+*Last updated: 2026-02-22 after roadmap creation*
