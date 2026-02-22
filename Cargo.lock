@@ -149,6 +149,7 @@ dependencies = [
  "ignore",
  "oxc_resolver",
  "petgraph",
+ "regex",
  "serde",
  "serde_json",
  "toml",
