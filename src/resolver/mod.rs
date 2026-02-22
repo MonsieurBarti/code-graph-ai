@@ -27,6 +27,9 @@ pub struct ResolveStats {
     pub builtin: usize,
     /// Number of symbol-level relationship edges added to the graph.
     pub relationships_added: usize,
+    /// Number of direct ResolvedImport edges added by the named re-export chain pass.
+    /// These edges bypass barrel files and point directly to the defining file.
+    pub named_reexport_edges: usize,
 }
 
 /// Run the full import resolution pipeline on the code graph.
@@ -161,6 +164,15 @@ pub fn resolve_all(
     // Step 4: Barrel chain pass.
     // -----------------------------------------------------------------------
     barrel::resolve_barrel_chains(graph, parse_results, verbose);
+
+    // Step 4b: Named re-export chain pass.
+    // Adds direct ResolvedImport edges from importing files to the defining file,
+    // bypassing barrel files for named re-exports (export { Foo } from './module').
+    let named_reexport_edges = barrel::resolve_named_reexport_chains(graph, parse_results, verbose);
+    stats.named_reexport_edges = named_reexport_edges;
+    if verbose {
+        eprintln!("  Named re-export edges added: {}", named_reexport_edges);
+    }
 
     // -----------------------------------------------------------------------
     // Step 5: Symbol relationship pass.
