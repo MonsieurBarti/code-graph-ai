@@ -49,9 +49,26 @@ pub struct FileInfo {
     pub language: String,
 }
 
-/// A node in the code graph — either a file or a symbol within a file.
+/// Metadata about an external package (node_modules dependency).
+/// Internals are not indexed — external package nodes are terminal in the graph.
+#[derive(Debug, Clone)]
+pub struct ExternalPackageInfo {
+    /// The npm package name (e.g. "react", "@org/utils").
+    pub name: String,
+    /// Package version, if available from package.json.
+    pub version: Option<String>,
+}
+
+/// A node in the code graph — a file, a symbol within a file, an external package,
+/// or an unresolved import.
 #[derive(Debug, Clone)]
 pub enum GraphNode {
+    /// A source file node.
     File(FileInfo),
+    /// A symbol (function, class, interface, etc.) within a source file.
     Symbol(SymbolInfo),
+    /// An external package node (node_modules dependency — internals not indexed).
+    ExternalPackage(ExternalPackageInfo),
+    /// An import specifier that could not be resolved to a file or known package.
+    UnresolvedImport { specifier: String, reason: String },
 }
