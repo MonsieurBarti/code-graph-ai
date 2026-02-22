@@ -11,10 +11,10 @@
 - [x] **PARS-02**: Tool extracts symbols from each file: functions, classes, interfaces, type aliases, enums, and exported variables
 - [x] **PARS-03**: Tool extracts all import statements (ESM import, CJS require, dynamic import with string literal)
 - [x] **PARS-04**: Tool extracts export statements (named exports, default exports, re-exports)
-- [ ] **PARS-05**: Tool resolves TypeScript path aliases from tsconfig.json (paths, baseUrl, extends chains)
+- [x] **PARS-05**: Tool resolves TypeScript path aliases from tsconfig.json (paths, baseUrl, extends chains)
 - [ ] **PARS-06**: Tool resolves barrel file imports to the actual defining file (symbol-level resolution through index.ts)
-- [ ] **PARS-07**: Tool resolves monorepo workspace packages to local paths (package.json workspaces)
-- [ ] **PARS-08**: Tool builds a complete file-level dependency graph with import edges
+- [x] **PARS-07**: Tool resolves monorepo workspace packages to local paths (package.json workspaces)
+- [x] **PARS-08**: Tool builds a complete file-level dependency graph with import edges
 - [ ] **PARS-09**: Tool builds symbol-level relationships: contains, exports, calls, extends, implements
 
 ### Queries
@@ -87,10 +87,10 @@
 | PARS-02 | Phase 1 | Complete |
 | PARS-03 | Phase 1 | Complete |
 | PARS-04 | Phase 1 | Complete |
-| PARS-05 | Phase 2 | Pending |
+| PARS-05 | Phase 2 | Complete |
 | PARS-06 | Phase 2 | Pending |
-| PARS-07 | Phase 2 | Pending |
-| PARS-08 | Phase 2 | Pending |
+| PARS-07 | Phase 2 | Complete |
+| PARS-08 | Phase 2 | Complete |
 | PARS-09 | Phase 2 | Pending |
 | QURY-01 | Phase 3 | Pending |
 | QURY-02 | Phase 3 | Pending |
