@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use regex::RegexBuilder;
@@ -153,6 +154,32 @@ pub fn find_symbol(
     results.sort_by(|a, b| a.file_path.cmp(&b.file_path).then(a.line.cmp(&b.line)));
 
     Ok(results)
+}
+
+/// Compile `pattern` as a regex and collect all matching symbol names with their node indices.
+///
+/// Returns a vec of `(name, indices)` pairs — one entry per unique symbol name that matches.
+/// The caller decides whether an empty result is an error.
+///
+/// `case_insensitive`: enable case-insensitive matching.
+pub fn match_symbols(
+    graph: &CodeGraph,
+    pattern: &str,
+    case_insensitive: bool,
+) -> Result<Vec<(String, Vec<NodeIndex>)>> {
+    let re = RegexBuilder::new(pattern)
+        .case_insensitive(case_insensitive)
+        .build()
+        .map_err(|e| anyhow::anyhow!("invalid symbol pattern '{}': {}", pattern, e))?;
+
+    let matches: Vec<(String, Vec<NodeIndex>)> = graph
+        .symbol_index
+        .iter()
+        .filter(|(name, _)| re.is_match(name))
+        .map(|(name, indices)| (name.clone(), indices.clone()))
+        .collect();
+
+    Ok(matches)
 }
 
 #[cfg(test)]

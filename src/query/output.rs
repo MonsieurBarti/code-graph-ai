@@ -2,8 +2,11 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use crate::cli::OutputFormat;
+use crate::query::circular::CircularDep;
 use crate::query::find::FindResult;
 use crate::query::find::kind_to_str;
+use crate::query::impact::ImpactResult;
+use crate::query::refs::{RefKind, RefResult};
 use crate::query::stats::ProjectStats;
 
 /// Format and print find results to stdout according to the selected output format.
@@ -189,6 +192,306 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat) {
                 "unresolved_imports": stats.unresolved_imports,
             });
             println!("{}", serde_json::to_string_pretty(&json).unwrap_or_default());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Refs output
+// ---------------------------------------------------------------------------
+
+/// Format and print reference results to stdout.
+pub fn format_refs_results(results: &[RefResult], format: &OutputFormat, project_root: &Path) {
+    match format {
+        OutputFormat::Compact => {
+            for r in results {
+                let rel = r
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&r.file_path);
+                match r.ref_kind {
+                    RefKind::Import => {
+                        println!("ref {} import", rel.display());
+                    }
+                    RefKind::Call => {
+                        let caller = r.symbol_name.as_deref().unwrap_or("?");
+                        let line = r.line.map_or_else(|| "?".to_string(), |l| l.to_string());
+                        println!("ref {}:{} call {}", rel.display(), line, caller);
+                    }
+                }
+            }
+            println!("{} references found", results.len());
+        }
+
+        OutputFormat::Table => {
+            let use_color = std::io::stdout().is_terminal();
+
+            let file_w = results
+                .iter()
+                .map(|r| {
+                    r.file_path
+                        .strip_prefix(project_root)
+                        .unwrap_or(&r.file_path)
+                        .to_string_lossy()
+                        .len()
+                })
+                .max()
+                .unwrap_or(4)
+                .max(4);
+            let caller_w = results
+                .iter()
+                .map(|r| r.symbol_name.as_deref().unwrap_or("").len())
+                .max()
+                .unwrap_or(6)
+                .max(6);
+
+            if use_color {
+                println!(
+                    "\x1b[1m{:<file_w$}  {:<6}  {:<caller_w$}  {:>6}\x1b[0m",
+                    "FILE",
+                    "TYPE",
+                    "CALLER",
+                    "LINE",
+                    file_w = file_w,
+                    caller_w = caller_w,
+                );
+            } else {
+                println!(
+                    "{:<file_w$}  {:<6}  {:<caller_w$}  {:>6}",
+                    "FILE",
+                    "TYPE",
+                    "CALLER",
+                    "LINE",
+                    file_w = file_w,
+                    caller_w = caller_w,
+                );
+            }
+            println!("{}", "-".repeat(file_w + caller_w + 20));
+
+            for r in results {
+                let rel = r
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&r.file_path);
+                let kind_str = match r.ref_kind {
+                    RefKind::Import => "import",
+                    RefKind::Call => "call",
+                };
+                let caller = r.symbol_name.as_deref().unwrap_or("");
+                let line_str = r.line.map_or_else(|| "-".to_string(), |l| l.to_string());
+                println!(
+                    "{:<file_w$}  {:<6}  {:<caller_w$}  {:>6}",
+                    rel.display(),
+                    kind_str,
+                    caller,
+                    line_str,
+                    file_w = file_w,
+                    caller_w = caller_w,
+                );
+            }
+        }
+
+        OutputFormat::Json => {
+            let json_results: Vec<serde_json::Value> = results
+                .iter()
+                .map(|r| {
+                    let rel = r
+                        .file_path
+                        .strip_prefix(project_root)
+                        .unwrap_or(&r.file_path);
+                    let kind_str = match r.ref_kind {
+                        RefKind::Import => "import",
+                        RefKind::Call => "call",
+                    };
+                    serde_json::json!({
+                        "file": rel.to_string_lossy(),
+                        "kind": kind_str,
+                        "caller": r.symbol_name,
+                        "line": r.line,
+                    })
+                })
+                .collect();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json_results).unwrap_or_default()
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Impact output
+// ---------------------------------------------------------------------------
+
+/// Format and print impact (blast radius) results to stdout.
+///
+/// `tree_mode`: when true, use 2-space indentation per depth level.
+pub fn format_impact_results(
+    results: &[ImpactResult],
+    format: &OutputFormat,
+    project_root: &Path,
+    tree_mode: bool,
+) {
+    match format {
+        OutputFormat::Compact => {
+            if tree_mode {
+                for r in results {
+                    let rel = r
+                        .file_path
+                        .strip_prefix(project_root)
+                        .unwrap_or(&r.file_path);
+                    let indent = "  ".repeat(r.depth.saturating_sub(1));
+                    println!("{}impact {}", indent, rel.display());
+                }
+            } else {
+                for r in results {
+                    let rel = r
+                        .file_path
+                        .strip_prefix(project_root)
+                        .unwrap_or(&r.file_path);
+                    println!("impact {}", rel.display());
+                }
+            }
+            println!("{} files affected", results.len());
+        }
+
+        OutputFormat::Table => {
+            let use_color = std::io::stdout().is_terminal();
+
+            let file_w = results
+                .iter()
+                .map(|r| {
+                    r.file_path
+                        .strip_prefix(project_root)
+                        .unwrap_or(&r.file_path)
+                        .to_string_lossy()
+                        .len()
+                })
+                .max()
+                .unwrap_or(4)
+                .max(4);
+
+            if use_color {
+                println!(
+                    "\x1b[1m{:>5}  {:<file_w$}\x1b[0m",
+                    "DEPTH",
+                    "FILE",
+                    file_w = file_w,
+                );
+            } else {
+                println!(
+                    "{:>5}  {:<file_w$}",
+                    "DEPTH",
+                    "FILE",
+                    file_w = file_w,
+                );
+            }
+            println!("{}", "-".repeat(file_w + 8));
+
+            for r in results {
+                let rel = r
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&r.file_path);
+                println!(
+                    "{:>5}  {:<file_w$}",
+                    r.depth,
+                    rel.display(),
+                    file_w = file_w,
+                );
+            }
+        }
+
+        OutputFormat::Json => {
+            let json_results: Vec<serde_json::Value> = results
+                .iter()
+                .map(|r| {
+                    let rel = r
+                        .file_path
+                        .strip_prefix(project_root)
+                        .unwrap_or(&r.file_path);
+                    serde_json::json!({
+                        "file": rel.to_string_lossy(),
+                        "depth": r.depth,
+                    })
+                })
+                .collect();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json_results).unwrap_or_default()
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Circular output
+// ---------------------------------------------------------------------------
+
+/// Format and print circular dependency results to stdout.
+pub fn format_circular_results(cycles: &[CircularDep], format: &OutputFormat, project_root: &Path) {
+    match format {
+        OutputFormat::Compact => {
+            for cycle in cycles {
+                let parts: Vec<String> = cycle
+                    .files
+                    .iter()
+                    .map(|p| {
+                        p.strip_prefix(project_root)
+                            .unwrap_or(p)
+                            .to_string_lossy()
+                            .to_string()
+                    })
+                    .collect();
+                println!("cycle {}", parts.join(" -> "));
+            }
+            println!("{} cycles found", cycles.len());
+        }
+
+        OutputFormat::Table => {
+            let use_color = std::io::stdout().is_terminal();
+            let header = |s: &str| {
+                if use_color {
+                    format!("\x1b[1m{s}\x1b[0m")
+                } else {
+                    s.to_string()
+                }
+            };
+
+            for (i, cycle) in cycles.iter().enumerate() {
+                println!("{}", header(&format!("=== Cycle {} ===", i + 1)));
+                // Show all but the last entry (which is the repeated first file).
+                let unique_files = &cycle.files[..cycle.files.len().saturating_sub(1)];
+                for path in unique_files {
+                    let rel = path.strip_prefix(project_root).unwrap_or(path);
+                    println!("  {}", rel.display());
+                }
+                println!();
+            }
+            println!("{} cycles found", cycles.len());
+        }
+
+        OutputFormat::Json => {
+            let json_results: Vec<serde_json::Value> = cycles
+                .iter()
+                .map(|cycle| {
+                    let files: Vec<String> = cycle
+                        .files
+                        .iter()
+                        .map(|p| {
+                            p.strip_prefix(project_root)
+                                .unwrap_or(p)
+                                .to_string_lossy()
+                                .to_string()
+                        })
+                        .collect();
+                    serde_json::json!({ "files": files })
+                })
+                .collect();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json_results).unwrap_or_default()
+            );
         }
     }
 }
