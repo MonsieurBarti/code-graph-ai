@@ -1,5 +1,6 @@
 pub mod imports;
 pub mod languages;
+pub mod relationships;
 pub mod symbols;
 
 use std::path::Path;
@@ -11,6 +12,7 @@ use crate::graph::node::SymbolInfo;
 
 use imports::{ExportInfo, ImportInfo, extract_exports, extract_imports};
 use languages::language_for_extension;
+use relationships::{RelationshipInfo, extract_relationships};
 use symbols::extract_symbols;
 
 /// The result of parsing a single source file.
@@ -18,6 +20,7 @@ use symbols::extract_symbols;
 /// - `symbols`: extracted top-level and child symbols (see [`extract_symbols`])
 /// - `imports`: ESM / CJS / dynamic imports extracted from the file
 /// - `exports`: named / default / re-export statements extracted from the file
+/// - `relationships`: symbol-level relationships (calls, extends, implements, type refs)
 /// - `tree`: the raw tree-sitter syntax tree (retained for debugging / future queries)
 pub struct ParseResult {
     /// Each entry is `(parent_symbol, child_symbols)`.
@@ -26,11 +29,15 @@ pub struct ParseResult {
     pub imports: Vec<ImportInfo>,
     /// All standalone export statements found in the file.
     pub exports: Vec<ExportInfo>,
+    /// All symbol-level relationships found in the file.
+    /// Includes direct calls, method calls, class extends/implements, interface extends,
+    /// and type annotation references.
+    pub relationships: Vec<RelationshipInfo>,
     /// The syntax tree — retained for debugging or future query passes.
     pub tree: Tree,
 }
 
-/// Parse a source file and extract all symbols, imports, and exports.
+/// Parse a source file and extract all symbols, imports, exports, and relationships.
 ///
 /// # Parameters
 /// - `path`: path to the file (used for extension-based language selection)
@@ -63,6 +70,13 @@ pub fn parse_file(path: &Path, source: &[u8]) -> Result<ParseResult> {
     let symbols = extract_symbols(&tree, source, &language, is_tsx);
     let imports = extract_imports(&tree, source, &language, is_tsx);
     let exports = extract_exports(&tree, source, &language, is_tsx);
+    let relationships_vec = extract_relationships(&tree, source, &language, is_tsx);
 
-    Ok(ParseResult { symbols, imports, exports, tree })
+    Ok(ParseResult {
+        symbols,
+        imports,
+        exports,
+        relationships: relationships_vec,
+        tree,
+    })
 }
