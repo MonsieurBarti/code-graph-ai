@@ -1,3 +1,4 @@
+pub mod imports;
 pub mod languages;
 pub mod symbols;
 
@@ -8,21 +9,28 @@ use tree_sitter::{Parser, Tree};
 
 use crate::graph::node::SymbolInfo;
 
+use imports::{ExportInfo, ImportInfo, extract_exports, extract_imports};
 use languages::language_for_extension;
 use symbols::extract_symbols;
 
 /// The result of parsing a single source file.
 ///
 /// - `symbols`: extracted top-level and child symbols (see [`extract_symbols`])
-/// - `tree`: the raw tree-sitter syntax tree, kept for Plan 03 import/export extraction
+/// - `imports`: ESM / CJS / dynamic imports extracted from the file
+/// - `exports`: named / default / re-export statements extracted from the file
+/// - `tree`: the raw tree-sitter syntax tree (retained for debugging / future queries)
 pub struct ParseResult {
     /// Each entry is `(parent_symbol, child_symbols)`.
     pub symbols: Vec<(SymbolInfo, Vec<SymbolInfo>)>,
-    /// The syntax tree — retained for later import/export query passes.
+    /// All imports found in the file (ESM, CJS, dynamic).
+    pub imports: Vec<ImportInfo>,
+    /// All standalone export statements found in the file.
+    pub exports: Vec<ExportInfo>,
+    /// The syntax tree — retained for debugging or future query passes.
     pub tree: Tree,
 }
 
-/// Parse a source file and extract all symbols.
+/// Parse a source file and extract all symbols, imports, and exports.
 ///
 /// # Parameters
 /// - `path`: path to the file (used for extension-based language selection)
@@ -53,6 +61,8 @@ pub fn parse_file(path: &Path, source: &[u8]) -> Result<ParseResult> {
         .ok_or_else(|| anyhow!("tree-sitter returned None for {:?}", path))?;
 
     let symbols = extract_symbols(&tree, source, &language, is_tsx);
+    let imports = extract_imports(&tree, source, &language);
+    let exports = extract_exports(&tree, source, &language);
 
-    Ok(ParseResult { symbols, tree })
+    Ok(ParseResult { symbols, imports, exports, tree })
 }
