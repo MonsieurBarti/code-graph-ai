@@ -8,7 +8,7 @@
 ### Parsing
 
 - [x] **PARS-01**: Tool can index all .ts/.tsx/.js/.jsx files in a project, respecting .gitignore
-- [ ] **PARS-02**: Tool extracts symbols from each file: functions, classes, interfaces, type aliases, enums, and exported variables
+- [x] **PARS-02**: Tool extracts symbols from each file: functions, classes, interfaces, type aliases, enums, and exported variables
 - [ ] **PARS-03**: Tool extracts all import statements (ESM import, CJS require, dynamic import with string literal)
 - [ ] **PARS-04**: Tool extracts export statements (named exports, default exports, re-exports)
 - [ ] **PARS-05**: Tool resolves TypeScript path aliases from tsconfig.json (paths, baseUrl, extends chains)
@@ -84,7 +84,7 @@
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | PARS-01 | Phase 1 | Complete |
-| PARS-02 | Phase 1 | Pending |
+| PARS-02 | Phase 1 | Complete |
 | PARS-03 | Phase 1 | Pending |
 | PARS-04 | Phase 1 | Pending |
 | PARS-05 | Phase 2 | Pending |
