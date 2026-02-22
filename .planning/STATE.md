@@ -10,29 +10,29 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Phase: 2 of 6 (Import Resolution & Graph Completion)
-Plan: 2 of 5 in current phase (COMPLETE)
+Plan: 3 of 5 in current phase (COMPLETE)
 Status: In Progress
-Last activity: 2026-02-22 — Completed 02-02 (relationship extraction module, tree-sitter queries for calls/extends/implements/type-refs)
+Last activity: 2026-02-22 — Completed 02-03 (full resolution pipeline integration — resolve_all orchestrator, barrel chain resolution, symbol relationship edges, output metrics)
 
-Progress: [████░░░░░░] 24%
+Progress: [█████░░░░░] 30%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: 17 min
-- Total execution time: 1.2 hours
+- Total plans completed: 5
+- Average duration: 20 min
+- Total execution time: 1.9 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 3 completed (DONE) | 64 min | 21 min |
-| 02 | 1 completed | 5 min | 5 min |
+| 02 | 3 completed | 48 min | 16 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (4 min), 01-02 (29 min), 01-03 (31 min), 02-01 (5 min)
-- Trend: Parsing tasks ~30min; infrastructure/extension plans fast (~5min)
+- Last 5 plans: 01-02 (29 min), 01-03 (31 min), 02-01 (5 min), 02-02 (5 min), 02-03 (38 min)
+- Trend: Integration/wiring plans ~38min; infrastructure/extension plans fast (~5min)
 
 *Updated after each plan completion*
 | Phase 01 P01 | 4 | 2 tasks | 5 files |
@@ -40,6 +40,7 @@ Progress: [████░░░░░░] 24%
 | Phase 01 P03 | 31 | 2 tasks | 4 files |
 | Phase 02 P01 | 5 | 2 tasks | 8 files |
 | Phase 02 P02 | 5 | 1 tasks | 2 files |
+| Phase 02 P03 | 38 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -73,6 +74,10 @@ Recent decisions affecting current work:
 - [Phase 02]: JS grammar (tree-sitter-javascript 0.25) uses different class_heritage layout — no extends_clause node, requires separate grammar-specific query
 - [Phase 02]: extends_type_clause confirmed as correct node name for interface extends in TS grammar (validated via live tree exploration)
 - [Phase 02]: from_name is None for Calls/MethodCall/TypeReference in context-free extraction pass — caller scope resolution deferred to Plan 03 graph wiring
+- [02-03]: Barrel pass uses parse_results HashMap lookup instead of second oxc_resolver call — faster and avoids resolver API complexity for already-indexed files
+- [02-03]: External package classification based on specifier prefix (not . and not /) — workspace aliases handled upstream by resolver
+- [02-03]: Symbol relationship pass skips ambiguous multi-candidate calls — cross-file call ambiguity documented limitation (research Open Question 3)
+- [02-03]: petgraph::visit::EdgeRef trait must be explicitly imported for .target() on EdgeReference
 
 ### Pending Todos
 
@@ -87,5 +92,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 02-02-PLAN.md (relationship extraction module, tree-sitter queries for calls/extends/implements/type-refs — Phase 2 Plan 2 complete)
+Stopped at: Completed 02-03-PLAN.md (full resolution pipeline integration — resolve_all orchestrator, barrel chain resolution, symbol relationship edges, output metrics — Phase 2 Plan 3 complete)
 Resume file: None
