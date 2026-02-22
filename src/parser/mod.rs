@@ -61,8 +61,8 @@ pub fn parse_file(path: &Path, source: &[u8]) -> Result<ParseResult> {
         .ok_or_else(|| anyhow!("tree-sitter returned None for {:?}", path))?;
 
     let symbols = extract_symbols(&tree, source, &language, is_tsx);
-    let imports = extract_imports(&tree, source, &language);
-    let exports = extract_exports(&tree, source, &language);
+    let imports = extract_imports(&tree, source, &language, is_tsx);
+    let exports = extract_exports(&tree, source, &language, is_tsx);
 
     Ok(ParseResult { symbols, imports, exports, tree })
 }
