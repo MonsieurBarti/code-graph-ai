@@ -270,55 +270,90 @@ fn main() -> Result<()> {
         Commands::Refs {
             path,
             symbol,
-            case_insensitive: _,
+            case_insensitive,
             kind: _,
             file: _,
-            format: _,
+            format,
         } => {
-            // Validate regex before indexing.
+            // Validate regex FIRST before the expensive index pipeline.
             regex::RegexBuilder::new(&symbol)
-                .case_insensitive(false)
+                .case_insensitive(case_insensitive)
                 .build()
                 .map_err(|e| anyhow::anyhow!("invalid symbol pattern '{}': {}", symbol, e))?;
 
-            let _graph = build_graph(&path, false)?;
-            todo!("Phase 3 Plan 02/03")
+            let graph = build_graph(&path, false)?;
+            let matches = query::find::match_symbols(&graph, &symbol, case_insensitive)?;
+
+            if matches.is_empty() {
+                eprintln!("no symbols matching '{}' found", symbol);
+                std::process::exit(1);
+            }
+
+            // Collect all matched NodeIndices.
+            let all_indices: Vec<petgraph::stable_graph::NodeIndex> =
+                matches.iter().flat_map(|(_, indices)| indices.iter().copied()).collect();
+
+            let results = query::refs::find_refs(&graph, &symbol, &all_indices, &path);
+
+            if results.is_empty() {
+                eprintln!("no references to '{}' found", symbol);
+            } else {
+                query::output::format_refs_results(&results, &format, &path);
+            }
         }
 
         Commands::Impact {
             path,
             symbol,
-            case_insensitive: _,
-            tree: _,
-            format: _,
+            case_insensitive,
+            tree,
+            format,
         } => {
+            // Validate regex FIRST.
             regex::RegexBuilder::new(&symbol)
-                .case_insensitive(false)
+                .case_insensitive(case_insensitive)
                 .build()
                 .map_err(|e| anyhow::anyhow!("invalid symbol pattern '{}': {}", symbol, e))?;
 
-            let _graph = build_graph(&path, false)?;
-            todo!("Phase 3 Plan 02/03")
+            let graph = build_graph(&path, false)?;
+            let matches = query::find::match_symbols(&graph, &symbol, case_insensitive)?;
+
+            if matches.is_empty() {
+                eprintln!("no symbols matching '{}' found", symbol);
+                std::process::exit(1);
+            }
+
+            let all_indices: Vec<petgraph::stable_graph::NodeIndex> =
+                matches.iter().flat_map(|(_, indices)| indices.iter().copied()).collect();
+
+            let results = query::impact::blast_radius(&graph, &all_indices, &path);
+            query::output::format_impact_results(&results, &format, &path, tree);
         }
 
-        Commands::Circular { path, format: _ } => {
-            let _graph = build_graph(&path, false)?;
-            todo!("Phase 3 Plan 02/03")
+        Commands::Circular { path, format } => {
+            let graph = build_graph(&path, false)?;
+            let cycles = query::circular::find_circular(&graph, &path);
+
+            if cycles.is_empty() {
+                println!("no circular dependencies found");
+            } else {
+                query::output::format_circular_results(&cycles, &format, &path);
+            }
         }
 
         Commands::Context {
             path,
             symbol,
-            case_insensitive: _,
+            case_insensitive,
             format: _,
         } => {
             regex::RegexBuilder::new(&symbol)
-                .case_insensitive(false)
+                .case_insensitive(case_insensitive)
                 .build()
                 .map_err(|e| anyhow::anyhow!("invalid symbol pattern '{}': {}", symbol, e))?;
 
             let _graph = build_graph(&path, false)?;
-            todo!("Phase 3 Plan 02/03")
+            todo!("Phase 3 Plan 03")
         }
     }
 
