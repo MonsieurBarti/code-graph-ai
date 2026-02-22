@@ -52,11 +52,11 @@ pub enum Commands {
     /// Re-indexes the project before executing the query. Supports regex patterns
     /// (e.g. "User.*Service"), case-insensitive matching, kind filters, and file scoping.
     Find {
-        /// Path to the project root to index and query.
-        path: PathBuf,
-
         /// Symbol name or regex pattern (e.g. "UserService" or "User.*Service").
         symbol: String,
+
+        /// Path to the project root to index and query.
+        path: PathBuf,
 
         /// Case-insensitive pattern matching.
         #[arg(short = 'i', long)]
@@ -79,11 +79,11 @@ pub enum Commands {
     ///
     /// Reports files that import the symbol's defining file and call sites (Calls edges).
     Refs {
-        /// Path to the project root to index and query.
-        path: PathBuf,
-
         /// Symbol name or regex pattern.
         symbol: String,
+
+        /// Path to the project root to index and query.
+        path: PathBuf,
 
         /// Case-insensitive pattern matching.
         #[arg(short = 'i', long)]
@@ -106,11 +106,11 @@ pub enum Commands {
     ///
     /// Performs reverse BFS on the import graph from the symbol's defining file.
     Impact {
-        /// Path to the project root to index and query.
-        path: PathBuf,
-
         /// Symbol name or regex pattern.
         symbol: String,
+
+        /// Path to the project root to index and query.
+        path: PathBuf,
 
         /// Case-insensitive pattern matching.
         #[arg(short = 'i', long)]
@@ -152,11 +152,11 @@ pub enum Commands {
     ///
     /// Combines find + refs + call graph edges in a single query pass.
     Context {
-        /// Path to the project root to index and query.
-        path: PathBuf,
-
         /// Symbol name or regex pattern.
         symbol: String,
+
+        /// Path to the project root to index and query.
+        path: PathBuf,
 
         /// Case-insensitive pattern matching.
         #[arg(short = 'i', long)]
