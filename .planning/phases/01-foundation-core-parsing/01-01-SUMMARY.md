@@ -137,3 +137,16 @@ None - no external service configuration required.
 ---
 *Phase: 01-foundation-core-parsing*
 *Completed: 2026-02-22*
+
+## Self-Check: PASSED
+
+All artifacts verified:
+- FOUND: Cargo.toml
+- FOUND: src/main.rs
+- FOUND: src/cli.rs
+- FOUND: src/config.rs
+- FOUND: src/walker.rs
+- FOUND: .planning/phases/01-foundation-core-parsing/01-01-SUMMARY.md
+- FOUND commit e09cc5b (Task 1: scaffold)
+- FOUND commit 12e0a0e (Task 2: walker)
+- FOUND commit 7a33e21 (docs: metadata)
