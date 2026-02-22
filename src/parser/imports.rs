@@ -98,36 +98,109 @@ const EXPORT_QUERY: &str = r#"
 "#;
 
 // ---------------------------------------------------------------------------
-// Query cache
+// Query cache — one set of statics per grammar (TS / TSX / JS).
+// Queries are grammar-specific: a Query compiled for one grammar cannot be
+// used against a tree parsed with a different grammar.
 // ---------------------------------------------------------------------------
 
+// TypeScript (.ts)
 static TS_IMPORT_QUERY: OnceLock<Query> = OnceLock::new();
-static REQUIRE_QUERY_CACHE: OnceLock<Query> = OnceLock::new();
-static DYNAMIC_IMPORT_QUERY_CACHE: OnceLock<Query> = OnceLock::new();
-static EXPORT_QUERY_CACHE: OnceLock<Query> = OnceLock::new();
+static TS_REQUIRE_QUERY: OnceLock<Query> = OnceLock::new();
+static TS_DYNAMIC_QUERY: OnceLock<Query> = OnceLock::new();
+static TS_EXPORT_QUERY: OnceLock<Query> = OnceLock::new();
 
-fn import_query(language: &Language) -> &'static Query {
-    TS_IMPORT_QUERY.get_or_init(|| {
-        Query::new(language, IMPORT_QUERY_TS).expect("invalid import query")
-    })
+// TypeScript-TSX (.tsx / .jsx)
+static TSX_IMPORT_QUERY: OnceLock<Query> = OnceLock::new();
+static TSX_REQUIRE_QUERY: OnceLock<Query> = OnceLock::new();
+static TSX_DYNAMIC_QUERY: OnceLock<Query> = OnceLock::new();
+static TSX_EXPORT_QUERY: OnceLock<Query> = OnceLock::new();
+
+// JavaScript (.js)
+static JS_IMPORT_QUERY: OnceLock<Query> = OnceLock::new();
+static JS_REQUIRE_QUERY: OnceLock<Query> = OnceLock::new();
+static JS_DYNAMIC_QUERY: OnceLock<Query> = OnceLock::new();
+static JS_EXPORT_QUERY: OnceLock<Query> = OnceLock::new();
+
+/// Which language group a file falls into.
+/// Note: `Language::name()` returns `None` for TypeScript/TSX grammars in tree-sitter 0.26.
+/// We therefore use `is_tsx` (derived from file extension) for TS vs TSX discrimination,
+/// and `language.name() == Some("javascript")` only for the JavaScript grammar check.
+/// This mirrors the pattern established in symbols.rs.
+enum LangGroup {
+    TypeScript,
+    Tsx,
+    JavaScript,
 }
 
-fn require_query(language: &Language) -> &'static Query {
-    REQUIRE_QUERY_CACHE.get_or_init(|| {
-        Query::new(language, REQUIRE_QUERY).expect("invalid require query")
-    })
+fn lang_group(language: &Language, is_tsx: bool) -> LangGroup {
+    // JavaScript grammar reliably returns Some("javascript") from name().
+    // TypeScript and TSX grammars may return None; use is_tsx flag instead.
+    match language.name().unwrap_or("") {
+        "javascript" => LangGroup::JavaScript,
+        _ => {
+            if is_tsx {
+                LangGroup::Tsx
+            } else {
+                LangGroup::TypeScript
+            }
+        }
+    }
 }
 
-fn dynamic_import_query(language: &Language) -> &'static Query {
-    DYNAMIC_IMPORT_QUERY_CACHE.get_or_init(|| {
-        Query::new(language, DYNAMIC_IMPORT_QUERY).expect("invalid dynamic import query")
-    })
+fn import_query(language: &Language, is_tsx: bool) -> &'static Query {
+    match lang_group(language, is_tsx) {
+        LangGroup::TypeScript => TS_IMPORT_QUERY.get_or_init(|| {
+            Query::new(language, IMPORT_QUERY_TS).expect("invalid TS import query")
+        }),
+        LangGroup::Tsx => TSX_IMPORT_QUERY.get_or_init(|| {
+            Query::new(language, IMPORT_QUERY_TS).expect("invalid TSX import query")
+        }),
+        LangGroup::JavaScript => JS_IMPORT_QUERY.get_or_init(|| {
+            Query::new(language, IMPORT_QUERY_TS).expect("invalid JS import query")
+        }),
+    }
 }
 
-fn export_query(language: &Language) -> &'static Query {
-    EXPORT_QUERY_CACHE.get_or_init(|| {
-        Query::new(language, EXPORT_QUERY).expect("invalid export query")
-    })
+fn require_query(language: &Language, is_tsx: bool) -> &'static Query {
+    match lang_group(language, is_tsx) {
+        LangGroup::TypeScript => TS_REQUIRE_QUERY.get_or_init(|| {
+            Query::new(language, REQUIRE_QUERY).expect("invalid TS require query")
+        }),
+        LangGroup::Tsx => TSX_REQUIRE_QUERY.get_or_init(|| {
+            Query::new(language, REQUIRE_QUERY).expect("invalid TSX require query")
+        }),
+        LangGroup::JavaScript => JS_REQUIRE_QUERY.get_or_init(|| {
+            Query::new(language, REQUIRE_QUERY).expect("invalid JS require query")
+        }),
+    }
+}
+
+fn dynamic_import_query(language: &Language, is_tsx: bool) -> &'static Query {
+    match lang_group(language, is_tsx) {
+        LangGroup::TypeScript => TS_DYNAMIC_QUERY.get_or_init(|| {
+            Query::new(language, DYNAMIC_IMPORT_QUERY).expect("invalid TS dynamic import query")
+        }),
+        LangGroup::Tsx => TSX_DYNAMIC_QUERY.get_or_init(|| {
+            Query::new(language, DYNAMIC_IMPORT_QUERY).expect("invalid TSX dynamic import query")
+        }),
+        LangGroup::JavaScript => JS_DYNAMIC_QUERY.get_or_init(|| {
+            Query::new(language, DYNAMIC_IMPORT_QUERY).expect("invalid JS dynamic import query")
+        }),
+    }
+}
+
+fn export_query(language: &Language, is_tsx: bool) -> &'static Query {
+    match lang_group(language, is_tsx) {
+        LangGroup::TypeScript => TS_EXPORT_QUERY.get_or_init(|| {
+            Query::new(language, EXPORT_QUERY).expect("invalid TS export query")
+        }),
+        LangGroup::Tsx => TSX_EXPORT_QUERY.get_or_init(|| {
+            Query::new(language, EXPORT_QUERY).expect("invalid TSX export query")
+        }),
+        LangGroup::JavaScript => JS_EXPORT_QUERY.get_or_init(|| {
+            Query::new(language, EXPORT_QUERY).expect("invalid JS export query")
+        }),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -281,12 +354,15 @@ fn find_require_binding(call_node: Node, source: &[u8]) -> Option<String> {
 }
 
 /// Extract all imports (ESM, CJS, dynamic) from a parsed syntax tree.
-pub fn extract_imports(tree: &Tree, source: &[u8], language: &Language) -> Vec<ImportInfo> {
+///
+/// `is_tsx` must be `true` for `.tsx` and `.jsx` files — used to select the correct
+/// per-grammar query cache. This mirrors the `is_tsx` convention from `extract_symbols`.
+pub fn extract_imports(tree: &Tree, source: &[u8], language: &Language, is_tsx: bool) -> Vec<ImportInfo> {
     let mut imports = Vec::new();
 
     // --- ESM static imports ---
     {
-        let query = import_query(language);
+        let query = import_query(language, is_tsx);
         let module_path_idx = query
             .capture_index_for_name("module_path")
             .expect("import query must have @module_path");
@@ -325,7 +401,7 @@ pub fn extract_imports(tree: &Tree, source: &[u8], language: &Language) -> Vec<I
         // The require query matches ALL call_expression(identifier, ...) patterns.
         // We filter for "require" in code (tree-sitter 0.26 StreamingIterator does not
         // auto-apply #eq? predicates).
-        let query = require_query(language);
+        let query = require_query(language, is_tsx);
         let module_path_idx = match query.capture_index_for_name("module_path") {
             Some(idx) => idx,
             None => {
@@ -393,7 +469,7 @@ pub fn extract_imports(tree: &Tree, source: &[u8], language: &Language) -> Vec<I
 
     // --- Dynamic import() calls ---
     {
-        let query = dynamic_import_query(language);
+        let query = dynamic_import_query(language, is_tsx);
         let module_path_idx = query
             .capture_index_for_name("module_path")
             .expect("dynamic import query must have @module_path");
@@ -428,10 +504,13 @@ pub fn extract_imports(tree: &Tree, source: &[u8], language: &Language) -> Vec<I
 // ---------------------------------------------------------------------------
 
 /// Extract all exports from a parsed syntax tree.
-pub fn extract_exports(tree: &Tree, source: &[u8], language: &Language) -> Vec<ExportInfo> {
+///
+/// `is_tsx` must be `true` for `.tsx` and `.jsx` files — used to select the correct
+/// per-grammar query cache. This mirrors the `is_tsx` convention from `extract_symbols`.
+pub fn extract_exports(tree: &Tree, source: &[u8], language: &Language, is_tsx: bool) -> Vec<ExportInfo> {
     let mut exports = Vec::new();
 
-    let query = export_query(language);
+    let query = export_query(language, is_tsx);
     let export_stmt_idx = query
         .capture_index_for_name("export_stmt")
         .expect("export query must have @export_stmt");
@@ -586,12 +665,20 @@ mod tests {
         (tree, lang)
     }
 
+    fn parse_tsx(source: &str) -> (tree_sitter::Tree, Language) {
+        let lang = language_for_extension("tsx").unwrap();
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&lang).unwrap();
+        let tree = parser.parse(source.as_bytes(), None).unwrap();
+        (tree, lang)
+    }
+
     // Test 1: ESM named imports
     #[test]
     fn test_esm_named_imports() {
         let src = "import { useState, useEffect } from 'react';";
         let (tree, lang) = parse_ts(src);
-        let imports = extract_imports(&tree, src.as_bytes(), &lang);
+        let imports = extract_imports(&tree, src.as_bytes(), &lang, false);
         assert_eq!(imports.len(), 1, "should find 1 import");
         let imp = &imports[0];
         assert_eq!(imp.kind, ImportKind::ESM);
@@ -608,7 +695,7 @@ mod tests {
     fn test_esm_default_import() {
         let src = "import React from 'react';";
         let (tree, lang) = parse_ts(src);
-        let imports = extract_imports(&tree, src.as_bytes(), &lang);
+        let imports = extract_imports(&tree, src.as_bytes(), &lang, false);
         assert_eq!(imports.len(), 1);
         let imp = &imports[0];
         assert_eq!(imp.kind, ImportKind::ESM);
@@ -624,7 +711,7 @@ mod tests {
     fn test_esm_namespace_import() {
         let src = "import * as path from 'path';";
         let (tree, lang) = parse_ts(src);
-        let imports = extract_imports(&tree, src.as_bytes(), &lang);
+        let imports = extract_imports(&tree, src.as_bytes(), &lang, false);
         assert_eq!(imports.len(), 1);
         let imp = &imports[0];
         assert_eq!(imp.kind, ImportKind::ESM);
@@ -640,7 +727,7 @@ mod tests {
     fn test_cjs_require() {
         let src = "const fs = require('fs');";
         let (tree, lang) = parse_js(src);
-        let imports = extract_imports(&tree, src.as_bytes(), &lang);
+        let imports = extract_imports(&tree, src.as_bytes(), &lang, false);
         assert_eq!(imports.len(), 1, "should find 1 import");
         let imp = &imports[0];
         assert_eq!(imp.kind, ImportKind::CJS);
@@ -652,7 +739,7 @@ mod tests {
     fn test_dynamic_import() {
         let src = "const mod = await import('./lazy');";
         let (tree, lang) = parse_ts(src);
-        let imports = extract_imports(&tree, src.as_bytes(), &lang);
+        let imports = extract_imports(&tree, src.as_bytes(), &lang, false);
         assert_eq!(imports.len(), 1, "should find 1 dynamic import");
         let imp = &imports[0];
         assert_eq!(imp.kind, ImportKind::DynamicImport);
@@ -664,7 +751,7 @@ mod tests {
     fn test_named_export() {
         let src = "export { foo, bar };";
         let (tree, lang) = parse_ts(src);
-        let exports = extract_exports(&tree, src.as_bytes(), &lang);
+        let exports = extract_exports(&tree, src.as_bytes(), &lang, false);
         assert_eq!(exports.len(), 1, "should find 1 export");
         let exp = &exports[0];
         assert_eq!(exp.kind, ExportKind::Named);
@@ -679,7 +766,7 @@ mod tests {
     fn test_default_export() {
         let src = "export default MyComponent;";
         let (tree, lang) = parse_ts(src);
-        let exports = extract_exports(&tree, src.as_bytes(), &lang);
+        let exports = extract_exports(&tree, src.as_bytes(), &lang, false);
         assert_eq!(exports.len(), 1, "should find 1 export");
         let exp = &exports[0];
         assert_eq!(exp.kind, ExportKind::Default);
@@ -692,7 +779,7 @@ mod tests {
     fn test_reexport() {
         let src = "export { helper } from './utils';";
         let (tree, lang) = parse_ts(src);
-        let exports = extract_exports(&tree, src.as_bytes(), &lang);
+        let exports = extract_exports(&tree, src.as_bytes(), &lang, false);
         assert_eq!(exports.len(), 1, "should find 1 re-export");
         let exp = &exports[0];
         assert_eq!(exp.kind, ExportKind::ReExport);
@@ -705,7 +792,7 @@ mod tests {
     fn test_reexport_all() {
         let src = "export * from './types';";
         let (tree, lang) = parse_ts(src);
-        let exports = extract_exports(&tree, src.as_bytes(), &lang);
+        let exports = extract_exports(&tree, src.as_bytes(), &lang, false);
         assert_eq!(exports.len(), 1, "should find 1 re-export-all");
         let exp = &exports[0];
         assert_eq!(exp.kind, ExportKind::ReExportAll);
@@ -713,4 +800,28 @@ mod tests {
         assert_eq!(exp.source.as_deref(), Some("./types"));
     }
 
+    #[test]
+    fn test_appfile_imports() {
+        let src = "import { useState } from 'react';\nimport * as path from 'path';\nconst fs = require('fs');";
+        let (tree, lang) = parse_ts(src);
+        let imports = extract_imports(&tree, src.as_bytes(), &lang, false);
+        let summary = imports.iter().map(|i| format!("{:?}:{}", i.kind, i.module_path)).collect::<Vec<_>>().join(", ");
+        assert_eq!(imports.len(), 3, "Expected 3 imports, got {}: [{}]", imports.len(), summary);
+    }
+
+    // This test verifies that TSX processing does not contaminate TS import statics.
+    #[test]
+    fn test_tsx_then_ts_imports() {
+        // Process TSX file first (initializes TSX statics)
+        let tsx_src = "export const b = 2;";
+        let (tsx_tree, tsx_lang) = parse_tsx(tsx_src);
+        let tsx_imports = extract_imports(&tsx_tree, tsx_src.as_bytes(), &tsx_lang, true);
+        assert_eq!(tsx_imports.len(), 0, "TSX file should have 0 imports");
+
+        // Now process TS file — must use its own TS statics, not TSX statics
+        let ts_src = "import { useState } from 'react';";
+        let (ts_tree, ts_lang) = parse_ts(ts_src);
+        let ts_imports = extract_imports(&ts_tree, ts_src.as_bytes(), &ts_lang, false);
+        assert_eq!(ts_imports.len(), 1, "TS file after TSX should still find 1 import");
+    }
 }
