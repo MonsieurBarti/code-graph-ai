@@ -3,6 +3,7 @@ mod config;
 mod graph;
 mod output;
 mod parser;
+mod resolver;
 mod walker;
 
 use std::collections::HashMap;
