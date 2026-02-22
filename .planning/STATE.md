@@ -10,29 +10,29 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Phase: 2 of 6 (Import Resolution & Graph Completion)
-Plan: 3 of 5 in current phase (COMPLETE)
+Plan: 4 of 5 in current phase (COMPLETE)
 Status: In Progress
-Last activity: 2026-02-22 — Completed 02-03 (full resolution pipeline integration — resolve_all orchestrator, barrel chain resolution, symbol relationship edges, output metrics)
+Last activity: 2026-02-22 — Completed 02-04 (named re-export barrel chain resolution — resolve_named_reexport_chains(), direct ResolvedImport edges bypassing barrels, cycle detection, PARS-06 gap closed)
 
-Progress: [█████░░░░░] 30%
+Progress: [██████░░░░] 36%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
-- Average duration: 20 min
-- Total execution time: 1.9 hours
+- Total plans completed: 6
+- Average duration: 21 min
+- Total execution time: 2.3 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 3 completed (DONE) | 64 min | 21 min |
-| 02 | 3 completed | 48 min | 16 min |
+| 02 | 4 completed | 73 min | 18 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-02 (29 min), 01-03 (31 min), 02-01 (5 min), 02-02 (5 min), 02-03 (38 min)
-- Trend: Integration/wiring plans ~38min; infrastructure/extension plans fast (~5min)
+- Last 5 plans: 01-03 (31 min), 02-01 (5 min), 02-02 (5 min), 02-03 (38 min), 02-04 (25 min)
+- Trend: Integration/wiring plans ~25-38min; infrastructure/extension plans fast (~5min)
 
 *Updated after each plan completion*
 | Phase 01 P01 | 4 | 2 tasks | 5 files |
@@ -41,6 +41,7 @@ Progress: [█████░░░░░] 30%
 | Phase 02 P01 | 5 | 2 tasks | 8 files |
 | Phase 02 P02 | 5 | 1 tasks | 2 files |
 | Phase 02 P03 | 38 | 2 tasks | 4 files |
+| Phase 02 P04 | 25 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,10 @@ Recent decisions affecting current work:
 - [02-03]: External package classification based on specifier prefix (not . and not /) — workspace aliases handled upstream by resolver
 - [02-03]: Symbol relationship pass skips ambiguous multi-candidate calls — cross-file call ambiguity documented limitation (research Open Question 3)
 - [02-03]: petgraph::visit::EdgeRef trait must be explicitly imported for .target() on EdgeReference
+- [02-04]: Named re-export map built as pre-pass from parse_results before scanning edges — avoids combined borrow issues during graph mutation
+- [02-04]: Collect-then-mutate: candidates collected from graph edges into Vec first, then graph mutated in second pass — required by Rust borrow checker
+- [02-04]: ImportSpecifier.alias holds original exported name when aliased (import { Foo as F }) — use alias.as_deref().unwrap_or(&name) to get name matching barrel exports
+- [02-04]: named_reexport_edges field on ResolveStats is diagnostic only — not surfaced in IndexStats user-facing output
 
 ### Pending Todos
 
@@ -92,5 +97,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 02-03-PLAN.md (full resolution pipeline integration — resolve_all orchestrator, barrel chain resolution, symbol relationship edges, output metrics — Phase 2 Plan 3 complete)
+Stopped at: Completed 02-04-PLAN.md (named re-export barrel chain resolution — resolve_named_reexport_chains(), direct ResolvedImport edges, cycle detection, PARS-06 gap closed — Phase 2 Plan 4 complete)
 Resume file: None

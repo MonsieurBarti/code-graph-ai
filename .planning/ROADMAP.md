@@ -52,7 +52,7 @@ Plans:
 - [x] 02-01-PLAN.md — Graph types extension + resolver infrastructure (PARS-05, PARS-07, PARS-08)
 - [x] 02-02-PLAN.md — Symbol relationship extraction via tree-sitter queries (PARS-09)
 - [x] 02-03-PLAN.md — Resolution pipeline integration + barrel chasing + output (PARS-05, PARS-06, PARS-07, PARS-08, PARS-09)
-- [ ] 02-04-PLAN.md — Named re-export barrel chasing gap closure (PARS-06)
+- [x] 02-04-PLAN.md — Named re-export barrel chasing gap closure (PARS-06)
 
 ### Phase 3: Query Engine & CLI
 **Goal**: Developers and Claude can query the graph for any symbol's definition, references, impact radius, circular dependencies, and full context — all accessible via CLI commands
@@ -105,7 +105,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation & Core Parsing | 3/3 | Complete    | 2026-02-22 |
-| 2. Import Resolution & Graph Completion | 3/4 | Gap closure | - |
+| 2. Import Resolution & Graph Completion | 4/4 | Complete | 2026-02-22 |
 | 3. Query Engine & CLI | 0/TBD | Not started | - |
 | 4. MCP Integration | 0/TBD | Not started | - |
 | 5. Watch Mode & Persistence | 0/TBD | Not started | - |
