@@ -12,4 +12,18 @@ pub enum EdgeKind {
     /// Symbol -> Symbol: a child symbol belongs to a parent symbol.
     /// Used for interface properties/method signatures and class methods.
     ChildOf,
+
+    // Phase 2 additions:
+    /// Resolved import edge: importing file -> resolved target file.
+    /// specifier is the original raw import string from source.
+    ResolvedImport { specifier: String },
+    /// Symbol -> symbol: direct function/method call (foo() or obj.method()).
+    Calls,
+    /// Symbol -> symbol: class extends class, or interface extends interface.
+    Extends,
+    /// Symbol -> symbol: class implements interface.
+    Implements,
+    /// File -> file: barrel file re-exports everything from source (export * from './x').
+    /// Resolved lazily at query time per user decision.
+    BarrelReExportAll,
 }

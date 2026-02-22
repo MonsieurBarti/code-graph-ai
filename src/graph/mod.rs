@@ -8,7 +8,7 @@ use petgraph::stable_graph::{NodeIndex, StableGraph};
 use petgraph::Directed;
 
 use edge::EdgeKind;
-use node::{FileInfo, GraphNode, SymbolInfo, SymbolKind};
+use node::{ExternalPackageInfo, FileInfo, GraphNode, SymbolInfo, SymbolKind};
 
 /// The in-memory code graph: a directed petgraph StableGraph with O(1) lookup indexes.
 pub struct CodeGraph {
@@ -18,6 +18,8 @@ pub struct CodeGraph {
     pub file_index: HashMap<PathBuf, NodeIndex>,
     /// Maps symbol names to all node indices bearing that name (one name may appear in many files).
     pub symbol_index: HashMap<String, Vec<NodeIndex>>,
+    /// Maps external package names to their node indices for deduplication.
+    pub external_index: HashMap<String, NodeIndex>,
 }
 
 impl CodeGraph {
@@ -27,6 +29,7 @@ impl CodeGraph {
             graph: StableGraph::new(),
             file_index: HashMap::new(),
             symbol_index: HashMap::new(),
+            external_index: HashMap::new(),
         }
     }
 
@@ -88,6 +91,101 @@ impl CodeGraph {
             }
         }
         map
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 2: helper methods for new edge and node types
+    // -------------------------------------------------------------------------
+
+    /// Add a `ResolvedImport` edge from `from` to `to`.
+    /// `specifier` is the original raw import string as written in source.
+    pub fn add_resolved_import(&mut self, from: NodeIndex, to: NodeIndex, specifier: &str) {
+        self.graph.add_edge(
+            from,
+            to,
+            EdgeKind::ResolvedImport {
+                specifier: specifier.to_owned(),
+            },
+        );
+    }
+
+    /// Add (or reuse) an `ExternalPackage` node for `name` and add a `ResolvedImport` edge
+    /// from `from` to it. `specifier` is the original import string.
+    ///
+    /// If a node for this package name already exists in the graph, it is reused and no
+    /// duplicate node is created.
+    ///
+    /// Returns the `NodeIndex` of the external package node.
+    pub fn add_external_package(
+        &mut self,
+        from: NodeIndex,
+        name: &str,
+        specifier: &str,
+    ) -> NodeIndex {
+        let pkg_idx = if let Some(&existing) = self.external_index.get(name) {
+            existing
+        } else {
+            let info = ExternalPackageInfo {
+                name: name.to_owned(),
+                version: None,
+            };
+            let idx = self.graph.add_node(GraphNode::ExternalPackage(info));
+            self.external_index.insert(name.to_owned(), idx);
+            idx
+        };
+        self.graph.add_edge(
+            from,
+            pkg_idx,
+            EdgeKind::ResolvedImport {
+                specifier: specifier.to_owned(),
+            },
+        );
+        pkg_idx
+    }
+
+    /// Add an `UnresolvedImport` node (a sentinel capturing an unresolvable import) and a
+    /// `ResolvedImport` edge from `from` to it.
+    ///
+    /// Returns the `NodeIndex` of the new unresolved-import node.
+    pub fn add_unresolved_import(
+        &mut self,
+        from: NodeIndex,
+        specifier: &str,
+        reason: &str,
+    ) -> NodeIndex {
+        let node = GraphNode::UnresolvedImport {
+            specifier: specifier.to_owned(),
+            reason: reason.to_owned(),
+        };
+        let idx = self.graph.add_node(node);
+        self.graph.add_edge(
+            from,
+            idx,
+            EdgeKind::ResolvedImport {
+                specifier: specifier.to_owned(),
+            },
+        );
+        idx
+    }
+
+    /// Add a `Calls` edge from `caller` to `callee`.
+    pub fn add_calls_edge(&mut self, caller: NodeIndex, callee: NodeIndex) {
+        self.graph.add_edge(caller, callee, EdgeKind::Calls);
+    }
+
+    /// Add an `Extends` edge from `child` to `parent`.
+    pub fn add_extends_edge(&mut self, child: NodeIndex, parent: NodeIndex) {
+        self.graph.add_edge(child, parent, EdgeKind::Extends);
+    }
+
+    /// Add an `Implements` edge from `class_idx` to `iface_idx`.
+    pub fn add_implements_edge(&mut self, class_idx: NodeIndex, iface_idx: NodeIndex) {
+        self.graph.add_edge(class_idx, iface_idx, EdgeKind::Implements);
+    }
+
+    /// Add a `BarrelReExportAll` edge from `barrel` to `source`.
+    pub fn add_barrel_reexport_all(&mut self, barrel: NodeIndex, source: NodeIndex) {
+        self.graph.add_edge(barrel, source, EdgeKind::BarrelReExportAll);
     }
 }
 
@@ -194,5 +292,68 @@ mod tests {
         let breakdown = graph.symbols_by_kind();
         assert_eq!(breakdown.get(&SymbolKind::Function), Some(&2));
         assert_eq!(breakdown.get(&SymbolKind::Class), Some(&1));
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 2 tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_add_external_package_dedup() {
+        let mut graph = CodeGraph::new();
+        let f = graph.add_file(PathBuf::from("src/app.ts"), "typescript");
+
+        let idx1 = graph.add_external_package(f, "react", "react");
+        let idx2 = graph.add_external_package(f, "react", "react");
+        assert_eq!(
+            idx1, idx2,
+            "add_external_package with the same package name should return the same NodeIndex"
+        );
+
+        // Verify the node exists and is an ExternalPackage
+        match &graph.graph[idx1] {
+            GraphNode::ExternalPackage(info) => {
+                assert_eq!(info.name, "react");
+            }
+            other => panic!("expected ExternalPackage node, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_add_unresolved_import_creates_node_and_edge() {
+        let mut graph = CodeGraph::new();
+        let f = graph.add_file(PathBuf::from("src/app.ts"), "typescript");
+
+        let unresolved_idx =
+            graph.add_unresolved_import(f, "./missing-module", "file not found");
+
+        // Verify node is an UnresolvedImport
+        match &graph.graph[unresolved_idx] {
+            GraphNode::UnresolvedImport { specifier, reason } => {
+                assert_eq!(specifier, "./missing-module");
+                assert_eq!(reason, "file not found");
+            }
+            other => panic!("expected UnresolvedImport node, got {:?}", other),
+        }
+
+        // Verify edge exists from file to unresolved node
+        assert!(
+            graph.graph.contains_edge(f, unresolved_idx),
+            "edge should exist from file to UnresolvedImport node"
+        );
+    }
+
+    #[test]
+    fn test_add_resolved_import_creates_edge() {
+        let mut graph = CodeGraph::new();
+        let f1 = graph.add_file(PathBuf::from("src/app.ts"), "typescript");
+        let f2 = graph.add_file(PathBuf::from("src/utils.ts"), "typescript");
+
+        graph.add_resolved_import(f1, f2, "./utils");
+
+        assert!(
+            graph.graph.contains_edge(f1, f2),
+            "ResolvedImport edge should exist from importing file to target file"
+        );
     }
 }
