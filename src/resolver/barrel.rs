@@ -1,8 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::graph::CodeGraph;
-use crate::parser::imports::{ExportInfo, ExportKind};
+use crate::parser::imports::ExportKind;
 use crate::parser::ParseResult;
 
 /// Resolve barrel re-export chains in the graph.
