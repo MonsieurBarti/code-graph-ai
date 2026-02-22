@@ -31,7 +31,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. The tool extracts functions, classes, interfaces, type aliases, enums, and exported variables from each file
   4. The tool extracts ESM imports, CJS require calls, and dynamic imports with string literals from each file
   5. The tool extracts named exports, default exports, and re-exports from each file
-**Plans**: TBD
+**Plans:** 3 plans
+Plans:
+- [ ] 01-01-PLAN.md — Project scaffold, CLI, config, and file walker (PARS-01)
+- [ ] 01-02-PLAN.md — Parser infrastructure, graph structures, and symbol extraction (PARS-02)
+- [ ] 01-03-PLAN.md — Import/export extraction and full indexing pipeline (PARS-03, PARS-04)
 
 ### Phase 2: Import Resolution & Graph Completion
 **Goal**: The in-memory graph correctly resolves every import to its actual defining file and symbol, handling TypeScript path aliases, barrel files, and monorepo workspace packages
@@ -95,7 +99,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation & Core Parsing | 0/TBD | Not started | - |
+| 1. Foundation & Core Parsing | 0/3 | Planned | - |
 | 2. Import Resolution & Graph Completion | 0/TBD | Not started | - |
 | 3. Query Engine & CLI | 0/TBD | Not started | - |
 | 4. MCP Integration | 0/TBD | Not started | - |
