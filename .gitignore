@@ -1,0 +1,19 @@
+# Build
+/target/
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.*
+
+# Claude / Planning / Dev
+.claude/
+.planning/
+.devcontainer/
