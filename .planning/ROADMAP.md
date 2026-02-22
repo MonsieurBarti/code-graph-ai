@@ -47,7 +47,7 @@ Plans:
   3. An import referencing a workspace package name resolves to its local source path (not node_modules)
   4. The graph contains a complete file-level dependency edge for every import in the codebase
   5. The graph contains symbol-level relationship edges: contains, exports, calls, extends, implements
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 Plans:
 - [ ] 02-01-PLAN.md — Graph types extension + resolver infrastructure (PARS-05, PARS-07, PARS-08)
 - [ ] 02-02-PLAN.md — Symbol relationship extraction via tree-sitter queries (PARS-09)
@@ -104,7 +104,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation & Core Parsing | 3/3 | Complete    | 2026-02-22 |
-| 2. Import Resolution & Graph Completion | 1/3 | In Progress|  |
+| 2. Import Resolution & Graph Completion | 2/3 | In Progress|  |
 | 3. Query Engine & CLI | 0/TBD | Not started | - |
 | 4. MCP Integration | 0/TBD | Not started | - |
 | 5. Watch Mode & Persistence | 0/TBD | Not started | - |
