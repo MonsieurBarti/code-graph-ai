@@ -15,7 +15,7 @@
 - [ ] **PARS-06**: Tool resolves barrel file imports to the actual defining file (symbol-level resolution through index.ts)
 - [x] **PARS-07**: Tool resolves monorepo workspace packages to local paths (package.json workspaces)
 - [x] **PARS-08**: Tool builds a complete file-level dependency graph with import edges
-- [ ] **PARS-09**: Tool builds symbol-level relationships: contains, exports, calls, extends, implements
+- [x] **PARS-09**: Tool builds symbol-level relationships: contains, exports, calls, extends, implements
 
 ### Queries
 
@@ -91,7 +91,7 @@
 | PARS-06 | Phase 2 | Pending |
 | PARS-07 | Phase 2 | Complete |
 | PARS-08 | Phase 2 | Complete |
-| PARS-09 | Phase 2 | Pending |
+| PARS-09 | Phase 2 | Complete |
 | QURY-01 | Phase 3 | Pending |
 | QURY-02 | Phase 3 | Pending |
 | QURY-03 | Phase 3 | Pending |

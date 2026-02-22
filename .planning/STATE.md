@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Phase: 2 of 6 (Import Resolution & Graph Completion)
-Plan: 1 of 5 in current phase (COMPLETE)
+Plan: 2 of 5 in current phase (COMPLETE)
 Status: In Progress
-Last activity: 2026-02-22 — Completed 02-01 (graph type extensions, oxc_resolver infrastructure, workspace detection)
+Last activity: 2026-02-22 — Completed 02-02 (relationship extraction module, tree-sitter queries for calls/extends/implements/type-refs)
 
-Progress: [████░░░░░░] 20%
+Progress: [████░░░░░░] 24%
 
 ## Performance Metrics
 
@@ -39,6 +39,7 @@ Progress: [████░░░░░░] 20%
 | Phase 01 P02 | 29 | 2 tasks | 7 files |
 | Phase 01 P03 | 31 | 2 tasks | 4 files |
 | Phase 02 P01 | 5 | 2 tasks | 8 files |
+| Phase 02 P02 | 5 | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -69,6 +70,9 @@ Recent decisions affecting current work:
 - [02-01]: ExternalPackage nodes deduplicated by package name via external_index HashMap on CodeGraph
 - [02-01]: builtin_modules: true enabled on Resolver so Node.js builtins classify as BuiltinModule not Unresolved
 - [02-01]: workspace source-preferred mapping: src/ dir used when it exists, otherwise package root
+- [Phase 02]: JS grammar (tree-sitter-javascript 0.25) uses different class_heritage layout — no extends_clause node, requires separate grammar-specific query
+- [Phase 02]: extends_type_clause confirmed as correct node name for interface extends in TS grammar (validated via live tree exploration)
+- [Phase 02]: from_name is None for Calls/MethodCall/TypeReference in context-free extraction pass — caller scope resolution deferred to Plan 03 graph wiring
 
 ### Pending Todos
 
@@ -83,5 +87,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 02-01-PLAN.md (graph type extensions, oxc_resolver wrapper, workspace detection — Phase 2 Plan 1 complete)
+Stopped at: Completed 02-02-PLAN.md (relationship extraction module, tree-sitter queries for calls/extends/implements/type-refs — Phase 2 Plan 2 complete)
 Resume file: None
