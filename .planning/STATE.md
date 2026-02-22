@@ -10,32 +10,33 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Phase: 1 of 6 (Foundation & Core Parsing)
-Plan: 2 of 3 in current phase
-Status: Executing
-Last activity: 2026-02-22 — Completed 01-02 (tree-sitter parser, symbol extraction, CodeGraph data structures)
+Plan: 3 of 3 in current phase (COMPLETE)
+Status: Phase 1 Complete
+Last activity: 2026-02-22 — Completed 01-03 (import/export extraction, full indexing pipeline, code-graph index . command)
 
-Progress: [██░░░░░░░░] 10%
+Progress: [████░░░░░░] 17%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
-- Average duration: 17 min
-- Total execution time: 0.6 hours
+- Total plans completed: 3
+- Average duration: 21 min
+- Total execution time: 1.1 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01 | 2 completed | 33 min | 17 min |
+| 01 | 3 completed (DONE) | 64 min | 21 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (4 min), 01-02 (29 min)
-- Trend: Parser implementation expected to take longer than scaffold
+- Last 5 plans: 01-01 (4 min), 01-02 (29 min), 01-03 (31 min)
+- Trend: Parsing tasks consistently ~30min; scaffold was 4min outlier
 
 *Updated after each plan completion*
 | Phase 01 P01 | 4 | 2 tasks | 5 files |
 | Phase 01 P02 | 29 | 2 tasks | 7 files |
+| Phase 01 P03 | 31 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -56,6 +57,10 @@ Recent decisions affecting current work:
 - [01-02]: OnceLock<Query> static per language — compiled once, reused across all files
 - [01-02]: De-duplicate symbols by (name, row) to handle overlapping query patterns
 - [01-02]: tree-sitter 0.26 QueryMatches uses StreamingIterator (not standard Iterator) — must import tree_sitter::StreamingIterator
+- [01-03]: Language::name() returns None for TypeScript and TSX grammars in tree-sitter 0.26 — use is_tsx bool param derived from file extension for TS/TSX discrimination (not Language::name())
+- [01-03]: All extractor functions (symbols, imports, exports) use is_tsx: bool as 4th parameter for per-grammar OnceLock selection
+- [01-03]: tree-sitter 0.26 StreamingIterator does not auto-filter #eq? predicates — filter function name in Rust code instead
+- [01-03]: tree-sitter namespace_import identifier has no field name — find by child kind, not child_by_field_name()
 
 ### Pending Todos
 
@@ -70,5 +75,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 01-02-PLAN.md (tree-sitter parser, symbol extraction, CodeGraph data structures)
+Stopped at: Completed 01-03-PLAN.md (import/export extraction, full indexing pipeline, code-graph index . command — Phase 1 COMPLETE)
 Resume file: None
