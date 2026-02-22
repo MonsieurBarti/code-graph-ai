@@ -33,9 +33,9 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. The tool extracts named exports, default exports, and re-exports from each file
 **Plans:** 3/3 plans complete
 Plans:
-- [ ] 01-01-PLAN.md — Project scaffold, CLI, config, and file walker (PARS-01)
-- [ ] 01-02-PLAN.md — Parser infrastructure, graph structures, and symbol extraction (PARS-02)
-- [ ] 01-03-PLAN.md — Import/export extraction and full indexing pipeline (PARS-03, PARS-04)
+- [x] 01-01-PLAN.md — Project scaffold, CLI, config, and file walker (PARS-01)
+- [x] 01-02-PLAN.md — Parser infrastructure, graph structures, and symbol extraction (PARS-02)
+- [x] 01-03-PLAN.md — Import/export extraction and full indexing pipeline (PARS-03, PARS-04)
 
 ### Phase 2: Import Resolution & Graph Completion
 **Goal**: The in-memory graph correctly resolves every import to its actual defining file and symbol, handling TypeScript path aliases, barrel files, and monorepo workspace packages
@@ -47,11 +47,12 @@ Plans:
   3. An import referencing a workspace package name resolves to its local source path (not node_modules)
   4. The graph contains a complete file-level dependency edge for every import in the codebase
   5. The graph contains symbol-level relationship edges: contains, exports, calls, extends, implements
-**Plans:** 3/3 plans executed
+**Plans:** 4 plans (3 executed + 1 gap closure)
 Plans:
 - [x] 02-01-PLAN.md — Graph types extension + resolver infrastructure (PARS-05, PARS-07, PARS-08)
 - [x] 02-02-PLAN.md — Symbol relationship extraction via tree-sitter queries (PARS-09)
 - [x] 02-03-PLAN.md — Resolution pipeline integration + barrel chasing + output (PARS-05, PARS-06, PARS-07, PARS-08, PARS-09)
+- [ ] 02-04-PLAN.md — Named re-export barrel chasing gap closure (PARS-06)
 
 ### Phase 3: Query Engine & CLI
 **Goal**: Developers and Claude can query the graph for any symbol's definition, references, impact radius, circular dependencies, and full context — all accessible via CLI commands
@@ -104,7 +105,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation & Core Parsing | 3/3 | Complete    | 2026-02-22 |
-| 2. Import Resolution & Graph Completion | 3/3 | Complete    | 2026-02-22 |
+| 2. Import Resolution & Graph Completion | 3/4 | Gap closure | - |
 | 3. Query Engine & CLI | 0/TBD | Not started | - |
 | 4. MCP Integration | 0/TBD | Not started | - |
 | 5. Watch Mode & Persistence | 0/TBD | Not started | - |
