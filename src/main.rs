@@ -345,15 +345,31 @@ fn main() -> Result<()> {
             path,
             symbol,
             case_insensitive,
-            format: _,
+            format,
         } => {
+            // Validate regex FIRST before the expensive index pipeline.
             regex::RegexBuilder::new(&symbol)
                 .case_insensitive(case_insensitive)
                 .build()
                 .map_err(|e| anyhow::anyhow!("invalid symbol pattern '{}': {}", symbol, e))?;
 
-            let _graph = build_graph(&path, false)?;
-            todo!("Phase 3 Plan 03")
+            let graph = build_graph(&path, false)?;
+            let matches = query::find::match_symbols(&graph, &symbol, case_insensitive)?;
+
+            if matches.is_empty() {
+                eprintln!("no symbols matching '{}' found", symbol);
+                std::process::exit(1);
+            }
+
+            // Build one SymbolContext per matched symbol name.
+            let results: Vec<query::context::SymbolContext> = matches
+                .iter()
+                .map(|(name, indices)| {
+                    query::context::symbol_context(&graph, name, indices, &path)
+                })
+                .collect();
+
+            query::output::format_context_results(&results, &format, &path, &symbol);
         }
     }
 
