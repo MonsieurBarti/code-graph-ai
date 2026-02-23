@@ -21,9 +21,4 @@ if ! RUSTFLAGS="-Dwarnings" cargo clippy --all-targets --all-features; then
     exit 1
 fi
 
-# Preserve existing entire CLI hook behavior (non-blocking)
-if command -v entire > /dev/null 2>&1; then
-    entire hooks git pre-push "$1" || true
-fi
-
 exit 0

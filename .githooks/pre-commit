@@ -1,0 +1,19 @@
+#!/bin/sh
+# Pre-commit hook: prevent committing files that should be ignored by .gitignore
+# This catches files that were force-added or tracked before being gitignored.
+
+set -e
+
+# Get files staged for commit that are also ignored by .gitignore
+ignored_files=$(git ls-files --cached --ignored --exclude-standard 2>/dev/null || true)
+
+if [ -n "$ignored_files" ]; then
+    echo "ERROR: The following staged files match .gitignore patterns:"
+    echo ""
+    echo "$ignored_files" | while read -r f; do echo "  $f"; done
+    echo ""
+    echo "Remove them from tracking with: git rm --cached <file>"
+    exit 1
+fi
+
+exit 0
