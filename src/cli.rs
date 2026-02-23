@@ -172,4 +172,13 @@ pub enum Commands {
         /// Path to the project root (defaults to current directory if omitted).
         path: Option<PathBuf>,
     },
+
+    /// Start a file watcher that monitors for changes and re-indexes incrementally.
+    ///
+    /// Useful for debugging watcher behavior. The MCP server starts its own
+    /// embedded watcher automatically — this command runs standalone.
+    Watch {
+        /// Path to the project root to watch.
+        path: PathBuf,
+    },
 }
