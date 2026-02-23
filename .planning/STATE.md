@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** Claude Code can understand any codebase's structure and dependencies without reading source files — querying a local graph instead, saving tokens and time on every interaction.
-**Current focus:** Phase 4 — MCP Integration
+**Current focus:** Phase 5 — Watch Mode Persistence
 
 ## Current Position
 
-Phase: 4 of 6 (MCP Integration)
-Plan: 2 of 2 in current phase
+Phase: 5 of 6 (Watch Mode Persistence)
+Plan: 1 of 3 in current phase
 Status: Executing
-Last activity: 2026-02-23 — Completed 04-02-PLAN.md (MCP stdio server with 6 tools)
+Last activity: 2026-02-23 — Completed 05-01-PLAN.md (graph serialization + cache persistence layer)
 
-Progress: [█████████░] 55%
+Progress: [██████████] 60%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 10
-- Average duration: 18 min
-- Total execution time: ~2.9 hours
+- Total plans completed: 11
+- Average duration: 17 min
+- Total execution time: ~3.0 hours
 
 **By Phase:**
 
@@ -48,6 +48,7 @@ Progress: [█████████░] 55%
 | Phase 03 P03 | 127 | 1 tasks | 5 files |
 | Phase 04 P01 | 3 | 2 tasks | 5 files |
 | Phase 04 P02 | 23 | 2 tasks | 4 files |
+| Phase 05 P01 | 3 | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -106,6 +107,11 @@ Recent decisions affecting current work:
 - [Phase 04-02]: Return Result<String, String> from tool handlers — Err maps to isError:true via IntoCallToolResult blanket impl
 - [Phase 04-02]: #[tool_handler] annotation required on ServerHandler impl to wire call_tool/list_tools/get_tool
 - [Phase 04-02]: Graph built in spawn_blocking to avoid blocking async executor during CPU-bound graph construction
+- [05-01]: bincode 2 with serde feature used — all graph type serialization goes through serde derives (not bincode derive macros)
+- [05-01]: Atomic cache write via NamedTempFile::new_in(cache_dir) + persist() rename — prevents corrupt cache on crash
+- [05-01]: CACHE_VERSION = 1 constant — load_cache returns None on version mismatch, triggers full rebuild (safe degradation)
+- [05-01]: remove_file_from_graph collects Contains/ChildOf edges then removes in second pass — collect-then-mutate avoids borrow checker issues
+- [05-01]: Rust 2024 edition: explicit ref binding in if-let patterns removed — implicit borrowing used instead
 
 ### Pending Todos
 
@@ -114,11 +120,11 @@ None.
 ### Blockers/Concerns
 
 - [Research flag - RESOLVED]: rmcp 0.16 API verified during Phase 4 implementation — #[tool_router] + #[tool_handler] macros work correctly
-- [Research flag]: rkyv integration with petgraph may need custom serialization — prototype early in Phase 5 planning
+- [Research flag - RESOLVED]: rkyv integration with petgraph — using bincode + serde instead (simpler, no custom derives needed, serde-1 feature on petgraph handles StableGraph)
 - [Research flag - RESOLVED]: tree-sitter TypeScript grammar handles latest TS features — verified during 01-02 implementation
 
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 04-02-PLAN.md
-Resume file: .planning/phases/04-mcp-integration/04-02-SUMMARY.md
+Stopped at: Completed 05-01-PLAN.md
+Resume file: .planning/phases/05-watch-mode-persistence/05-01-SUMMARY.md

@@ -39,7 +39,7 @@
 - [ ] **PERF-01**: Full index of a 10K-file TypeScript codebase completes in under 30 seconds
 - [ ] **PERF-02**: Tool uses parallel parsing (rayon) to utilize multi-core CPUs
 - [ ] **PERF-03**: Background daemon uses less than 100MB RSS for typical projects (<10K files)
-- [ ] **PERF-04**: Graph persists to disk; cold start loads cached graph without re-parsing unchanged files
+- [x] **PERF-04**: Graph persists to disk; cold start loads cached graph without re-parsing unchanged files
 
 ### Distribution
 
@@ -103,7 +103,7 @@
 | INTG-03 | Phase 4 | Complete |
 | INTG-04 | Phase 5 | Pending |
 | INTG-05 | Phase 5 | Pending |
-| PERF-04 | Phase 5 | Pending |
+| PERF-04 | Phase 5 | Complete |
 | PERF-01 | Phase 6 | Pending |
 | PERF-02 | Phase 6 | Pending |
 | PERF-03 | Phase 6 | Pending |
