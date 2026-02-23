@@ -16,8 +16,8 @@ use languages::language_for_extension;
 use relationships::{RelationshipInfo, extract_relationships};
 use symbols::extract_symbols;
 
-/// Thread-local Parser instances — one per rayon worker thread, zero lock contention.
-/// Each Parser is initialised once per thread with the appropriate grammar.
+// Thread-local Parser instances — one per rayon worker thread, zero lock contention.
+// Each Parser is initialised once per thread with the appropriate grammar.
 thread_local! {
     static PARSER_TS: RefCell<Parser> = RefCell::new({
         let mut p = Parser::new();

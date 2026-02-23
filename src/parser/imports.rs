@@ -10,9 +10,9 @@ use tree_sitter::{Language, Node, Query, QueryCursor, StreamingIterator, Tree};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportKind {
     /// ESM static import: `import { X } from './module'`
-    ESM,
+    Esm,
     /// CommonJS require: `const X = require('./module')`
-    CJS,
+    Cjs,
     /// Dynamic import: `import('./module')`
     DynamicImport,
 }
@@ -34,6 +34,7 @@ pub struct ImportSpecifier {
 #[derive(Debug, Clone)]
 pub struct ImportInfo {
     /// Kind of import (ESM / CJS / dynamic).
+    #[allow(dead_code)]
     pub kind: ImportKind,
     /// The raw module specifier string, e.g. `"react"` or `"./utils"`.
     pub module_path: String,
@@ -388,7 +389,7 @@ pub fn extract_imports(tree: &Tree, source: &[u8], language: &Language, is_tsx: 
             if let (Some(imp_node), Some(path)) = (import_node, module_path) {
                 let specifiers = extract_esm_specifiers(imp_node, source);
                 imports.push(ImportInfo {
-                    kind: ImportKind::ESM,
+                    kind: ImportKind::Esm,
                     module_path: path,
                     specifiers,
                 });
@@ -447,8 +448,8 @@ pub fn extract_imports(tree: &Tree, source: &[u8], language: &Language, is_tsx: 
                 });
 
                 let mut specifiers = Vec::new();
-                if let Some(call) = call_expr {
-                    if let Some(binding) = find_require_binding(call, source) {
+                if let Some(call) = call_expr
+                    && let Some(binding) = find_require_binding(call, source) {
                         specifiers.push(ImportSpecifier {
                             name: binding,
                             alias: None,
@@ -456,10 +457,9 @@ pub fn extract_imports(tree: &Tree, source: &[u8], language: &Language, is_tsx: 
                             is_namespace: false,
                         });
                     }
-                }
 
                 imports.push(ImportInfo {
-                    kind: ImportKind::CJS,
+                    kind: ImportKind::Cjs,
                     module_path: path,
                     specifiers,
                 });
@@ -527,11 +527,10 @@ pub fn extract_exports(tree: &Tree, source: &[u8], language: &Language, is_tsx: 
             }
         }
 
-        if let Some(node) = export_node {
-            if let Some(info) = classify_export(node, source) {
+        if let Some(node) = export_node
+            && let Some(info) = classify_export(node, source) {
                 exports.push(info);
             }
-        }
     }
 
     exports
@@ -617,12 +616,7 @@ fn find_export_source(export_node: Node, source: &[u8]) -> Option<String> {
 /// Find the first direct child of `node` with the given kind.
 fn find_child_of_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
     let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == kind {
-            return Some(child);
-        }
-    }
-    None
+    node.children(&mut cursor).find(|child| child.kind() == kind)
 }
 
 /// Extract the exported names from an export_clause node.
@@ -681,7 +675,7 @@ mod tests {
         let imports = extract_imports(&tree, src.as_bytes(), &lang, false);
         assert_eq!(imports.len(), 1, "should find 1 import");
         let imp = &imports[0];
-        assert_eq!(imp.kind, ImportKind::ESM);
+        assert_eq!(imp.kind, ImportKind::Esm);
         assert_eq!(imp.module_path, "react");
         assert_eq!(imp.specifiers.len(), 2, "should have 2 specifiers");
         let names: Vec<_> = imp.specifiers.iter().map(|s| s.name.as_str()).collect();
@@ -698,7 +692,7 @@ mod tests {
         let imports = extract_imports(&tree, src.as_bytes(), &lang, false);
         assert_eq!(imports.len(), 1);
         let imp = &imports[0];
-        assert_eq!(imp.kind, ImportKind::ESM);
+        assert_eq!(imp.kind, ImportKind::Esm);
         assert_eq!(imp.module_path, "react");
         assert_eq!(imp.specifiers.len(), 1);
         assert_eq!(imp.specifiers[0].name, "React");
@@ -714,7 +708,7 @@ mod tests {
         let imports = extract_imports(&tree, src.as_bytes(), &lang, false);
         assert_eq!(imports.len(), 1);
         let imp = &imports[0];
-        assert_eq!(imp.kind, ImportKind::ESM);
+        assert_eq!(imp.kind, ImportKind::Esm);
         assert_eq!(imp.module_path, "path");
         assert_eq!(imp.specifiers.len(), 1);
         assert_eq!(imp.specifiers[0].name, "path");
@@ -730,7 +724,7 @@ mod tests {
         let imports = extract_imports(&tree, src.as_bytes(), &lang, false);
         assert_eq!(imports.len(), 1, "should find 1 import");
         let imp = &imports[0];
-        assert_eq!(imp.kind, ImportKind::CJS);
+        assert_eq!(imp.kind, ImportKind::Cjs);
         assert_eq!(imp.module_path, "fs");
     }
 

@@ -6,6 +6,7 @@ pub enum WatchEvent {
     /// A source file was modified (content changed).
     Modified(PathBuf),
     /// A new source file was created.
+    #[allow(dead_code)]
     Created(PathBuf),
     /// A source file was deleted.
     Deleted(PathBuf),
