@@ -193,6 +193,38 @@ Once connected, Claude Code gets access to six tools:
 
 The MCP server loads from disk cache on startup for near-instant cold starts, runs an embedded file watcher for live updates, and suggests similar symbol names when a search yields no results.
 
+### Recommended CLAUDE.md instructions
+
+Claude Code defaults to reading source files with its built-in glob/grep/read tools. Without explicit guidance, it won't use code-graph even when the MCP server is running. Add the following to your project's `CLAUDE.md` so Claude prefers graph queries over file reading for codebase navigation:
+
+```markdown
+## Code navigation
+
+Use code-graph MCP tools (`find_symbol`, `find_references`, `get_context`, `get_impact`) as the
+primary way to navigate the codebase. Prefer these over glob/grep/read for finding definitions,
+tracing references, and understanding blast radius. Fall back to file reading only when you need
+the full source of a file (e.g., to edit it or review implementation details).
+```
+
+### Permission whitelisting
+
+By default, Claude Code asks for confirmation on every MCP tool call. To auto-approve code-graph tools (they are read-only and safe), add this to `.claude/settings.json` in your project root:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "mcp__code-graph__find_symbol",
+      "mcp__code-graph__find_references",
+      "mcp__code-graph__get_impact",
+      "mcp__code-graph__detect_circular",
+      "mcp__code-graph__get_context",
+      "mcp__code-graph__get_stats"
+    ]
+  }
+}
+```
+
 ## Configuration
 
 Optional `code-graph.toml` in your project root:
