@@ -1,8 +1,10 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
 use crate::config::CodeGraphConfig;
+use crate::language::LanguageKind;
 
 /// Workspace field from package.json — can be either a flat list of glob patterns
 /// or an object with a `packages` key.
@@ -28,20 +30,26 @@ struct PackageJson {
     workspaces: Option<WorkspacesField>,
 }
 
-/// TS/JS file extensions that code-graph processes.
-const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx"];
+/// Source file extensions that code-graph discovers.
+/// .rs files are discovered and counted but not parsed until Phase 8.
+const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "rs"];
 
-/// Walk a project directory and collect all TypeScript/JavaScript source files.
+/// Walk a project directory and collect source files.
 ///
 /// Respects `.gitignore` rules, always excludes `node_modules`, applies any
 /// additional exclusions from `config.exclude`, and detects monorepo workspaces
 /// from `package.json`.
 ///
 /// When `verbose` is true, each discovered file path is printed to stderr.
+///
+/// When `allowed_languages` is `Some(set)`, only files whose extension matches
+/// one of the languages in the set are included. When `None`, all source
+/// extensions are included.
 pub fn walk_project(
     root: &Path,
     config: &CodeGraphConfig,
     verbose: bool,
+    allowed_languages: Option<&HashSet<LanguageKind>>,
 ) -> anyhow::Result<Vec<PathBuf>> {
     // Always walk from the project root — this covers all files including workspace packages
     // (since workspace dirs are sub-directories of the root).
@@ -51,7 +59,7 @@ pub fn walk_project(
     let _ = detect_workspace_roots(root);
 
     let mut files = Vec::new();
-    collect_files(root, config, verbose, &mut files);
+    collect_files(root, config, verbose, allowed_languages, &mut files);
 
     Ok(files)
 }
@@ -95,8 +103,14 @@ fn detect_workspace_roots(root: &Path) -> Vec<PathBuf> {
     roots
 }
 
-/// Collect TS/JS source files from a single directory tree using the `ignore` crate.
-fn collect_files(root: &Path, config: &CodeGraphConfig, verbose: bool, out: &mut Vec<PathBuf>) {
+/// Collect source files from a single directory tree using the `ignore` crate.
+fn collect_files(
+    root: &Path,
+    config: &CodeGraphConfig,
+    verbose: bool,
+    allowed_languages: Option<&HashSet<LanguageKind>>,
+    out: &mut Vec<PathBuf>,
+) {
     let walker = ignore::WalkBuilder::new(root)
         .standard_filters(true)
         // Read .gitignore files even when the directory is not inside a git repository.
@@ -135,6 +149,13 @@ fn collect_files(root: &Path, config: &CodeGraphConfig, verbose: bool, out: &mut
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         if !SOURCE_EXTENSIONS.contains(&ext) {
             continue;
+        }
+
+        // Apply language filter if specified.
+        if let Some(langs) = allowed_languages {
+            if !langs.iter().any(|lk| lk.matches_extension(ext)) {
+                continue;
+            }
         }
 
         if verbose {

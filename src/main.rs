@@ -11,7 +11,7 @@ mod resolver;
 mod walker;
 mod watcher;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -21,6 +21,7 @@ use rayon::prelude::*;
 use cli::{Cli, Commands};
 use config::CodeGraphConfig;
 use graph::{CodeGraph, node::SymbolKind};
+use language::LanguageKind;
 use output::{IndexStats, print_summary};
 use parser::ParseResult;
 use parser::imports::ImportKind;
@@ -32,7 +33,7 @@ use walker::walk_project;
 /// inline copy so it can also compute detailed stats without a second pass.
 pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
     let config = CodeGraphConfig::load(path);
-    let files = walk_project(path, &config, verbose)?;
+    let files = walk_project(path, &config, verbose, None)?;
 
     // Phase 1: Parse all files in parallel (CPU-bound — rayon par_iter).
     let raw_results: Vec<(PathBuf, &'static str, ParseResult)> = files
@@ -92,17 +93,69 @@ async fn main() -> Result<()> {
             path,
             verbose,
             json,
+            language,
         } => {
             // 1. Load config (always succeeds — defaults when file is absent).
             let config = CodeGraphConfig::load(&path);
 
-            // 2. Start timer.
+            // 2. Parse --language flag values into a language filter set.
+            // When --language is not specified, auto-detect from config files at project root.
+            // The detected set is informational in Phase 7 — the walk still discovers all
+            // supported extensions, and the post-walk counts confirm actual presence.
+            let _detected_languages = language::detect_languages(&path);
+
+            let allowed_languages: Option<HashSet<LanguageKind>> = if language.is_empty() {
+                None // auto-detect: walk all supported extensions
+            } else {
+                let mut set = HashSet::new();
+                for lang_str in &language {
+                    match LanguageKind::from_str_loose(lang_str) {
+                        Some(lk) => {
+                            set.insert(lk);
+                        }
+                        None => anyhow::bail!(
+                            "unknown language '{}'. Valid: typescript, javascript, rust (or ts, js, rs)",
+                            lang_str
+                        ),
+                    }
+                }
+                Some(set)
+            };
+
+            // 3. Start timer.
             let start = std::time::Instant::now();
 
-            // 3. Walk files.
-            let files = walk_project(&path, &config, verbose)?;
+            // 4. Walk files.
+            let files = walk_project(&path, &config, verbose, allowed_languages.as_ref())?;
 
-            // 4. Create graph.
+            // 5. Compute per-language file counts from the walk result BEFORE parsing.
+            // Rust files are counted but not parsed — they must not enter the parse pipeline.
+            let ts_file_count = files
+                .iter()
+                .filter(|f| {
+                    matches!(
+                        f.extension().and_then(|e| e.to_str()),
+                        Some("ts" | "tsx")
+                    )
+                })
+                .count();
+            let js_file_count = files
+                .iter()
+                .filter(|f| {
+                    matches!(
+                        f.extension().and_then(|e| e.to_str()),
+                        Some("js" | "jsx")
+                    )
+                })
+                .count();
+            let rust_file_count = files
+                .iter()
+                .filter(|f| {
+                    matches!(f.extension().and_then(|e| e.to_str()), Some("rs"))
+                })
+                .count();
+
+            // 6. Create graph.
             let mut graph = CodeGraph::new();
 
             // Import/export counts (accumulated across all files).
@@ -115,7 +168,9 @@ async fn main() -> Result<()> {
             // Parse results map — retained for the resolution step.
             let mut parse_results: HashMap<PathBuf, ParseResult> = HashMap::new();
 
-            // 5. Parse all files in parallel (rayon par_iter).
+            // 7. Parse all TS/JS files in parallel (rayon par_iter).
+            // Rust files (.rs) hit the `_` arm and return None — they are counted
+            // above but intentionally not parsed until Phase 8.
             let raw_results: Vec<(PathBuf, &'static str, ParseResult)> = files
                 .par_iter()
                 .filter_map(|file_path| {
@@ -125,17 +180,18 @@ async fn main() -> Result<()> {
                             "ts" => "typescript",
                             "tsx" => "tsx",
                             "js" | "jsx" => "javascript",
-                            _ => return None,
+                            _ => return None, // .rs and any unknown extensions skip parsing
                         };
                     let result = parser::parse_file_parallel(file_path, &source).ok()?;
                     Some((file_path.clone(), language_str, result))
                 })
                 .collect();
 
-            // skipped = files that couldn't be read or parsed (filter_map silently drops them)
-            let skipped = files.len() - raw_results.len();
+            // skipped = TS/JS files that couldn't be read or parsed.
+            // Rust files are intentionally not parsed — exclude them from skipped count.
+            let skipped = files.len() - raw_results.len() - rust_file_count;
 
-            // 6. Insert into graph sequentially + accumulate stats.
+            // 8. Insert into graph sequentially + accumulate stats.
             for (file_path, language_str, result) in raw_results {
                 // Add file node to graph.
                 let file_idx = graph.add_file(file_path.clone(), language_str);
@@ -217,6 +273,9 @@ async fn main() -> Result<()> {
                 external_packages: resolve_stats.external,
                 builtin_modules: resolve_stats.builtin,
                 relationship_edges: resolve_stats.relationships_added,
+                ts_file_count,
+                js_file_count,
+                rust_file_count,
             };
 
             // 9. Print summary.

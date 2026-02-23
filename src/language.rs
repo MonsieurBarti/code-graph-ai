@@ -25,6 +25,8 @@ impl LanguageKind {
     }
 
     /// Human-readable display name for stats output.
+    // Used by output.rs in Phase 8+ when Rust parsing is added.
+    #[allow(dead_code)]
     pub fn display_name(&self) -> &'static str {
         match self {
             LanguageKind::TypeScript => "TypeScript",
@@ -109,11 +111,13 @@ fn check_config_files(dir: &Path, found: &mut HashSet<LanguageKind>) {
 
 /// Minimal deserialization struct for Cargo workspace table.
 #[derive(Deserialize, Default)]
+#[allow(dead_code)]
 struct CargoManifest {
     workspace: Option<WorkspaceTable>,
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct WorkspaceTable {
     members: Vec<String>,
 }
@@ -123,6 +127,9 @@ struct WorkspaceTable {
 ///
 /// Returns an empty vec if `Cargo.toml` is absent, has no `[workspace]` section,
 /// or cannot be parsed — consistent with the graceful-error pattern in `config.rs`.
+///
+/// Used by Phase 9 (Rust Module Resolver) for workspace crate discovery.
+#[allow(dead_code)]
 pub fn cargo_workspace_members(root: &Path) -> Vec<std::path::PathBuf> {
     let manifest_path = root.join("Cargo.toml");
     let contents = match std::fs::read_to_string(&manifest_path) {

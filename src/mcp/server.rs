@@ -225,7 +225,7 @@ fn apply_staleness_diff(
 
     // Walk current files
     let config = crate::config::CodeGraphConfig::load(project_root);
-    let current_files = crate::walker::walk_project(project_root, &config, false)?;
+    let current_files = crate::walker::walk_project(project_root, &config, false, None)?;
     let current_set: std::collections::HashSet<PathBuf> = current_files.iter().cloned().collect();
 
     // Find changed and new files

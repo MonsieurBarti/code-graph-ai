@@ -36,6 +36,12 @@ pub struct IndexStats {
     pub builtin_modules: usize,
     /// Number of symbol-level relationship edges added (Calls, Extends, Implements, TypeRef).
     pub relationship_edges: usize,
+    /// Number of TypeScript (.ts/.tsx) files discovered.
+    pub ts_file_count: usize,
+    /// Number of JavaScript (.js/.jsx) files discovered.
+    pub js_file_count: usize,
+    /// Number of Rust (.rs) files discovered (discovery only — not parsed in this version).
+    pub rust_file_count: usize,
 }
 
 /// Print a summary of the indexing run.
@@ -59,6 +65,18 @@ pub fn print_summary(stats: &IndexStats, json: bool) {
         "Indexed {} files in {:.2}s",
         stats.file_count, stats.elapsed_secs
     );
+
+    // Per-language file counts — only show languages with files present.
+    if stats.ts_file_count > 0 {
+        println!("  TypeScript: {} files", stats.ts_file_count);
+    }
+    if stats.js_file_count > 0 {
+        println!("  JavaScript: {} files", stats.js_file_count);
+    }
+    if stats.rust_file_count > 0 {
+        println!("  Rust: {} files (discovery only)", stats.rust_file_count);
+    }
+
     println!(
         "  {} functions, {} classes, {} interfaces, {} types, {} enums, {} variables",
         stats.functions,

@@ -33,7 +33,7 @@ pub enum OutputFormat {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Index a project directory, discovering and parsing all TypeScript/JavaScript files.
+    /// Index a project directory, discovering and parsing all source files.
     Index {
         /// Path to the project root to index.
         path: PathBuf,
@@ -45,6 +45,12 @@ pub enum Commands {
         /// Output results as JSON instead of human-readable text.
         #[arg(long)]
         json: bool,
+
+        /// Override language auto-detection. Comma-separated or repeated.
+        /// Valid: typescript, javascript, rust (or ts, js, rs).
+        /// Example: --language rust  or  --language rust,typescript
+        #[arg(long, value_delimiter = ',')]
+        language: Vec<String>,
     },
 
     /// Find a symbol's definition (file:line location).
