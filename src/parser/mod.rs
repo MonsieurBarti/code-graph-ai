@@ -11,10 +11,10 @@ use tree_sitter::Parser;
 
 use crate::graph::node::SymbolInfo;
 
-use imports::{ExportInfo, ImportInfo, extract_exports, extract_imports};
+use imports::{ExportInfo, ImportInfo, extract_exports, extract_imports, extract_rust_use};
 use languages::language_for_extension;
 use relationships::{RelationshipInfo, extract_relationships};
-use symbols::extract_symbols;
+use symbols::{extract_impl_methods, extract_rust_symbols, extract_symbols};
 
 // Thread-local Parser instances — one per rayon worker thread, zero lock contention.
 // Each Parser is initialised once per thread with the appropriate grammar.
@@ -92,23 +92,27 @@ pub struct ParseResult {
 pub fn parse_file(path: &Path, source: &[u8]) -> Result<ParseResult> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
-    // "rs" arm: parse with a fresh parser and return an empty placeholder result.
-    // Plan 02 will fill in the actual symbol/use extraction for Rust files.
+    // "rs" arm: parse with a fresh parser and extract Rust symbols + use declarations.
     if ext == "rs" {
         let language = language_for_extension("rs").expect("rs language is always Some");
         let mut parser = Parser::new();
         parser
             .set_language(&language)
             .with_context(|| "failed to set tree-sitter language for extension \"rs\"")?;
-        let _tree = parser
+        let tree = parser
             .parse(source, None)
             .ok_or_else(|| anyhow!("tree-sitter returned None for {:?}", path))?;
+        let top_level = extract_rust_symbols(&tree, source, &language);
+        let impl_methods = extract_impl_methods(&tree, source);
+        let rust_uses = extract_rust_use(&tree, source);
+        let mut all_symbols = top_level;
+        all_symbols.extend(impl_methods);
         return Ok(ParseResult {
-            symbols: Vec::new(),
+            symbols: all_symbols,
             imports: Vec::new(),
             exports: Vec::new(),
             relationships: Vec::new(),
-            rust_uses: Vec::new(),
+            rust_uses,
         });
     }
 
@@ -159,19 +163,23 @@ pub fn parse_file_parallel(path: &Path, source: &[u8]) -> Result<ParseResult> {
 
     let is_tsx = matches!(ext, "tsx" | "jsx");
 
-    // "rs" arm: parse with PARSER_RS and return an empty placeholder result.
-    // Plan 02 will fill in the actual symbol/use extraction for Rust files.
+    // "rs" arm: parse with PARSER_RS and extract Rust symbols + use declarations.
     if ext == "rs" {
+        let language = language_for_extension("rs").expect("rs language is always Some");
         let tree = PARSER_RS
             .with(|p| p.borrow_mut().parse(source, None))
             .ok_or_else(|| anyhow!("tree-sitter returned None for {:?}", path))?;
-        let _ = tree; // tree is available; Plan 02 will use it
+        let top_level = extract_rust_symbols(&tree, source, &language);
+        let impl_methods = extract_impl_methods(&tree, source);
+        let rust_uses = extract_rust_use(&tree, source);
+        let mut all_symbols = top_level;
+        all_symbols.extend(impl_methods);
         return Ok(ParseResult {
-            symbols: Vec::new(),
+            symbols: all_symbols,
             imports: Vec::new(),
             exports: Vec::new(),
             relationships: Vec::new(),
-            rust_uses: Vec::new(),
+            rust_uses,
         });
     }
 

@@ -503,6 +503,42 @@ pub fn extract_imports(
 // Export extraction
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Rust use declaration extraction
+// ---------------------------------------------------------------------------
+
+/// Extract all Rust `use` and `pub use` declarations from a parsed syntax tree.
+///
+/// Returns a `Vec<RustUseInfo>` with the raw use path string and `is_pub_use` flag.
+/// Phase 8 stores raw source text; Phase 9 handles use-tree expansion.
+pub fn extract_rust_use(tree: &Tree, source: &[u8]) -> Vec<crate::parser::RustUseInfo> {
+    let mut results = Vec::new();
+    let root = tree.root_node();
+
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.kind() != "use_declaration" {
+            continue;
+        }
+
+        // Check for pub visibility modifier
+        let is_pub_use = {
+            let mut c = child.walk();
+            child.children(&mut c).any(|n| n.kind() == "visibility_modifier")
+        };
+
+        // Extract the use path from the "argument" field
+        let path = match child.child_by_field_name("argument") {
+            Some(arg_node) => node_text(arg_node, source).to_owned(),
+            None => continue,
+        };
+
+        results.push(crate::parser::RustUseInfo { path, is_pub_use });
+    }
+
+    results
+}
+
 /// Extract all exports from a parsed syntax tree.
 ///
 /// `is_tsx` must be `true` for `.tsx` and `.jsx` files — used to select the correct

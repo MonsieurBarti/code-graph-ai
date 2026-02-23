@@ -5,6 +5,23 @@ use tree_sitter::{Language, Node, Query, QueryCursor, StreamingIterator, Tree};
 use crate::graph::node::{SymbolInfo, SymbolKind, SymbolVisibility};
 
 // ---------------------------------------------------------------------------
+// Rust query string
+// ---------------------------------------------------------------------------
+
+/// Tree-sitter S-expression query for Rust (`.rs`) top-level items.
+/// impl blocks are NOT captured here — they are walked directly via `extract_impl_methods`.
+const SYMBOL_QUERY_RS: &str = r#"
+    (function_item name: (identifier) @name) @symbol
+    (struct_item name: (type_identifier) @name) @symbol
+    (enum_item name: (type_identifier) @name) @symbol
+    (trait_item name: (type_identifier) @name) @symbol
+    (type_item name: (type_identifier) @name) @symbol
+    (const_item name: (identifier) @name) @symbol
+    (static_item name: (identifier) @name) @symbol
+    (macro_definition name: (identifier) @name) @symbol
+"#;
+
+// ---------------------------------------------------------------------------
 // Query strings
 // ---------------------------------------------------------------------------
 
@@ -136,6 +153,7 @@ const SYMBOL_QUERY_JS: &str = r#"
 static TS_QUERY: OnceLock<Query> = OnceLock::new();
 static TSX_QUERY: OnceLock<Query> = OnceLock::new();
 static JS_QUERY: OnceLock<Query> = OnceLock::new();
+static RS_SYMBOL_QUERY: OnceLock<Query> = OnceLock::new();
 
 fn ts_query(language: &Language) -> &'static Query {
     TS_QUERY.get_or_init(|| Query::new(language, SYMBOL_QUERY_TS).expect("invalid TS symbol query"))
@@ -148,6 +166,11 @@ fn tsx_query(language: &Language) -> &'static Query {
 
 fn js_query(language: &Language) -> &'static Query {
     JS_QUERY.get_or_init(|| Query::new(language, SYMBOL_QUERY_JS).expect("invalid JS symbol query"))
+}
+
+fn rs_symbol_query(language: &Language) -> &'static Query {
+    RS_SYMBOL_QUERY
+        .get_or_init(|| Query::new(language, SYMBOL_QUERY_RS).expect("invalid RS symbol query"))
 }
 
 // ---------------------------------------------------------------------------
@@ -587,6 +610,280 @@ fn find_declaration_node<'a>(node: Node<'a>, target_kind: &str) -> Option<Node<'
         }
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// Rust-specific helpers
+// ---------------------------------------------------------------------------
+
+/// Extract visibility from a Rust item node.
+///
+/// Looks for a `visibility_modifier` child:
+/// - `"pub"` alone → `Pub`
+/// - `"pub(..."` (any variant incl. pub(crate), pub(super), pub(in ...)) → `PubCrate`
+/// - No modifier → `Private`
+fn extract_visibility(node: Node, source: &[u8]) -> SymbolVisibility {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "visibility_modifier" {
+            let text = node_text(child, source);
+            if text == "pub" {
+                return SymbolVisibility::Pub;
+            } else if text.starts_with("pub(") {
+                return SymbolVisibility::PubCrate;
+            }
+            // Any other visibility_modifier falls through to Private
+        }
+    }
+    SymbolVisibility::Private
+}
+
+/// Extract a simple type name from an impl block's "type" field node.
+///
+/// Handles:
+/// - `type_identifier` | `scoped_type_identifier` → text as-is
+/// - `generic_type` → read the "type" field child's text (strips generics)
+/// - Fallback → text as-is
+fn extract_simple_type_name<'a>(type_node: Node<'a>, source: &'a [u8]) -> &'a str {
+    match type_node.kind() {
+        "type_identifier" | "scoped_type_identifier" => node_text(type_node, source),
+        "generic_type" => {
+            // `HashMap<K, V>` → get the "type" field which is `HashMap`
+            if let Some(name_node) = type_node.child_by_field_name("type") {
+                node_text(name_node, source)
+            } else {
+                node_text(type_node, source)
+            }
+        }
+        _ => node_text(type_node, source),
+    }
+}
+
+/// Extract trait methods from a `trait_item` node as child `SymbolInfo` entries.
+///
+/// Handles both:
+/// - `function_signature_item`: required methods (no body)
+/// - `function_item`: default methods (has body)
+fn extract_trait_methods(
+    trait_node: Node,
+    trait_name: &str,
+    source: &[u8],
+) -> Vec<SymbolInfo> {
+    let mut methods = Vec::new();
+
+    // Find the declaration_list child
+    let decl_list = {
+        let mut found = None;
+        let mut cursor = trait_node.walk();
+        for child in trait_node.children(&mut cursor) {
+            if child.kind() == "declaration_list" {
+                found = Some(child);
+                break;
+            }
+        }
+        match found {
+            Some(n) => n,
+            None => return methods,
+        }
+    };
+
+    let mut cursor = decl_list.walk();
+    for child in decl_list.children(&mut cursor) {
+        match child.kind() {
+            "function_signature_item" | "function_item" => {
+                if let Some(name_node) = child.child_by_field_name("name") {
+                    let method_name = node_text(name_node, source);
+                    let qualified_name = format!("{}::{}", trait_name, method_name);
+                    let pos = name_node.start_position();
+                    let visibility = extract_visibility(child, source);
+                    methods.push(SymbolInfo {
+                        name: qualified_name,
+                        kind: SymbolKind::ImplMethod,
+                        line: pos.row + 1,
+                        col: pos.column,
+                        is_exported: false,
+                        is_default: false,
+                        visibility,
+                        trait_impl: None,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    methods
+}
+
+// ---------------------------------------------------------------------------
+// Rust public API
+// ---------------------------------------------------------------------------
+
+/// Extract top-level Rust symbols from a parsed syntax tree.
+///
+/// Returns a `Vec` of `(parent_symbol, child_symbols)` tuples.
+/// For trait items, child_symbols contains the trait's methods.
+/// For all other items, child_symbols is empty.
+pub fn extract_rust_symbols(
+    tree: &Tree,
+    source: &[u8],
+    language: &Language,
+) -> Vec<(SymbolInfo, Vec<SymbolInfo>)> {
+    let query = rs_symbol_query(language);
+
+    let name_idx = query
+        .capture_index_for_name("name")
+        .expect("RS query must have @name capture");
+    let symbol_idx = query
+        .capture_index_for_name("symbol")
+        .expect("RS query must have @symbol capture");
+
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(query, tree.root_node(), source);
+
+    // De-duplicate by (name, row) — same pattern as TS/JS
+    let mut seen: std::collections::HashSet<(String, usize)> = std::collections::HashSet::new();
+    let mut results: Vec<(SymbolInfo, Vec<SymbolInfo>)> = Vec::new();
+
+    while let Some(m) = matches.next() {
+        let mut symbol_node: Option<Node> = None;
+        let mut name_node: Option<Node> = None;
+
+        for capture in m.captures {
+            if capture.index == symbol_idx {
+                symbol_node = Some(capture.node);
+            } else if capture.index == name_idx {
+                name_node = Some(capture.node);
+            }
+        }
+
+        let (sym_node, name_node) = match (symbol_node, name_node) {
+            (Some(s), Some(n)) => (s, n),
+            _ => continue,
+        };
+
+        let name = node_text(name_node, source).to_owned();
+        let pos = name_node.start_position();
+        let key = (name.clone(), pos.row);
+
+        if !seen.insert(key) {
+            continue;
+        }
+
+        let kind = match sym_node.kind() {
+            "function_item" => SymbolKind::Function,
+            "struct_item" => SymbolKind::Struct,
+            "enum_item" => SymbolKind::Enum,
+            "trait_item" => SymbolKind::Trait,
+            "type_item" => SymbolKind::TypeAlias,
+            "const_item" => SymbolKind::Const,
+            "static_item" => SymbolKind::Static,
+            "macro_definition" => SymbolKind::Macro,
+            _ => continue,
+        };
+
+        let visibility = extract_visibility(sym_node, source);
+
+        let info = SymbolInfo {
+            name: name.clone(),
+            kind: kind.clone(),
+            line: pos.row + 1,
+            col: pos.column,
+            is_exported: false,
+            is_default: false,
+            visibility,
+            trait_impl: None,
+        };
+
+        // For trait items: extract child methods from the declaration_list.
+        let children = if kind == SymbolKind::Trait {
+            extract_trait_methods(sym_node, &name, source)
+        } else {
+            vec![]
+        };
+
+        results.push((info, children));
+    }
+
+    results
+}
+
+/// Extract all impl block methods from a Rust syntax tree.
+///
+/// impl blocks are NOT added as graph nodes (per CONTEXT.md: impl blocks are containers only).
+/// Each method is returned as a standalone `(SymbolInfo, vec![])` with qualified name
+/// `TypeName::method_name`.
+pub fn extract_impl_methods(tree: &Tree, source: &[u8]) -> Vec<(SymbolInfo, Vec<SymbolInfo>)> {
+    let mut results = Vec::new();
+    let root = tree.root_node();
+
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.kind() != "impl_item" {
+            continue;
+        }
+
+        // Extract the type name from the "type" field
+        let type_name = match child.child_by_field_name("type") {
+            Some(type_node) => extract_simple_type_name(type_node, source).to_owned(),
+            None => continue,
+        };
+
+        // Check if this is a trait impl: look for "trait" field
+        let trait_name: Option<String> = child
+            .child_by_field_name("trait")
+            .map(|trait_node| extract_simple_type_name(trait_node, source).to_owned());
+
+        // Find the declaration_list body
+        let decl_list = {
+            let mut found = None;
+            let mut c = child.walk();
+            for grandchild in child.children(&mut c) {
+                if grandchild.kind() == "declaration_list" {
+                    found = Some(grandchild);
+                    break;
+                }
+            }
+            match found {
+                Some(n) => n,
+                None => continue,
+            }
+        };
+
+        // Walk declaration_list for function_item nodes
+        let mut decl_cursor = decl_list.walk();
+        for method_node in decl_list.children(&mut decl_cursor) {
+            if method_node.kind() != "function_item" {
+                continue;
+            }
+
+            let method_name = match method_node.child_by_field_name("name") {
+                Some(n) => node_text(n, source).to_owned(),
+                None => continue,
+            };
+
+            let name_node = method_node.child_by_field_name("name").unwrap();
+            let pos = name_node.start_position();
+            let qualified_name = format!("{}::{}", type_name, method_name);
+            let visibility = extract_visibility(method_node, source);
+
+            results.push((
+                SymbolInfo {
+                    name: qualified_name,
+                    kind: SymbolKind::ImplMethod,
+                    line: pos.row + 1,
+                    col: pos.column,
+                    is_exported: false,
+                    is_default: false,
+                    visibility,
+                    trait_impl: trait_name.clone(),
+                },
+                vec![],
+            ));
+        }
+    }
+
+    results
 }
 
 // ---------------------------------------------------------------------------
