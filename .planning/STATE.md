@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Phase: 5 of 6 (Watch Mode Persistence)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: Executing
-Last activity: 2026-02-23 — Completed 05-01-PLAN.md (graph serialization + cache persistence layer)
+Last activity: 2026-02-23 — Completed 05-02-PLAN.md (file watcher + incremental re-index pipeline)
 
-Progress: [██████████] 60%
+Progress: [███████████] 65%
 
 ## Performance Metrics
 
@@ -49,6 +49,7 @@ Progress: [██████████] 60%
 | Phase 04 P01 | 3 | 2 tasks | 5 files |
 | Phase 04 P02 | 23 | 2 tasks | 4 files |
 | Phase 05 P01 | 3 | 2 tasks | 7 files |
+| Phase 05 P02 | 4 | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -112,6 +113,11 @@ Recent decisions affecting current work:
 - [05-01]: CACHE_VERSION = 1 constant — load_cache returns None on version mismatch, triggers full rebuild (safe degradation)
 - [05-01]: remove_file_from_graph collects Contains/ChildOf edges then removes in second pass — collect-then-mutate avoids borrow checker issues
 - [05-01]: Rust 2024 edition: explicit ref binding in if-let patterns removed — implicit borrowing used instead
+- [05-02]: notify 8 + notify-debouncer-mini 0.7 for 75ms debounce — sync mpsc + spawn_blocking bridge to tokio async channel
+- [05-02]: DebounceEventResult Err is single notify::Error (not Vec) — plan template iterated incorrectly, fixed to direct eprintln
+- [05-02]: classify_event uses path.exists() to distinguish Modified vs Deleted — debouncer-mini does not provide create/modify distinction
+- [05-02]: is_external_package/extract_package_name duplicated from resolver::mod.rs (private there) — 15 lines, stable, no visibility change needed
+- [05-02]: handle_file_event returns false for ConfigChanged — caller triggers full rebuild via build_graph
 
 ### Pending Todos
 
@@ -126,5 +132,6 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 05-01-PLAN.md
+Stopped at: Completed 05-02-PLAN.md
+Resume file: .planning/phases/05-watch-mode-persistence/05-02-SUMMARY.md
 Resume file: .planning/phases/05-watch-mode-persistence/05-01-SUMMARY.md

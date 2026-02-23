@@ -91,7 +91,7 @@ Plans:
   1. Saving a file in an indexed project triggers an automatic incremental re-index with no user action
   2. A single-file change is fully re-indexed and the graph updated in under 100ms
   3. After stopping and restarting the daemon, the graph is available immediately (cold start reads persisted graph, skips parsing unchanged files)
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 Plans:
 - [ ] 05-01-PLAN.md — Serde derives on graph types, bincode cache envelope, remove_file helper (PERF-04)
 - [ ] 05-02-PLAN.md — File watcher with notify-debouncer-mini, incremental re-index pipeline (INTG-04, INTG-05)
@@ -119,5 +119,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 2. Import Resolution & Graph Completion | 4/4 | Complete | 2026-02-22 |
 | 3. Query Engine & CLI | 3/3 | Complete   | 2026-02-23 |
 | 4. MCP Integration | 2/2 | Complete   | 2026-02-23 |
-| 5. Watch Mode & Persistence | 1/3 | In Progress|  |
+| 5. Watch Mode & Persistence | 2/3 | In Progress|  |
 | 6. Performance & Distribution | 0/TBD | Not started | - |
