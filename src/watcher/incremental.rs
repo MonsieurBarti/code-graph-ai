@@ -15,7 +15,7 @@ use super::event::WatchEvent;
 
 /// Handle a single watch event by performing an incremental graph update.
 ///
-/// For Modified/Created: removes old file entry, re-parses, re-adds to graph,
+/// For Modified: removes old file entry, re-parses, re-adds to graph,
 /// re-resolves the file's imports, and checks if unresolved imports in other files
 /// now resolve to this file.
 ///
@@ -26,7 +26,7 @@ use super::event::WatchEvent;
 /// Returns `true` if the graph was modified, `false` if ConfigChanged (caller must full-rebuild).
 pub fn handle_file_event(graph: &mut CodeGraph, event: &WatchEvent, project_root: &Path) -> bool {
     match event {
-        WatchEvent::Modified(path) | WatchEvent::Created(path) => {
+        WatchEvent::Modified(path) => {
             handle_modified(graph, path, project_root);
             true
         }

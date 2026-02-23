@@ -5,9 +5,6 @@ use std::path::PathBuf;
 pub enum WatchEvent {
     /// A source file was modified (content changed).
     Modified(PathBuf),
-    /// A new source file was created.
-    #[allow(dead_code)]
-    Created(PathBuf),
     /// A source file was deleted.
     Deleted(PathBuf),
     /// A config file changed (tsconfig.json, package.json) — triggers full re-index.
