@@ -22,6 +22,7 @@ use config::CodeGraphConfig;
 use graph::{CodeGraph, node::SymbolKind};
 use output::{IndexStats, print_summary};
 use parser::ParseResult;
+use parser::imports::ImportKind;
 use walker::walk_project;
 
 /// Build the code graph for a project at `path` by walking, parsing, and resolving all files.
@@ -106,6 +107,9 @@ async fn main() -> Result<()> {
             // Import/export counts (accumulated across all files).
             let mut total_imports: usize = 0;
             let mut total_exports: usize = 0;
+            let mut esm_imports: usize = 0;
+            let mut cjs_imports: usize = 0;
+            let mut dynamic_imports: usize = 0;
 
             // Parse results map — retained for the resolution step.
             let mut parse_results: HashMap<PathBuf, ParseResult> = HashMap::new();
@@ -146,6 +150,13 @@ async fn main() -> Result<()> {
                 // Accumulate import/export counts.
                 total_imports += result.imports.len();
                 total_exports += result.exports.len();
+                for imp in &result.imports {
+                    match imp.kind {
+                        ImportKind::Esm => esm_imports += 1,
+                        ImportKind::Cjs => cjs_imports += 1,
+                        ImportKind::DynamicImport => dynamic_imports += 1,
+                    }
+                }
 
                 if verbose {
                     eprintln!(
@@ -194,6 +205,9 @@ async fn main() -> Result<()> {
                 methods: *breakdown.get(&SymbolKind::Method).unwrap_or(&0),
                 properties: *breakdown.get(&SymbolKind::Property).unwrap_or(&0),
                 imports: total_imports,
+                esm_imports,
+                cjs_imports,
+                dynamic_imports,
                 exports: total_exports,
                 skipped,
                 elapsed_secs,
