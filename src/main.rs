@@ -2,6 +2,7 @@ mod cache;
 mod cli;
 mod config;
 mod graph;
+mod language;
 mod mcp;
 mod output;
 mod parser;
