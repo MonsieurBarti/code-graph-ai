@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Phase: 6 of 6 (Performance & Distribution)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: Executing
-Last activity: 2026-02-23 — Completed 06-01-PLAN.md (rayon parallel parsing, thread_local parsers, ParseResult memory opt)
+Last activity: 2026-02-23 — Completed 06-02-PLAN.md (crates.io metadata, [[bin]] table, README install instructions)
 
-Progress: [█████████████] 75%
+Progress: [██████████████] 80%
 
 ## Performance Metrics
 
@@ -52,6 +52,7 @@ Progress: [█████████████] 75%
 | Phase 05 P02 | 4 | 2 tasks | 5 files |
 | Phase 05 P03 | 5 | 2 tasks | 3 files |
 | Phase 06 P01 | 4 | 2 tasks | 5 files |
+| Phase 06 P02 | 3 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -129,6 +130,8 @@ Recent decisions affecting current work:
 - [06-01]: Tree field removed from ParseResult — ASTs not retained after extraction to keep RSS under 100 MB budget
 - [06-01]: parse_file() preserved for single-file incremental watcher; parse_file_parallel() added for bulk par_iter paths
 - [06-01]: skipped count in Index command = files.len() - raw_results.len() (filter_map silently drops unreadable/unparseable files)
+- [Phase 06]: code-graph-cli is the crate name on crates.io; code-graph is the binary name users run after install
+- [Phase 06]: Exclude list in Cargo.toml prevents .planning/, .github/, .claude/, .devcontainer/, .entire/ from being published to crates.io
 
 ### Pending Todos
 
@@ -143,5 +146,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 06-01-PLAN.md
+Stopped at: Completed 06-02-PLAN.md
 Resume file: .planning/phases/06-performance-distribution/06-01-SUMMARY.md
