@@ -25,7 +25,7 @@ use walker::walk_project;
 ///
 /// This is the shared pipeline used by all query subcommands. The Index command has its own
 /// inline copy so it can also compute detailed stats without a second pass.
-fn build_graph(path: &PathBuf, verbose: bool) -> Result<CodeGraph> {
+pub(crate) fn build_graph(path: &PathBuf, verbose: bool) -> Result<CodeGraph> {
     let config = CodeGraphConfig::load(path);
     let files = walk_project(path, &config, verbose)?;
 
@@ -375,8 +375,10 @@ async fn main() -> Result<()> {
         }
 
         Commands::Mcp { path } => {
-            println!("MCP server not yet implemented");
-            let _ = path;
+            let project_root = path.unwrap_or_else(|| {
+                std::env::current_dir().expect("cannot determine current directory")
+            });
+            mcp::run(project_root).await?;
         }
     }
 
