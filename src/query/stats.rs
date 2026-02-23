@@ -1,4 +1,8 @@
-use crate::graph::{CodeGraph, node::{GraphNode, SymbolKind}, edge::EdgeKind};
+use crate::graph::{
+    CodeGraph,
+    edge::EdgeKind,
+    node::{GraphNode, SymbolKind},
+};
 
 /// Aggregated project statistics derived from the code graph.
 #[derive(Debug)]

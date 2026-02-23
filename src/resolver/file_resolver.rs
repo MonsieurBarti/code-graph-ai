@@ -64,17 +64,11 @@ pub fn build_resolver(
 ///
 /// The resolver uses `from_file`'s parent directory as the resolution base, which matches
 /// how Node.js and TypeScript resolve relative imports.
-pub fn resolve_import(
-    resolver: &Resolver,
-    from_file: &Path,
-    specifier: &str,
-) -> ResolutionOutcome {
+pub fn resolve_import(resolver: &Resolver, from_file: &Path, specifier: &str) -> ResolutionOutcome {
     let dir = match from_file.parent() {
         Some(d) => d,
         None => {
-            return ResolutionOutcome::Unresolved(
-                "from_file has no parent directory".to_owned(),
-            );
+            return ResolutionOutcome::Unresolved("from_file has no parent directory".to_owned());
         }
     };
 
@@ -90,9 +84,7 @@ pub fn resolve_import(
 /// Convert a workspace package map into the alias format expected by `oxc_resolver`.
 ///
 /// Each entry maps `package_name` → `[AliasValue::Path(source_dir)]`.
-pub fn workspace_map_to_aliases(
-    map: &HashMap<String, PathBuf>,
-) -> Vec<(String, Vec<AliasValue>)> {
+pub fn workspace_map_to_aliases(map: &HashMap<String, PathBuf>) -> Vec<(String, Vec<AliasValue>)> {
     map.iter()
         .map(|(name, path)| {
             (
@@ -131,7 +123,10 @@ mod tests {
     #[test]
     fn test_workspace_map_to_aliases_single_entry() {
         let mut map = HashMap::new();
-        map.insert("@myorg/utils".to_owned(), PathBuf::from("/repo/packages/utils/src"));
+        map.insert(
+            "@myorg/utils".to_owned(),
+            PathBuf::from("/repo/packages/utils/src"),
+        );
         let aliases = workspace_map_to_aliases(&map);
         assert_eq!(aliases.len(), 1);
         let (name, values) = &aliases[0];

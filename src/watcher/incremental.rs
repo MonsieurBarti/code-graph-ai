@@ -7,8 +7,8 @@ use crate::graph::edge::EdgeKind;
 use crate::graph::node::GraphNode;
 use crate::parser;
 use crate::resolver::{
-    build_resolver, discover_workspace_packages, workspace_map_to_aliases, resolve_import,
-    ResolutionOutcome,
+    ResolutionOutcome, build_resolver, discover_workspace_packages, resolve_import,
+    workspace_map_to_aliases,
 };
 
 use super::event::WatchEvent;
@@ -24,11 +24,7 @@ use super::event::WatchEvent;
 /// For ConfigChanged: triggers a full rebuild (caller handles this by calling build_graph).
 ///
 /// Returns `true` if the graph was modified, `false` if ConfigChanged (caller must full-rebuild).
-pub fn handle_file_event(
-    graph: &mut CodeGraph,
-    event: &WatchEvent,
-    project_root: &Path,
-) -> bool {
+pub fn handle_file_event(graph: &mut CodeGraph, event: &WatchEvent, project_root: &Path) -> bool {
     match event {
         WatchEvent::Modified(path) | WatchEvent::Created(path) => {
             handle_modified(graph, path, project_root);
@@ -163,10 +159,16 @@ fn wire_relationships_for_file(
                     None => continue,
                 };
 
-                let from_candidates =
-                    graph.symbol_index.get(from_name).cloned().unwrap_or_default();
-                let to_candidates =
-                    graph.symbol_index.get(&rel.to_name).cloned().unwrap_or_default();
+                let from_candidates = graph
+                    .symbol_index
+                    .get(from_name)
+                    .cloned()
+                    .unwrap_or_default();
+                let to_candidates = graph
+                    .symbol_index
+                    .get(&rel.to_name)
+                    .cloned()
+                    .unwrap_or_default();
 
                 if from_candidates.is_empty() || to_candidates.is_empty() {
                     continue;
@@ -222,11 +224,7 @@ fn wire_relationships_for_file(
 /// After adding a new/modified file, check if any existing UnresolvedImport nodes
 /// in the graph might now resolve to this file. If so, remove the unresolved node
 /// and add a proper ResolvedImport edge.
-fn fix_unresolved_pointing_to(
-    graph: &mut CodeGraph,
-    new_file_path: &Path,
-    project_root: &Path,
-) {
+fn fix_unresolved_pointing_to(graph: &mut CodeGraph, new_file_path: &Path, project_root: &Path) {
     // Collect unresolved import nodes and their importers
     let unresolved: Vec<(
         petgraph::stable_graph::NodeIndex,
@@ -237,17 +235,18 @@ fn fix_unresolved_pointing_to(
         .node_indices()
         .filter_map(|idx| {
             if let GraphNode::UnresolvedImport { specifier, reason } = &graph.graph[idx]
-                && reason != "builtin" {
-                    // Find the importer (the node with an edge to this unresolved node)
-                    let importer = graph
-                        .graph
-                        .edges_directed(idx, petgraph::Direction::Incoming)
-                        .next()
-                        .map(|e| e.source());
-                    if let Some(importer_idx) = importer {
-                        return Some((idx, importer_idx, specifier.clone()));
-                    }
+                && reason != "builtin"
+            {
+                // Find the importer (the node with an edge to this unresolved node)
+                let importer = graph
+                    .graph
+                    .edges_directed(idx, petgraph::Direction::Incoming)
+                    .next()
+                    .map(|e| e.source());
+                if let Some(importer_idx) = importer {
+                    return Some((idx, importer_idx, specifier.clone()));
                 }
+            }
             None
         })
         .collect();
@@ -275,11 +274,12 @@ fn fix_unresolved_pointing_to(
 
         let outcome = resolve_import(&resolver, &importer_path, &specifier);
         if let ResolutionOutcome::Resolved(resolved_path) = outcome
-            && resolved_path == new_file_path {
-                // This unresolved import now resolves to the new file!
-                graph.graph.remove_node(unresolved_idx);
-                graph.add_resolved_import(importer_idx, new_file_idx, &specifier);
-            }
+            && resolved_path == new_file_path
+        {
+            // This unresolved import now resolves to the new file!
+            graph.graph.remove_node(unresolved_idx);
+            graph.add_resolved_import(importer_idx, new_file_idx, &specifier);
+        }
     }
 }
 

@@ -11,8 +11,8 @@ use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use tokio::sync::RwLock;
 
 use super::params::{
-    DetectCircularParams, FindReferencesParams, FindSymbolParams, GetContextParams, GetImpactParams,
-    GetStatsParams,
+    DetectCircularParams, FindReferencesParams, FindSymbolParams, GetContextParams,
+    GetImpactParams, GetStatsParams,
 };
 use crate::graph::CodeGraph;
 
@@ -74,15 +74,14 @@ impl CodeGraphServer {
         let graph = tokio::task::spawn_blocking(move || -> Result<CodeGraph, String> {
             if let Some(envelope) = crate::cache::load_cache(&path_clone) {
                 // Apply staleness diff — re-parse only changed files
-                let graph = apply_staleness_diff(envelope, &path_clone)
-                    .map_err(|e| e.to_string())?;
+                let graph =
+                    apply_staleness_diff(envelope, &path_clone).map_err(|e| e.to_string())?;
                 // Save updated cache with fresh mtimes
                 let _ = crate::cache::save_cache(&path_clone, &graph);
                 Ok(graph)
             } else {
                 // No cache — full build
-                let graph = crate::build_graph(&path_clone, false)
-                    .map_err(|e| e.to_string())?;
+                let graph = crate::build_graph(&path_clone, false).map_err(|e| e.to_string())?;
                 // Save to disk cache for future cold starts
                 let _ = crate::cache::save_cache(&path_clone, &graph);
                 Ok(graph)
@@ -138,15 +137,16 @@ impl CodeGraphServer {
                                 // Full rebuild — all CPU work happens in spawn_blocking
                                 // with NO lock held. Write lock acquired only to swap result.
                                 let root_clone = root.clone();
-                                if let Some(new_graph) =
-                                    tokio::task::spawn_blocking(move || -> anyhow::Result<CodeGraph> {
+                                if let Some(new_graph) = tokio::task::spawn_blocking(
+                                    move || -> anyhow::Result<CodeGraph> {
                                         let graph = crate::build_graph(&root_clone, false)?;
                                         let _ = crate::cache::save_cache(&root_clone, &graph);
                                         Ok(graph)
-                                    })
-                                    .await
-                                    .ok()
-                                    .and_then(|r| r.ok())
+                                    },
+                                )
+                                .await
+                                .ok()
+                                .and_then(|r| r.ok())
                                 {
                                     // Write lock held ONLY for the insert (nanoseconds)
                                     let mut cache = graph_cache.write().await;
@@ -226,8 +226,7 @@ fn apply_staleness_diff(
     // Walk current files
     let config = crate::config::CodeGraphConfig::load(project_root);
     let current_files = crate::walker::walk_project(project_root, &config, false)?;
-    let current_set: std::collections::HashSet<PathBuf> =
-        current_files.iter().cloned().collect();
+    let current_set: std::collections::HashSet<PathBuf> = current_files.iter().cloned().collect();
 
     // Find changed and new files
     let mut files_to_reparse: Vec<PathBuf> = Vec::new();
@@ -265,8 +264,7 @@ fn apply_staleness_diff(
 
     // Threshold: if >= 10% changed, do full rebuild (faster than scoped re-resolve for many changes)
     if total_changed * 10 >= total_current {
-        return crate::build_graph(project_root, false)
-            .map_err(|e| anyhow::anyhow!(e));
+        return crate::build_graph(project_root, false).map_err(|e| anyhow::anyhow!(e));
     }
 
     // Scoped approach: remove deleted + changed files, re-add changed files
@@ -365,7 +363,9 @@ fn not_found_msg(symbol: &str, suggestions: &[String]) -> String {
 
 #[tool_router]
 impl CodeGraphServer {
-    #[tool(description = "Find symbol definitions by name or regex. Returns file:line locations and symbol kind.")]
+    #[tool(
+        description = "Find symbol definitions by name or regex. Returns file:line locations and symbol kind."
+    )]
     async fn find_symbol(
         &self,
         Parameters(p): Parameters<FindSymbolParams>,
@@ -414,7 +414,9 @@ impl CodeGraphServer {
         Ok(output)
     }
 
-    #[tool(description = "Find all files and call sites that reference a symbol. Shows import and call edges.")]
+    #[tool(
+        description = "Find all files and call sites that reference a symbol. Shows import and call edges."
+    )]
     async fn find_references(
         &self,
         Parameters(p): Parameters<FindReferencesParams>,
@@ -429,8 +431,10 @@ impl CodeGraphServer {
             return Err(not_found_msg(&p.symbol, &suggestions));
         }
 
-        let all_indices: Vec<petgraph::stable_graph::NodeIndex> =
-            matches.iter().flat_map(|(_, indices)| indices.iter().copied()).collect();
+        let all_indices: Vec<petgraph::stable_graph::NodeIndex> = matches
+            .iter()
+            .flat_map(|(_, indices)| indices.iter().copied())
+            .collect();
 
         let results = crate::query::refs::find_refs(&graph, &p.symbol, &all_indices, &root);
 
@@ -454,7 +458,9 @@ impl CodeGraphServer {
         Ok(output)
     }
 
-    #[tool(description = "Get the blast radius of changing a symbol. Returns transitive dependent files.")]
+    #[tool(
+        description = "Get the blast radius of changing a symbol. Returns transitive dependent files."
+    )]
     async fn get_impact(
         &self,
         Parameters(p): Parameters<GetImpactParams>,
@@ -469,8 +475,10 @@ impl CodeGraphServer {
             return Err(not_found_msg(&p.symbol, &suggestions));
         }
 
-        let all_indices: Vec<petgraph::stable_graph::NodeIndex> =
-            matches.iter().flat_map(|(_, indices)| indices.iter().copied()).collect();
+        let all_indices: Vec<petgraph::stable_graph::NodeIndex> = matches
+            .iter()
+            .flat_map(|(_, indices)| indices.iter().copied())
+            .collect();
 
         let results = crate::query::impact::blast_radius(&graph, &all_indices, &root);
 
@@ -494,7 +502,9 @@ impl CodeGraphServer {
         Ok(output)
     }
 
-    #[tool(description = "Detect circular dependency cycles in the import graph. Returns file cycles.")]
+    #[tool(
+        description = "Detect circular dependency cycles in the import graph. Returns file cycles."
+    )]
     async fn detect_circular(
         &self,
         Parameters(p): Parameters<DetectCircularParams>,
@@ -502,10 +512,14 @@ impl CodeGraphServer {
         let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
 
         let cycles = crate::query::circular::find_circular(&graph, &root);
-        Ok(crate::query::output::format_circular_to_string(&cycles, &root))
+        Ok(crate::query::output::format_circular_to_string(
+            &cycles, &root,
+        ))
     }
 
-    #[tool(description = "360-degree view of a symbol: definition, references, callers, callees, type hierarchy.")]
+    #[tool(
+        description = "360-degree view of a symbol: definition, references, callers, callees, type hierarchy."
+    )]
     async fn get_context(
         &self,
         Parameters(p): Parameters<GetContextParams>,
@@ -527,14 +541,15 @@ impl CodeGraphServer {
             })
             .collect();
 
-        Ok(crate::query::output::format_context_to_string(&contexts, &root))
+        Ok(crate::query::output::format_context_to_string(
+            &contexts, &root,
+        ))
     }
 
-    #[tool(description = "Project overview: file count, symbol breakdown by kind, import/resolution summary.")]
-    async fn get_stats(
-        &self,
-        Parameters(p): Parameters<GetStatsParams>,
-    ) -> Result<String, String> {
+    #[tool(
+        description = "Project overview: file count, symbol breakdown by kind, import/resolution summary."
+    )]
+    async fn get_stats(&self, Parameters(p): Parameters<GetStatsParams>) -> Result<String, String> {
         let (graph, _root) = self.resolve_graph(p.project_path.as_deref()).await?;
 
         let stats = crate::query::stats::project_stats(&graph);

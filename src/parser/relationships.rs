@@ -147,15 +147,12 @@ fn lang_group(language: &Language, is_tsx: bool) -> LangGroup {
 
 fn calls_query(language: &Language, is_tsx: bool) -> &'static Query {
     match lang_group(language, is_tsx) {
-        LangGroup::TypeScript => TS_CALLS_QUERY.get_or_init(|| {
-            Query::new(language, CALLS_QUERY).expect("invalid TS calls query")
-        }),
-        LangGroup::Tsx => TSX_CALLS_QUERY.get_or_init(|| {
-            Query::new(language, CALLS_QUERY).expect("invalid TSX calls query")
-        }),
-        LangGroup::JavaScript => JS_CALLS_QUERY.get_or_init(|| {
-            Query::new(language, CALLS_QUERY).expect("invalid JS calls query")
-        }),
+        LangGroup::TypeScript => TS_CALLS_QUERY
+            .get_or_init(|| Query::new(language, CALLS_QUERY).expect("invalid TS calls query")),
+        LangGroup::Tsx => TSX_CALLS_QUERY
+            .get_or_init(|| Query::new(language, CALLS_QUERY).expect("invalid TSX calls query")),
+        LangGroup::JavaScript => JS_CALLS_QUERY
+            .get_or_init(|| Query::new(language, CALLS_QUERY).expect("invalid JS calls query")),
     }
 }
 
@@ -236,17 +233,14 @@ pub fn extract_relationships(
     is_tsx: bool,
 ) -> Vec<RelationshipInfo> {
     let mut results: Vec<RelationshipInfo> = Vec::new();
-    let mut seen: std::collections::HashSet<(String, usize, String)> = std::collections::HashSet::new();
+    let mut seen: std::collections::HashSet<(String, usize, String)> =
+        std::collections::HashSet::new();
 
     // Helper to deduplicate and push
     macro_rules! push_rel {
         ($info:expr) => {{
             let info: RelationshipInfo = $info;
-            let key = (
-                info.to_name.clone(),
-                info.line,
-                format!("{:?}", info.kind),
-            );
+            let key = (info.to_name.clone(), info.line, format!("{:?}", info.kind));
             if seen.insert(key) {
                 results.push(info);
             }
@@ -426,13 +420,24 @@ mod tests {
         let (tree, lang) = parse_ts(src);
         let rels = extract_relationships(&tree, src.as_bytes(), &lang, false);
 
-        let calls: Vec<_> = rels.iter().filter(|r| r.kind == RelationshipKind::Calls).collect();
-        assert_eq!(calls.len(), 2, "expected 2 Calls relationships, got {}", calls.len());
+        let calls: Vec<_> = rels
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::Calls)
+            .collect();
+        assert_eq!(
+            calls.len(),
+            2,
+            "expected 2 Calls relationships, got {}",
+            calls.len()
+        );
 
         let names: Vec<&str> = calls.iter().map(|r| r.to_name.as_str()).collect();
         assert!(names.contains(&"foo"), "missing 'foo' call");
         assert!(names.contains(&"bar"), "missing 'bar' call");
-        assert!(calls.iter().all(|r| r.from_name.is_none()), "from_name should be None for context-free extraction");
+        assert!(
+            calls.iter().all(|r| r.from_name.is_none()),
+            "from_name should be None for context-free extraction"
+        );
     }
 
     // Test 2: Method call extraction
@@ -442,7 +447,10 @@ mod tests {
         let (tree, lang) = parse_ts(src);
         let rels = extract_relationships(&tree, src.as_bytes(), &lang, false);
 
-        let method_calls: Vec<_> = rels.iter().filter(|r| r.kind == RelationshipKind::MethodCall).collect();
+        let method_calls: Vec<_> = rels
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::MethodCall)
+            .collect();
         assert_eq!(method_calls.len(), 2, "expected 2 MethodCall relationships");
 
         let names: Vec<&str> = method_calls.iter().map(|r| r.to_name.as_str()).collect();
@@ -457,10 +465,17 @@ mod tests {
         let (tree, lang) = parse_ts(src);
         let rels = extract_relationships(&tree, src.as_bytes(), &lang, false);
 
-        let extends: Vec<_> = rels.iter().filter(|r| r.kind == RelationshipKind::Extends).collect();
+        let extends: Vec<_> = rels
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::Extends)
+            .collect();
         assert_eq!(extends.len(), 1, "expected 1 Extends relationship");
         let rel = &extends[0];
-        assert_eq!(rel.from_name.as_deref(), Some("Dog"), "from_name should be 'Dog'");
+        assert_eq!(
+            rel.from_name.as_deref(),
+            Some("Dog"),
+            "from_name should be 'Dog'"
+        );
         assert_eq!(rel.to_name, "Animal", "to_name should be 'Animal'");
     }
 
@@ -471,10 +486,17 @@ mod tests {
         let (tree, lang) = parse_ts(src);
         let rels = extract_relationships(&tree, src.as_bytes(), &lang, false);
 
-        let impls: Vec<_> = rels.iter().filter(|r| r.kind == RelationshipKind::Implements).collect();
+        let impls: Vec<_> = rels
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::Implements)
+            .collect();
         assert_eq!(impls.len(), 1, "expected 1 Implements relationship");
         let rel = &impls[0];
-        assert_eq!(rel.from_name.as_deref(), Some("UserService"), "from_name should be 'UserService'");
+        assert_eq!(
+            rel.from_name.as_deref(),
+            Some("UserService"),
+            "from_name should be 'UserService'"
+        );
         assert_eq!(rel.to_name, "IService", "to_name should be 'IService'");
     }
 
@@ -485,10 +507,21 @@ mod tests {
         let (tree, lang) = parse_ts(src);
         let rels = extract_relationships(&tree, src.as_bytes(), &lang, false);
 
-        let iface_extends: Vec<_> = rels.iter().filter(|r| r.kind == RelationshipKind::InterfaceExtends).collect();
-        assert_eq!(iface_extends.len(), 1, "expected 1 InterfaceExtends relationship");
+        let iface_extends: Vec<_> = rels
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::InterfaceExtends)
+            .collect();
+        assert_eq!(
+            iface_extends.len(),
+            1,
+            "expected 1 InterfaceExtends relationship"
+        );
         let rel = &iface_extends[0];
-        assert_eq!(rel.from_name.as_deref(), Some("Admin"), "from_name should be 'Admin'");
+        assert_eq!(
+            rel.from_name.as_deref(),
+            Some("Admin"),
+            "from_name should be 'Admin'"
+        );
         assert_eq!(rel.to_name, "User", "to_name should be 'User'");
     }
 
@@ -499,7 +532,10 @@ mod tests {
         let (tree, lang) = parse_ts(src);
         let rels = extract_relationships(&tree, src.as_bytes(), &lang, false);
 
-        let type_refs: Vec<_> = rels.iter().filter(|r| r.kind == RelationshipKind::TypeReference).collect();
+        let type_refs: Vec<_> = rels
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::TypeReference)
+            .collect();
         assert_eq!(type_refs.len(), 1, "expected 1 TypeReference relationship");
         assert_eq!(type_refs[0].to_name, "MyType", "to_name should be 'MyType'");
         assert!(type_refs[0].from_name.is_none(), "from_name should be None");
@@ -521,18 +557,46 @@ const owner: Person = {};
         let (tree, lang) = parse_ts(src);
         let rels = extract_relationships(&tree, src.as_bytes(), &lang, false);
 
-        let calls: Vec<_> = rels.iter().filter(|r| r.kind == RelationshipKind::Calls).collect();
-        let method_calls: Vec<_> = rels.iter().filter(|r| r.kind == RelationshipKind::MethodCall).collect();
-        let extends: Vec<_> = rels.iter().filter(|r| r.kind == RelationshipKind::Extends).collect();
-        let impls: Vec<_> = rels.iter().filter(|r| r.kind == RelationshipKind::Implements).collect();
-        let iface_extends: Vec<_> = rels.iter().filter(|r| r.kind == RelationshipKind::InterfaceExtends).collect();
-        let type_refs: Vec<_> = rels.iter().filter(|r| r.kind == RelationshipKind::TypeReference).collect();
+        let calls: Vec<_> = rels
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::Calls)
+            .collect();
+        let method_calls: Vec<_> = rels
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::MethodCall)
+            .collect();
+        let extends: Vec<_> = rels
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::Extends)
+            .collect();
+        let impls: Vec<_> = rels
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::Implements)
+            .collect();
+        let iface_extends: Vec<_> = rels
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::InterfaceExtends)
+            .collect();
+        let type_refs: Vec<_> = rels
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::TypeReference)
+            .collect();
 
-        assert!(!calls.is_empty() || !method_calls.is_empty(), "should find some calls");
+        assert!(
+            !calls.is_empty() || !method_calls.is_empty(),
+            "should find some calls"
+        );
         assert_eq!(extends.len(), 1, "should find class extends Animal");
         assert_eq!(impls.len(), 1, "should find class implements IPet");
-        assert_eq!(iface_extends.len(), 1, "should find interface extends IAnimal");
-        assert!(!type_refs.is_empty(), "should find type reference to Person");
+        assert_eq!(
+            iface_extends.len(),
+            1,
+            "should find interface extends IAnimal"
+        );
+        assert!(
+            !type_refs.is_empty(),
+            "should find type reference to Person"
+        );
 
         let extends_rel = &extends[0];
         assert_eq!(extends_rel.from_name.as_deref(), Some("Dog"));
@@ -553,7 +617,10 @@ const owner: Person = {};
         let src = "";
         let (tree, lang) = parse_ts(src);
         let rels = extract_relationships(&tree, src.as_bytes(), &lang, false);
-        assert!(rels.is_empty(), "empty file should produce no relationships");
+        assert!(
+            rels.is_empty(),
+            "empty file should produce no relationships"
+        );
     }
 
     // Test: File with no relationship-forming constructs
@@ -563,10 +630,21 @@ const owner: Person = {};
         let (tree, lang) = parse_ts(src);
         let rels = extract_relationships(&tree, src.as_bytes(), &lang, false);
         // There should be no calls, extends, implements, or type refs
-        let significant: Vec<_> = rels.iter().filter(|r| {
-            matches!(r.kind, RelationshipKind::Extends | RelationshipKind::Implements | RelationshipKind::InterfaceExtends)
-        }).collect();
-        assert!(significant.is_empty(), "plain variable declarations should not produce inheritance relationships");
+        let significant: Vec<_> = rels
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.kind,
+                    RelationshipKind::Extends
+                        | RelationshipKind::Implements
+                        | RelationshipKind::InterfaceExtends
+                )
+            })
+            .collect();
+        assert!(
+            significant.is_empty(),
+            "plain variable declarations should not produce inheritance relationships"
+        );
     }
 
     // Test: Deduplication — same call on same line does not produce duplicates
@@ -578,8 +656,15 @@ const owner: Person = {};
         let src = "foo();";
         let (tree, lang) = parse_ts(src);
         let rels = extract_relationships(&tree, src.as_bytes(), &lang, false);
-        let foo_calls: Vec<_> = rels.iter().filter(|r| r.to_name == "foo" && r.kind == RelationshipKind::Calls).collect();
-        assert_eq!(foo_calls.len(), 1, "foo() on one line should produce exactly 1 Calls entry");
+        let foo_calls: Vec<_> = rels
+            .iter()
+            .filter(|r| r.to_name == "foo" && r.kind == RelationshipKind::Calls)
+            .collect();
+        assert_eq!(
+            foo_calls.len(),
+            1,
+            "foo() on one line should produce exactly 1 Calls entry"
+        );
     }
 
     // Test: TSX processing works correctly (no contamination from TS statics)
@@ -589,8 +674,14 @@ const owner: Person = {};
         let (tree, lang) = parse_tsx(src);
         let rels = extract_relationships(&tree, src.as_bytes(), &lang, true);
 
-        let extends: Vec<_> = rels.iter().filter(|r| r.kind == RelationshipKind::Extends).collect();
-        assert!(!extends.is_empty(), "TSX should find class extends relationship");
+        let extends: Vec<_> = rels
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::Extends)
+            .collect();
+        assert!(
+            !extends.is_empty(),
+            "TSX should find class extends relationship"
+        );
         assert_eq!(extends[0].to_name, "Component");
     }
 
@@ -601,7 +692,10 @@ const owner: Person = {};
         let (tree, lang) = parse_js(src);
         let rels = extract_relationships(&tree, src.as_bytes(), &lang, false);
 
-        let extends: Vec<_> = rels.iter().filter(|r| r.kind == RelationshipKind::Extends).collect();
+        let extends: Vec<_> = rels
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::Extends)
+            .collect();
         assert_eq!(extends.len(), 1, "JS class extends should be extracted");
         assert_eq!(extends[0].from_name.as_deref(), Some("Foo"));
         assert_eq!(extends[0].to_name, "Bar");

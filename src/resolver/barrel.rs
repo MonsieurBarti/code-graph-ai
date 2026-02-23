@@ -5,8 +5,8 @@ use petgraph::visit::EdgeRef;
 
 use crate::graph::CodeGraph;
 use crate::graph::edge::EdgeKind;
-use crate::parser::imports::ExportKind;
 use crate::parser::ParseResult;
+use crate::parser::imports::ExportKind;
 
 /// Resolve barrel re-export chains in the graph.
 ///
@@ -42,9 +42,10 @@ pub fn resolve_barrel_chains(
                 .iter()
                 .filter_map(|export| {
                     if export.kind == ExportKind::ReExportAll
-                        && let Some(source_specifier) = &export.source {
-                            return Some((file_path.clone(), source_specifier.clone()));
-                        }
+                        && let Some(source_specifier) = &export.source
+                    {
+                        return Some((file_path.clone(), source_specifier.clone()));
+                    }
                     None
                 })
                 .collect::<Vec<_>>()
@@ -68,7 +69,8 @@ pub fn resolve_barrel_chains(
             }
         };
 
-        let resolved_source = resolve_relative_specifier(barrel_dir, source_specifier, parse_results);
+        let resolved_source =
+            resolve_relative_specifier(barrel_dir, source_specifier, parse_results);
 
         match resolved_source {
             Some(source_path) => {
@@ -179,7 +181,9 @@ pub fn resolve_named_reexport_chains(
                 continue;
             }
 
-            if let Some(source_path) = resolve_relative_specifier(barrel_dir, source_specifier, parse_results) {
+            if let Some(source_path) =
+                resolve_relative_specifier(barrel_dir, source_specifier, parse_results)
+            {
                 barrel_reexports
                     .entry(file_path.clone())
                     .or_default()
@@ -223,7 +227,11 @@ pub fn resolve_named_reexport_chains(
                     if !specifier.starts_with('.') {
                         return None;
                     }
-                    Some((importer_path.clone(), barrel_path.clone(), specifier.clone()))
+                    Some((
+                        importer_path.clone(),
+                        barrel_path.clone(),
+                        specifier.clone(),
+                    ))
                 }
                 _ => None,
             }
@@ -238,7 +246,11 @@ pub fn resolve_named_reexport_chains(
     for (importer_path, barrel_path, specifier) in &candidates {
         // Get the import info for this importer + specifier to know which names were imported.
         let import_info = match parse_results.get(importer_path) {
-            Some(r) => r.imports.iter().find(|i| i.module_path == *specifier).cloned(),
+            Some(r) => r
+                .imports
+                .iter()
+                .find(|i| i.module_path == *specifier)
+                .cloned(),
             None => continue,
         };
 
@@ -246,7 +258,9 @@ pub fn resolve_named_reexport_chains(
         // For `import { Foo } from '...'`: alias is None, name is "Foo" (original name).
         // For `import { Foo as F } from '...'`: name is "F" (local), alias is Some("Foo") (original).
         let wanted_names: Vec<String> = match &import_info {
-            Some(info) => info.specifiers.iter()
+            Some(info) => info
+                .specifiers
+                .iter()
                 .filter_map(|s| {
                     if s.is_default || s.is_namespace {
                         None
@@ -304,10 +318,9 @@ pub fn resolve_named_reexport_chains(
         };
 
         // Avoid duplicate edges: check if this exact (from, to) ResolvedImport already exists.
-        let already_exists = graph
-            .graph
-            .edges(importer_idx)
-            .any(|e| e.target() == defining_idx && matches!(e.weight(), EdgeKind::ResolvedImport { .. }));
+        let already_exists = graph.graph.edges(importer_idx).any(|e| {
+            e.target() == defining_idx && matches!(e.weight(), EdgeKind::ResolvedImport { .. })
+        });
 
         if !already_exists {
             graph.add_resolved_import(importer_idx, defining_idx, &specifier);
@@ -341,7 +354,13 @@ fn chase_named_reexport(
     let mut visited: HashSet<PathBuf> = HashSet::new();
     visited.insert(current_barrel.to_path_buf());
 
-    chase_named_reexport_inner(name, current_exports, all_barrel_reexports, &mut visited, verbose)
+    chase_named_reexport_inner(
+        name,
+        current_exports,
+        all_barrel_reexports,
+        &mut visited,
+        verbose,
+    )
 }
 
 fn chase_named_reexport_inner(
@@ -375,10 +394,18 @@ fn chase_named_reexport_inner(
             Some(next_exports) => {
                 // The source is itself a barrel with named re-exports.
                 // Check if it re-exports `name` further.
-                let re_exported_again = next_exports.iter().any(|(ns, _)| ns.iter().any(|n| n == name));
+                let re_exported_again = next_exports
+                    .iter()
+                    .any(|(ns, _)| ns.iter().any(|n| n == name));
                 if re_exported_again {
                     // Chase deeper.
-                    return chase_named_reexport_inner(name, next_exports, all_barrel_reexports, visited, verbose);
+                    return chase_named_reexport_inner(
+                        name,
+                        next_exports,
+                        all_barrel_reexports,
+                        visited,
+                        verbose,
+                    );
                 } else {
                     // source_path defines (or locally re-exports) the name — it's the defining file.
                     return Some(source_path.clone());
@@ -454,8 +481,8 @@ mod tests {
 
     use crate::graph::CodeGraph;
     use crate::graph::edge::EdgeKind;
-    use crate::parser::imports::{ExportInfo, ExportKind};
     use crate::parser::ParseResult;
+    use crate::parser::imports::{ExportInfo, ExportKind};
 
     use crate::parser::imports::{ImportInfo, ImportKind, ImportSpecifier};
 
@@ -470,7 +497,10 @@ mod tests {
     }
 
     /// Build a ParseResult with the given imports and exports.
-    fn make_parse_result_with_imports(imports: Vec<ImportInfo>, exports: Vec<ExportInfo>) -> ParseResult {
+    fn make_parse_result_with_imports(
+        imports: Vec<ImportInfo>,
+        exports: Vec<ExportInfo>,
+    ) -> ParseResult {
         ParseResult {
             symbols: vec![],
             imports,
@@ -524,7 +554,10 @@ mod tests {
         );
 
         // Verify the edge kind is correct.
-        let edge = graph.graph.edges(barrel_idx).find(|e| e.target() == utils_idx);
+        let edge = graph
+            .graph
+            .edges(barrel_idx)
+            .find(|e| e.target() == utils_idx);
         assert!(edge.is_some(), "edge should be found");
         match edge.unwrap().weight() {
             EdgeKind::BarrelReExportAll => {} // correct
@@ -560,10 +593,11 @@ mod tests {
         let barrel_edge = graph
             .graph
             .edges(barrel_idx)
-            .find(|e| {
-                e.target() == utils_idx && matches!(e.weight(), EdgeKind::BarrelReExportAll)
-            });
-        assert!(barrel_edge.is_none(), "no BarrelReExportAll edge should exist for named re-export");
+            .find(|e| e.target() == utils_idx && matches!(e.weight(), EdgeKind::BarrelReExportAll));
+        assert!(
+            barrel_edge.is_none(),
+            "no BarrelReExportAll edge should exist for named re-export"
+        );
     }
 
     #[test]
@@ -589,7 +623,10 @@ mod tests {
         // No edges added (only the file node exists).
         let barrel_idx = graph.file_index[&barrel_path];
         let edge_count = graph.graph.edges(barrel_idx).count();
-        assert_eq!(edge_count, 0, "no edges should exist when source is missing");
+        assert_eq!(
+            edge_count, 0,
+            "no edges should exist when source is missing"
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -609,12 +646,12 @@ mod tests {
     fn test_named_reexport_adds_direct_edge() {
         let mut graph = CodeGraph::new();
 
-        let app_path     = PathBuf::from("/project/app.ts");
-        let index_path   = PathBuf::from("/project/services/index.ts");
+        let app_path = PathBuf::from("/project/app.ts");
+        let index_path = PathBuf::from("/project/services/index.ts");
         let service_path = PathBuf::from("/project/services/FooService.ts");
 
-        let app_idx     = graph.add_file(app_path.clone(), "typescript");
-        let _index_idx  = graph.add_file(index_path.clone(), "typescript");
+        let app_idx = graph.add_file(app_path.clone(), "typescript");
+        let _index_idx = graph.add_file(index_path.clone(), "typescript");
         let service_idx = graph.add_file(service_path.clone(), "typescript");
 
         // The file-level pass already added app.ts → services/index.ts.
@@ -629,15 +666,9 @@ mod tests {
         let mut parse_results: HashMap<PathBuf, ParseResult> = HashMap::new();
         parse_results.insert(
             app_path.clone(),
-            make_parse_result_with_imports(
-                vec![make_named_import("./services", &["Foo"])],
-                vec![],
-            ),
+            make_parse_result_with_imports(vec![make_named_import("./services", &["Foo"])], vec![]),
         );
-        parse_results.insert(
-            index_path.clone(),
-            make_parse_result(vec![barrel_export]),
-        );
+        parse_results.insert(index_path.clone(), make_parse_result(vec![barrel_export]));
         parse_results.insert(service_path.clone(), make_parse_result(vec![]));
 
         let added = resolve_named_reexport_chains(&mut graph, &parse_results, false);
@@ -655,7 +686,10 @@ mod tests {
             .find(|e| e.target() == service_idx);
         assert!(direct_edge.is_some(), "edge to defining file should exist");
         assert!(
-            matches!(direct_edge.unwrap().weight(), EdgeKind::ResolvedImport { .. }),
+            matches!(
+                direct_edge.unwrap().weight(),
+                EdgeKind::ResolvedImport { .. }
+            ),
             "edge should be ResolvedImport"
         );
     }
@@ -673,14 +707,14 @@ mod tests {
     fn test_named_reexport_multi_level_chain() {
         let mut graph = CodeGraph::new();
 
-        let app_path       = PathBuf::from("/project/app.ts");
-        let outer_path     = PathBuf::from("/project/outer/index.ts");
-        let inner_path     = PathBuf::from("/project/outer/inner/index.ts");
-        let defining_path  = PathBuf::from("/project/outer/inner/defining.ts");
+        let app_path = PathBuf::from("/project/app.ts");
+        let outer_path = PathBuf::from("/project/outer/index.ts");
+        let inner_path = PathBuf::from("/project/outer/inner/index.ts");
+        let defining_path = PathBuf::from("/project/outer/inner/defining.ts");
 
-        let app_idx      = graph.add_file(app_path.clone(), "typescript");
-        let _outer_idx   = graph.add_file(outer_path.clone(), "typescript");
-        let _inner_idx   = graph.add_file(inner_path.clone(), "typescript");
+        let app_idx = graph.add_file(app_path.clone(), "typescript");
+        let _outer_idx = graph.add_file(outer_path.clone(), "typescript");
+        let _inner_idx = graph.add_file(inner_path.clone(), "typescript");
         let defining_idx = graph.add_file(defining_path.clone(), "typescript");
 
         // File-level pass: app.ts → outer/index.ts
@@ -700,10 +734,7 @@ mod tests {
         let mut parse_results: HashMap<PathBuf, ParseResult> = HashMap::new();
         parse_results.insert(
             app_path.clone(),
-            make_parse_result_with_imports(
-                vec![make_named_import("./outer", &["Foo"])],
-                vec![],
-            ),
+            make_parse_result_with_imports(vec![make_named_import("./outer", &["Foo"])], vec![]),
         );
         parse_results.insert(outer_path.clone(), make_parse_result(vec![outer_export]));
         parse_results.insert(inner_path.clone(), make_parse_result(vec![inner_export]));
@@ -711,7 +742,10 @@ mod tests {
 
         let added = resolve_named_reexport_chains(&mut graph, &parse_results, false);
 
-        assert_eq!(added, 1, "should have added exactly 1 edge for the multi-level chain");
+        assert_eq!(
+            added, 1,
+            "should have added exactly 1 edge for the multi-level chain"
+        );
         assert!(
             graph.graph.contains_edge(app_idx, defining_idx),
             "direct ResolvedImport edge should exist from app.ts to defining.ts"
@@ -731,12 +765,12 @@ mod tests {
         let mut graph = CodeGraph::new();
 
         let app_path = PathBuf::from("/project/app.ts");
-        let a_path   = PathBuf::from("/project/a/index.ts");
-        let b_path   = PathBuf::from("/project/b/index.ts");
+        let a_path = PathBuf::from("/project/a/index.ts");
+        let b_path = PathBuf::from("/project/b/index.ts");
 
         let app_idx = graph.add_file(app_path.clone(), "typescript");
-        let _a_idx  = graph.add_file(a_path.clone(), "typescript");
-        let _b_idx  = graph.add_file(b_path.clone(), "typescript");
+        let _a_idx = graph.add_file(a_path.clone(), "typescript");
+        let _b_idx = graph.add_file(b_path.clone(), "typescript");
 
         // File-level pass: app.ts → a/index.ts
         graph.add_resolved_import(app_idx, _a_idx, "./a");
@@ -755,10 +789,7 @@ mod tests {
         let mut parse_results: HashMap<PathBuf, ParseResult> = HashMap::new();
         parse_results.insert(
             app_path.clone(),
-            make_parse_result_with_imports(
-                vec![make_named_import("./a", &["Foo"])],
-                vec![],
-            ),
+            make_parse_result_with_imports(vec![make_named_import("./a", &["Foo"])], vec![]),
         );
         parse_results.insert(a_path.clone(), make_parse_result(vec![a_export]));
         parse_results.insert(b_path.clone(), make_parse_result(vec![b_export]));
@@ -783,12 +814,12 @@ mod tests {
     fn test_named_reexport_no_edge_when_name_not_found() {
         let mut graph = CodeGraph::new();
 
-        let app_path     = PathBuf::from("/project/app.ts");
-        let index_path   = PathBuf::from("/project/services/index.ts");
+        let app_path = PathBuf::from("/project/app.ts");
+        let index_path = PathBuf::from("/project/services/index.ts");
         let service_path = PathBuf::from("/project/services/FooService.ts");
 
-        let app_idx     = graph.add_file(app_path.clone(), "typescript");
-        let index_idx   = graph.add_file(index_path.clone(), "typescript");
+        let app_idx = graph.add_file(app_path.clone(), "typescript");
+        let index_idx = graph.add_file(index_path.clone(), "typescript");
         let service_idx = graph.add_file(service_path.clone(), "typescript");
 
         // File-level pass: app.ts → services/index.ts
@@ -813,13 +844,19 @@ mod tests {
 
         let added = resolve_named_reexport_chains(&mut graph, &parse_results, false);
 
-        assert_eq!(added, 0, "no edge should be added when imported name is not in barrel re-exports");
+        assert_eq!(
+            added, 0,
+            "no edge should be added when imported name is not in barrel re-exports"
+        );
 
         // Verify no direct edge app.ts → FooService.ts was added.
         let direct_edge = graph
             .graph
             .edges(app_idx)
             .find(|e| e.target() == service_idx);
-        assert!(direct_edge.is_none(), "no edge to FooService.ts should exist when Bar is not re-exported");
+        assert!(
+            direct_edge.is_none(),
+            "no edge to FooService.ts should exist when Bar is not re-exported"
+        );
     }
 }

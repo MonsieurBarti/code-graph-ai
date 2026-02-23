@@ -1,0 +1,29 @@
+#!/bin/sh
+# Pre-push hook: mirrors CI checks from .github/workflows/ci.yml
+# Runs cargo fmt check and cargo clippy before allowing pushes.
+# Install: run 'make setup' or 'git config core.hooksPath .githooks'
+
+set -e
+
+echo "Running pre-push checks (mirroring CI)..."
+
+# Check formatting (mirrors CI fmt job: cargo fmt --all -- --check)
+if ! cargo fmt --all -- --check; then
+    echo ""
+    echo "Formatting check failed. Run 'cargo fmt --all' to fix."
+    exit 1
+fi
+
+# Check clippy (mirrors CI clippy job: cargo clippy --all-targets --all-features)
+if ! RUSTFLAGS="-Dwarnings" cargo clippy --all-targets --all-features; then
+    echo ""
+    echo "Clippy check failed. Fix warnings before pushing."
+    exit 1
+fi
+
+# Preserve existing entire CLI hook behavior (non-blocking)
+if command -v entire > /dev/null 2>&1; then
+    entire hooks git pre-push "$1" || true
+fi
+
+exit 0

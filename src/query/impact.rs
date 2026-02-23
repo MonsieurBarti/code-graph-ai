@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
+use petgraph::Direction;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::EdgeRef;
-use petgraph::Direction;
 
 use crate::graph::{CodeGraph, edge::EdgeKind, node::GraphNode};
 
@@ -130,11 +130,21 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use crate::graph::{CodeGraph, node::{SymbolInfo, SymbolKind}};
+    use crate::graph::{
+        CodeGraph,
+        node::{SymbolInfo, SymbolKind},
+    };
 
     /// Build a three-file graph:
     ///   a.ts defines `foo`; b.ts imports a.ts; c.ts imports b.ts (transitive).
-    fn three_file_chain() -> (CodeGraph, PathBuf, NodeIndex, NodeIndex, NodeIndex, NodeIndex) {
+    fn three_file_chain() -> (
+        CodeGraph,
+        PathBuf,
+        NodeIndex,
+        NodeIndex,
+        NodeIndex,
+        NodeIndex,
+    ) {
         let root = PathBuf::from("/proj");
         let mut graph = CodeGraph::new();
 
@@ -166,7 +176,10 @@ mod tests {
         let results = blast_radius(&graph, &[foo_sym], &root);
 
         let has_b = results.iter().any(|r| r.file_path.ends_with("b.ts"));
-        assert!(has_b, "b.ts directly imports a.ts and must appear in blast radius");
+        assert!(
+            has_b,
+            "b.ts directly imports a.ts and must appear in blast radius"
+        );
     }
 
     #[test]
@@ -175,7 +188,10 @@ mod tests {
         let results = blast_radius(&graph, &[foo_sym], &root);
 
         let has_c = results.iter().any(|r| r.file_path.ends_with("c.ts"));
-        assert!(has_c, "c.ts transitively imports a.ts and must appear in blast radius");
+        assert!(
+            has_c,
+            "c.ts transitively imports a.ts and must appear in blast radius"
+        );
     }
 
     #[test]
@@ -184,7 +200,10 @@ mod tests {
         let results = blast_radius(&graph, &[foo_sym], &root);
 
         let has_a = results.iter().any(|r| r.file_path.ends_with("a.ts"));
-        assert!(!has_a, "a.ts defines foo and should NOT appear in its own blast radius");
+        assert!(
+            !has_a,
+            "a.ts defines foo and should NOT appear in its own blast radius"
+        );
     }
 
     #[test]
@@ -209,8 +228,13 @@ mod tests {
         let _unrelated = graph.add_file(root.join("unrelated.ts"), "typescript");
 
         let results = blast_radius(&graph, &[foo_sym], &root);
-        let has_unrelated = results.iter().any(|r| r.file_path.ends_with("unrelated.ts"));
-        assert!(!has_unrelated, "unrelated.ts should not appear in blast radius");
+        let has_unrelated = results
+            .iter()
+            .any(|r| r.file_path.ends_with("unrelated.ts"));
+        assert!(
+            !has_unrelated,
+            "unrelated.ts should not appear in blast radius"
+        );
     }
 
     #[test]
@@ -219,8 +243,14 @@ mod tests {
         let results = blast_radius(&graph, &[foo_sym], &root);
 
         // b.ts is at depth 1 (directly imports a.ts), c.ts is at depth 2.
-        let b_result = results.iter().find(|r| r.file_path.ends_with("b.ts")).unwrap();
-        let c_result = results.iter().find(|r| r.file_path.ends_with("c.ts")).unwrap();
+        let b_result = results
+            .iter()
+            .find(|r| r.file_path.ends_with("b.ts"))
+            .unwrap();
+        let c_result = results
+            .iter()
+            .find(|r| r.file_path.ends_with("c.ts"))
+            .unwrap();
 
         assert_eq!(b_result.depth, 1, "b.ts should be at depth 1");
         assert_eq!(c_result.depth, 2, "c.ts should be at depth 2");
@@ -251,6 +281,9 @@ mod tests {
 
         let results = blast_radius(&graph, &[foo_sym], &root);
         let has_caller = results.iter().any(|r| r.file_path.ends_with("caller.ts"));
-        assert!(!has_caller, "Calls edge should not be followed in blast radius BFS");
+        assert!(
+            !has_caller,
+            "Calls edge should not be followed in blast radius BFS"
+        );
     }
 }

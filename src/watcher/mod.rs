@@ -5,8 +5,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
-use notify_debouncer_mini::{new_debouncer, DebounceEventResult};
 use notify::RecursiveMode;
+use notify_debouncer_mini::{DebounceEventResult, new_debouncer};
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::task::JoinHandle;
 
@@ -61,7 +61,9 @@ pub fn start_watcher(
     let mut debouncer = new_debouncer(Duration::from_millis(75), move |res| {
         let _ = std_tx.send(res);
     })?;
-    debouncer.watcher().watch(watch_root, RecursiveMode::Recursive)?;
+    debouncer
+        .watcher()
+        .watch(watch_root, RecursiveMode::Recursive)?;
 
     // Build gitignore matcher — same rules as walker::walk_project
     let gitignore = build_gitignore_matcher(watch_root);
@@ -78,9 +80,10 @@ pub fn start_watcher(
                     for debounced_event in events {
                         let path = debounced_event.path;
                         if let Some(watch_event) = classify_event(&path, &root, &gitignore)
-                            && tokio_tx.blocking_send(watch_event).is_err() {
-                                return; // receiver dropped, shutdown
-                            }
+                            && tokio_tx.blocking_send(watch_event).is_err()
+                        {
+                            return; // receiver dropped, shutdown
+                        }
                     }
                 }
                 Err(err) => {
@@ -126,9 +129,10 @@ fn classify_event(path: &Path, _project_root: &Path, gitignore: &Gitignore) -> O
 
     // Check if it's a config file
     if let Some(file_name) = path.file_name().and_then(|n| n.to_str())
-        && CONFIG_FILES.contains(&file_name) {
-            return Some(WatchEvent::ConfigChanged);
-        }
+        && CONFIG_FILES.contains(&file_name)
+    {
+        return Some(WatchEvent::ConfigChanged);
+    }
 
     // Check if it's a source file we care about
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -146,4 +150,3 @@ fn classify_event(path: &Path, _project_root: &Path, gitignore: &Gitignore) -> O
         Some(WatchEvent::Deleted(path.to_path_buf()))
     }
 }
-

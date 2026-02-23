@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use petgraph::graph::Graph;
-use petgraph::visit::{EdgeRef, IntoEdgeReferences};
-use petgraph::algo::kosaraju_scc;
 use petgraph::Directed;
+use petgraph::algo::kosaraju_scc;
+use petgraph::graph::Graph;
 use petgraph::stable_graph::NodeIndex;
+use petgraph::visit::{EdgeRef, IntoEdgeReferences};
 
 use crate::graph::{CodeGraph, edge::EdgeKind, node::GraphNode};
 
@@ -106,7 +106,10 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use crate::graph::{CodeGraph, node::{SymbolInfo, SymbolKind}};
+    use crate::graph::{
+        CodeGraph,
+        node::{SymbolInfo, SymbolKind},
+    };
 
     #[test]
     fn test_two_file_mutual_cycle_detected() {
@@ -123,12 +126,23 @@ mod tests {
         let cycles = find_circular(&graph, &root);
         assert_eq!(cycles.len(), 1, "one cycle expected");
         // The cycle should contain both a.ts and b.ts (plus one repeated to close it = 3 entries).
-        assert_eq!(cycles[0].files.len(), 3, "cycle should have 3 entries (2 files + closing)");
-        let paths: Vec<_> = cycles[0].files.iter().map(|p| p.file_name().unwrap().to_str().unwrap()).collect();
+        assert_eq!(
+            cycles[0].files.len(),
+            3,
+            "cycle should have 3 entries (2 files + closing)"
+        );
+        let paths: Vec<_> = cycles[0]
+            .files
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap())
+            .collect();
         assert!(paths.contains(&"a.ts"));
         assert!(paths.contains(&"b.ts"));
         // First and last should be the same (cycle closed).
-        assert_eq!(cycles[0].files[0], cycles[0].files[cycles[0].files.len() - 1]);
+        assert_eq!(
+            cycles[0].files[0],
+            cycles[0].files[cycles[0].files.len() - 1]
+        );
     }
 
     #[test]
@@ -203,7 +217,10 @@ mod tests {
         graph.add_external_package(a_file, "react", "react");
 
         let cycles = find_circular(&graph, &root);
-        assert!(cycles.is_empty(), "external package edges should not create cycles");
+        assert!(
+            cycles.is_empty(),
+            "external package edges should not create cycles"
+        );
     }
 
     #[test]
@@ -232,6 +249,10 @@ mod tests {
         graph.add_resolved_import(b_file, a_file, "./a");
 
         let cycles = find_circular(&graph, &root);
-        assert_eq!(cycles.len(), 1, "symbols should not interfere with cycle detection");
+        assert_eq!(
+            cycles.len(),
+            1,
+            "symbols should not interfere with cycle detection"
+        );
     }
 }

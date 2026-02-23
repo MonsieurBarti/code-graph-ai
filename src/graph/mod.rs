@@ -4,9 +4,9 @@ pub mod node;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use petgraph::Directed;
 use petgraph::stable_graph::{NodeIndex, StableGraph};
 use petgraph::visit::EdgeRef;
-use petgraph::Directed;
 
 use edge::EdgeKind;
 use node::{ExternalPackageInfo, FileInfo, GraphNode, SymbolInfo, SymbolKind};
@@ -66,7 +66,8 @@ impl CodeGraph {
     pub fn add_child_symbol(&mut self, parent_idx: NodeIndex, info: SymbolInfo) -> NodeIndex {
         let name = info.name.clone();
         let child_idx = self.graph.add_node(GraphNode::Symbol(info));
-        self.graph.add_edge(child_idx, parent_idx, EdgeKind::ChildOf);
+        self.graph
+            .add_edge(child_idx, parent_idx, EdgeKind::ChildOf);
         self.symbol_index.entry(name).or_default().push(child_idx);
         child_idx
     }
@@ -182,12 +183,14 @@ impl CodeGraph {
 
     /// Add an `Implements` edge from `class_idx` to `iface_idx`.
     pub fn add_implements_edge(&mut self, class_idx: NodeIndex, iface_idx: NodeIndex) {
-        self.graph.add_edge(class_idx, iface_idx, EdgeKind::Implements);
+        self.graph
+            .add_edge(class_idx, iface_idx, EdgeKind::Implements);
     }
 
     /// Add a `BarrelReExportAll` edge from `barrel` to `source`.
     pub fn add_barrel_reexport_all(&mut self, barrel: NodeIndex, source: NodeIndex) {
-        self.graph.add_edge(barrel, source, EdgeKind::BarrelReExportAll);
+        self.graph
+            .add_edge(barrel, source, EdgeKind::BarrelReExportAll);
     }
 
     /// Remove a file and all its owned nodes/edges from the graph.
@@ -203,7 +206,8 @@ impl CodeGraph {
 
         // Collect symbol nodes owned by this file (Contains edges from file)
         let mut nodes_to_remove = vec![file_idx];
-        let symbol_indices: Vec<NodeIndex> = self.graph
+        let symbol_indices: Vec<NodeIndex> = self
+            .graph
             .edges(file_idx)
             .filter(|e| matches!(e.weight(), EdgeKind::Contains))
             .map(|e| e.target())
@@ -212,7 +216,8 @@ impl CodeGraph {
         for &sym_idx in &symbol_indices {
             nodes_to_remove.push(sym_idx);
             // Also collect child symbols (ChildOf edges pointing TO this symbol)
-            let children: Vec<NodeIndex> = self.graph
+            let children: Vec<NodeIndex> = self
+                .graph
                 .edges_directed(sym_idx, petgraph::Direction::Incoming)
                 .filter(|e| matches!(e.weight(), EdgeKind::ChildOf))
                 .map(|e| e.source())
@@ -280,7 +285,10 @@ mod tests {
         let mut graph = CodeGraph::new();
         let idx1 = graph.add_file(PathBuf::from("app.ts"), "typescript");
         let idx2 = graph.add_file(PathBuf::from("app.ts"), "typescript");
-        assert_eq!(idx1, idx2, "duplicate add_file should return the same index");
+        assert_eq!(
+            idx1, idx2,
+            "duplicate add_file should return the same index"
+        );
         assert_eq!(graph.file_count(), 1);
     }
 
@@ -310,7 +318,11 @@ mod tests {
                 is_default: false,
             },
         );
-        assert_eq!(graph.symbol_count(), 2, "should count both interface and property");
+        assert_eq!(
+            graph.symbol_count(),
+            2,
+            "should count both interface and property"
+        );
         // ChildOf edge goes from child to parent
         assert!(
             graph.graph.contains_edge(prop, iface),
@@ -375,8 +387,7 @@ mod tests {
         let mut graph = CodeGraph::new();
         let f = graph.add_file(PathBuf::from("src/app.ts"), "typescript");
 
-        let unresolved_idx =
-            graph.add_unresolved_import(f, "./missing-module", "file not found");
+        let unresolved_idx = graph.add_unresolved_import(f, "./missing-module", "file not found");
 
         // Verify node is an UnresolvedImport
         match &graph.graph[unresolved_idx] {

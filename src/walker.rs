@@ -96,12 +96,7 @@ fn detect_workspace_roots(root: &Path) -> Vec<PathBuf> {
 }
 
 /// Collect TS/JS source files from a single directory tree using the `ignore` crate.
-fn collect_files(
-    root: &Path,
-    config: &CodeGraphConfig,
-    verbose: bool,
-    out: &mut Vec<PathBuf>,
-) {
+fn collect_files(root: &Path, config: &CodeGraphConfig, verbose: bool, out: &mut Vec<PathBuf>) {
     let walker = ignore::WalkBuilder::new(root)
         .standard_filters(true)
         // Read .gitignore files even when the directory is not inside a git repository.
@@ -171,16 +166,18 @@ fn is_excluded_by_config(path: &Path, config: &CodeGraphConfig) -> bool {
 
     for pattern in patterns {
         if let Ok(matched) = glob::Pattern::new(pattern)
-            && matched.matches(&path_str) {
-                return true;
-            }
+            && matched.matches(&path_str)
+        {
+            return true;
+        }
         // Also check if any component matches the pattern directly.
         for component in path.components() {
             if let Some(s) = component.as_os_str().to_str()
                 && let Ok(matched) = glob::Pattern::new(pattern)
-                    && matched.matches(s) {
-                        return true;
-                    }
+                && matched.matches(s)
+            {
+                return true;
+            }
         }
     }
 
