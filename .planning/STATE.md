@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Phase: 6 of 6 (Performance & Distribution)
-Plan: 2 of 3 in current phase
-Status: Executing
-Last activity: 2026-02-23 — Completed 06-02-PLAN.md (crates.io metadata, [[bin]] table, README install instructions)
+Plan: 3 of 3 in current phase — COMPLETE
+Status: Done
+Last activity: 2026-02-23 — Completed 06-03-PLAN.md (GitHub Actions CI + publish workflows)
 
-Progress: [██████████████] 80%
+Progress: [████████████████] 100%
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Progress: [██████████████] 80%
 | Phase 05 P03 | 5 | 2 tasks | 3 files |
 | Phase 06 P01 | 4 | 2 tasks | 5 files |
 | Phase 06 P02 | 3 | 2 tasks | 3 files |
+| Phase 06 P03 | 1 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -132,6 +133,10 @@ Recent decisions affecting current work:
 - [06-01]: skipped count in Index command = files.len() - raw_results.len() (filter_map silently drops unreadable/unparseable files)
 - [Phase 06]: code-graph-cli is the crate name on crates.io; code-graph is the binary name users run after install
 - [Phase 06]: Exclude list in Cargo.toml prevents .planning/, .github/, .claude/, .devcontainer/, .entire/ from being published to crates.io
+- [06-03]: fail-fast: false on CI test matrix (both OS results always visible); fail-fast: true on publish matrix (stop fast before consuming CI minutes)
+- [06-03]: Publish workflow re-runs full test matrix on tagged commit — not relying on prior CI run which may target different commit
+- [06-03]: Dry run step before actual cargo publish catches packaging issues before consuming a version slot
+- [06-03]: RUSTFLAGS=-Dwarnings scoped to clippy job only — test binaries may have intentional unused variables
 
 ### Pending Todos
 
@@ -146,5 +151,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 06-02-PLAN.md
-Resume file: .planning/phases/06-performance-distribution/06-01-SUMMARY.md
+Stopped at: Completed 06-03-PLAN.md — ALL PHASES COMPLETE
+Resume file: .planning/phases/06-performance-distribution/06-03-SUMMARY.md
