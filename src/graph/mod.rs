@@ -2,15 +2,17 @@ pub mod edge;
 pub mod node;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use petgraph::stable_graph::{NodeIndex, StableGraph};
+use petgraph::visit::EdgeRef;
 use petgraph::Directed;
 
 use edge::EdgeKind;
 use node::{ExternalPackageInfo, FileInfo, GraphNode, SymbolInfo, SymbolKind};
 
 /// The in-memory code graph: a directed petgraph StableGraph with O(1) lookup indexes.
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct CodeGraph {
     /// The underlying directed graph, parameterised over node and edge kinds.
     pub graph: StableGraph<GraphNode, EdgeKind, Directed>,
@@ -186,6 +188,55 @@ impl CodeGraph {
     /// Add a `BarrelReExportAll` edge from `barrel` to `source`.
     pub fn add_barrel_reexport_all(&mut self, barrel: NodeIndex, source: NodeIndex) {
         self.graph.add_edge(barrel, source, EdgeKind::BarrelReExportAll);
+    }
+
+    /// Remove a file and all its owned nodes/edges from the graph.
+    ///
+    /// Removes: the file node, all Symbol nodes connected via Contains edges,
+    /// all child symbols (via ChildOf edges from those symbols), and all edges
+    /// to/from any of these nodes. Also cleans up file_index and symbol_index.
+    pub fn remove_file_from_graph(&mut self, path: &Path) {
+        let file_idx = match self.file_index.remove(path) {
+            Some(idx) => idx,
+            None => return, // file not in graph
+        };
+
+        // Collect symbol nodes owned by this file (Contains edges from file)
+        let mut nodes_to_remove = vec![file_idx];
+        let symbol_indices: Vec<NodeIndex> = self.graph
+            .edges(file_idx)
+            .filter(|e| matches!(e.weight(), EdgeKind::Contains))
+            .map(|e| e.target())
+            .collect();
+
+        for &sym_idx in &symbol_indices {
+            nodes_to_remove.push(sym_idx);
+            // Also collect child symbols (ChildOf edges pointing TO this symbol)
+            let children: Vec<NodeIndex> = self.graph
+                .edges_directed(sym_idx, petgraph::Direction::Incoming)
+                .filter(|e| matches!(e.weight(), EdgeKind::ChildOf))
+                .map(|e| e.source())
+                .collect();
+            nodes_to_remove.extend(children);
+        }
+
+        // Clean up symbol_index for all symbol nodes being removed
+        for &node_idx in &nodes_to_remove {
+            if let Some(GraphNode::Symbol(info)) = self.graph.node_weight(node_idx) {
+                let name = info.name.clone();
+                if let Some(indices) = self.symbol_index.get_mut(&name) {
+                    indices.retain(|&i| i != node_idx);
+                    if indices.is_empty() {
+                        self.symbol_index.remove(&name);
+                    }
+                }
+            }
+        }
+
+        // Remove all nodes (StableGraph removes associated edges automatically)
+        for node_idx in nodes_to_remove {
+            self.graph.remove_node(node_idx);
+        }
     }
 }
 
