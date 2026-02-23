@@ -14,6 +14,12 @@ pub struct IndexStats {
     pub methods: usize,
     pub properties: usize,
     pub imports: usize,
+    /// Number of ESM static imports (`import ... from`).
+    pub esm_imports: usize,
+    /// Number of CommonJS require imports (`require(...)`).
+    pub cjs_imports: usize,
+    /// Number of dynamic imports (`import(...)`).
+    pub dynamic_imports: usize,
     pub exports: usize,
     /// Files skipped due to read or parse errors.
     pub skipped: usize,
@@ -67,6 +73,10 @@ pub fn print_summary(stats: &IndexStats, json: bool) {
         stats.components, stats.methods, stats.properties,
     );
     println!("  {} imports, {} exports", stats.imports, stats.exports);
+    println!(
+        "  {} ESM, {} CJS, {} dynamic imports",
+        stats.esm_imports, stats.cjs_imports, stats.dynamic_imports,
+    );
 
     // Resolution section.
     println!(

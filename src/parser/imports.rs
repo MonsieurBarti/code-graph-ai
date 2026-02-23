@@ -7,7 +7,7 @@ use tree_sitter::{Language, Node, Query, QueryCursor, StreamingIterator, Tree};
 // ---------------------------------------------------------------------------
 
 /// The kind of import statement.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ImportKind {
     /// ESM static import: `import { X } from './module'`
     Esm,
@@ -34,7 +34,6 @@ pub struct ImportSpecifier {
 #[derive(Debug, Clone)]
 pub struct ImportInfo {
     /// Kind of import (ESM / CJS / dynamic).
-    #[allow(dead_code)]
     pub kind: ImportKind,
     /// The raw module specifier string, e.g. `"react"` or `"./utils"`.
     pub module_path: String,
