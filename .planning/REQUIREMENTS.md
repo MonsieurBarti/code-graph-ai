@@ -43,8 +43,8 @@
 
 ### Distribution
 
-- [ ] **DIST-01**: Tool compiles to a single static binary with zero runtime dependencies
-- [ ] **DIST-02**: Tool is installable via `cargo install code-graph`
+- [x] **DIST-01**: Tool compiles to a single static binary with zero runtime dependencies
+- [x] **DIST-02**: Tool is installable via `cargo install code-graph`
 
 ## v2 Requirements
 
@@ -107,8 +107,8 @@
 | PERF-01 | Phase 6 | Complete |
 | PERF-02 | Phase 6 | Complete |
 | PERF-03 | Phase 6 | Complete |
-| DIST-01 | Phase 6 | Pending |
-| DIST-02 | Phase 6 | Pending |
+| DIST-01 | Phase 6 | Complete |
+| DIST-02 | Phase 6 | Complete |
 
 **Coverage:**
 - v1 requirements: 26 total
