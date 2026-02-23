@@ -89,8 +89,7 @@ impl CodeGraphServer {
             }
         })
         .await
-        .map_err(|e| format!("task join error: {}", e))?
-        .map_err(|e| e)?;
+        .map_err(|e| format!("task join error: {}", e))??;
 
         if graph.file_index.is_empty() {
             return Err(format!(
@@ -266,7 +265,7 @@ fn apply_staleness_diff(
 
     // Threshold: if >= 10% changed, do full rebuild (faster than scoped re-resolve for many changes)
     if total_changed * 10 >= total_current {
-        return crate::build_graph(&project_root.to_path_buf(), false)
+        return crate::build_graph(project_root, false)
             .map_err(|e| anyhow::anyhow!(e));
     }
 

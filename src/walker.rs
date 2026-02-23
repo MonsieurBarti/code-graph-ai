@@ -170,20 +170,17 @@ fn is_excluded_by_config(path: &Path, config: &CodeGraphConfig) -> bool {
     let path_str = path.to_string_lossy();
 
     for pattern in patterns {
-        if let Ok(matched) = glob::Pattern::new(pattern) {
-            if matched.matches(&path_str) {
+        if let Ok(matched) = glob::Pattern::new(pattern)
+            && matched.matches(&path_str) {
                 return true;
             }
-        }
         // Also check if any component matches the pattern directly.
         for component in path.components() {
-            if let Some(s) = component.as_os_str().to_str() {
-                if let Ok(matched) = glob::Pattern::new(pattern) {
-                    if matched.matches(s) {
+            if let Some(s) = component.as_os_str().to_str()
+                && let Ok(matched) = glob::Pattern::new(pattern)
+                    && matched.matches(s) {
                         return true;
                     }
-                }
-            }
         }
     }
 

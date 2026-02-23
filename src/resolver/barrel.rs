@@ -41,11 +41,10 @@ pub fn resolve_barrel_chains(
                 .exports
                 .iter()
                 .filter_map(|export| {
-                    if export.kind == ExportKind::ReExportAll {
-                        if let Some(source_specifier) = &export.source {
+                    if export.kind == ExportKind::ReExportAll
+                        && let Some(source_specifier) = &export.source {
                             return Some((file_path.clone(), source_specifier.clone()));
                         }
-                    }
                     None
                 })
                 .collect::<Vec<_>>()
@@ -334,13 +333,13 @@ pub fn resolve_named_reexport_chains(
 /// entry is found in `current_barrel` or the chain cycles.
 fn chase_named_reexport(
     name: &str,
-    current_barrel: &PathBuf,
+    current_barrel: &Path,
     current_exports: &[(Vec<String>, PathBuf)],
     all_barrel_reexports: &HashMap<PathBuf, Vec<(Vec<String>, PathBuf)>>,
     verbose: bool,
 ) -> Option<PathBuf> {
     let mut visited: HashSet<PathBuf> = HashSet::new();
-    visited.insert(current_barrel.clone());
+    visited.insert(current_barrel.to_path_buf());
 
     chase_named_reexport_inner(name, current_exports, all_barrel_reexports, &mut visited, verbose)
 }

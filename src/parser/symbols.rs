@@ -302,15 +302,14 @@ fn find_declaration_kind(symbol_node: Node, _name_node: Node) -> Option<String> 
 fn classify_lexical_declaration(lex_decl: Node) -> Option<String> {
     let mut cursor = lex_decl.walk();
     for child in lex_decl.children(&mut cursor) {
-        if child.kind() == "variable_declarator" {
-            if let Some(value_node) = child.child_by_field_name("value") {
+        if child.kind() == "variable_declarator"
+            && let Some(value_node) = child.child_by_field_name("value") {
                 if is_arrow_or_function_value(value_node) {
                     return Some("arrow_function_decl".into());
                 } else {
                     return Some("exported_variable".into());
                 }
             }
-        }
     }
     None
 }
@@ -333,17 +332,13 @@ fn arrow_body_contains_jsx(symbol_node: Node, name_node: Node) -> bool {
 
 /// Locate the `body` of the arrow function whose declarator matches `name_node`.
 fn find_arrow_body<'a>(node: Node<'a>, name_node: Node<'a>) -> Option<Node<'a>> {
-    if node.kind() == "variable_declarator" {
-        if let Some(decl_name) = node.child_by_field_name("name") {
-            if decl_name.id() == name_node.id() {
-                if let Some(value) = node.child_by_field_name("value") {
-                    if is_arrow_or_function_value(value) {
+    if node.kind() == "variable_declarator"
+        && let Some(decl_name) = node.child_by_field_name("name")
+            && decl_name.id() == name_node.id()
+                && let Some(value) = node.child_by_field_name("value")
+                    && is_arrow_or_function_value(value) {
                         return value.child_by_field_name("body");
                     }
-                }
-            }
-        }
-    }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if let Some(found) = find_arrow_body(child, name_node) {
@@ -421,8 +416,8 @@ fn extract_class_children(class_node: Node, source: &[u8]) -> Vec<SymbolInfo> {
 
     let mut cursor = body.walk();
     for child in body.children(&mut cursor) {
-        if child.kind() == "method_definition" {
-            if let Some(name_node) = child.child_by_field_name("name") {
+        if child.kind() == "method_definition"
+            && let Some(name_node) = child.child_by_field_name("name") {
                 let name = node_text(name_node, source).to_owned();
                 let pos = name_node.start_position();
                 children.push(SymbolInfo {
@@ -434,7 +429,6 @@ fn extract_class_children(class_node: Node, source: &[u8]) -> Vec<SymbolInfo> {
                     is_default: false,
                 });
             }
-        }
     }
     children
 }
@@ -536,13 +530,11 @@ pub fn extract_symbols(
         };
 
         // For exported-variable matches that are actually arrow functions — skip.
-        if kind == SymbolKind::Variable {
-            if let Some(val) = val_node {
-                if is_arrow_or_function_value(val) {
+        if kind == SymbolKind::Variable
+            && let Some(val) = val_node
+                && is_arrow_or_function_value(val) {
                     continue;
                 }
-            }
-        }
 
         let (is_exported, is_default) = detect_export(sym_node, source);
 
