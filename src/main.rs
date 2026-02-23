@@ -406,19 +406,6 @@ async fn main() -> Result<()> {
                         );
                         let _ = cache::save_cache(&path, &graph);
                     }
-                    watcher::event::WatchEvent::Created(p) => {
-                        let start = std::time::Instant::now();
-                        watcher::incremental::handle_file_event(&mut graph, &event, &path);
-                        let elapsed = start.elapsed();
-                        eprintln!(
-                            "[watch] created: {} ({:.1}ms, {} files, {} symbols)",
-                            p.strip_prefix(&path).unwrap_or(p).display(),
-                            elapsed.as_secs_f64() * 1000.0,
-                            graph.file_count(),
-                            graph.symbol_count()
-                        );
-                        let _ = cache::save_cache(&path, &graph);
-                    }
                     watcher::event::WatchEvent::Deleted(p) => {
                         watcher::incremental::handle_file_event(&mut graph, &event, &path);
                         eprintln!(

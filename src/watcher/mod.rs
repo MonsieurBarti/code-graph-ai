@@ -51,7 +51,7 @@ fn build_gitignore_matcher(project_root: &Path) -> Gitignore {
 /// - Debounces at 75ms (within the locked 50-100ms range)
 /// - Filters out node_modules and .code-graph paths (hardcoded)
 /// - Filters out .gitignore'd paths (same rules as initial indexing)
-/// - Classifies events into Modified/Created/Deleted/ConfigChanged
+/// - Classifies events into Modified/Deleted/ConfigChanged
 pub fn start_watcher(
     watch_root: &Path,
 ) -> anyhow::Result<(WatcherHandle, tokio_mpsc::Receiver<WatchEvent>)> {
@@ -142,9 +142,8 @@ fn classify_event(path: &Path, _project_root: &Path, gitignore: &Gitignore) -> O
 
     // Classify based on file existence
     if path.exists() {
-        // File exists — could be Modified or Created.
-        // notify-debouncer-mini doesn't distinguish; we treat both the same
-        // in the incremental pipeline (remove old + re-parse).
+        // File exists — treat as Modified (notify-debouncer-mini doesn't distinguish
+        // create vs modify; incremental pipeline handles both via remove-old + re-parse).
         Some(WatchEvent::Modified(path.to_path_buf()))
     } else {
         Some(WatchEvent::Deleted(path.to_path_buf()))
