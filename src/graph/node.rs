@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 /// The kind of symbol extracted from source code.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum SymbolKind {
     /// A function declaration or top-level const arrow function.
     Function,
@@ -24,7 +24,7 @@ pub enum SymbolKind {
 }
 
 /// Metadata about a symbol extracted from source code.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SymbolInfo {
     /// The symbol's identifier name.
     pub name: String,
@@ -41,7 +41,7 @@ pub struct SymbolInfo {
 }
 
 /// Metadata about a source file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FileInfo {
     /// Canonical path to the file.
     pub path: PathBuf,
@@ -51,7 +51,7 @@ pub struct FileInfo {
 
 /// Metadata about an external package (node_modules dependency).
 /// Internals are not indexed — external package nodes are terminal in the graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ExternalPackageInfo {
     /// The npm package name (e.g. "react", "@org/utils").
     pub name: String,
@@ -61,7 +61,7 @@ pub struct ExternalPackageInfo {
 
 /// A node in the code graph — a file, a symbol within a file, an external package,
 /// or an unresolved import.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum GraphNode {
     /// A source file node.
     File(FileInfo),

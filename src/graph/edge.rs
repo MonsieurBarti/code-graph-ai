@@ -1,5 +1,5 @@
 /// The kind of directed edge between two nodes in the code graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum EdgeKind {
     /// File -> Symbol: the file contains (declares) this symbol.
     Contains,
