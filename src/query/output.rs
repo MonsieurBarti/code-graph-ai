@@ -2,6 +2,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use crate::cli::OutputFormat;
+use crate::graph::node::SymbolVisibility;
 use crate::query::circular::CircularDep;
 use crate::query::context::SymbolContext;
 use crate::query::find::FindResult;
@@ -10,8 +11,27 @@ use crate::query::impact::ImpactResult;
 use crate::query::refs::{RefKind, RefResult};
 use crate::query::stats::ProjectStats;
 
+/// Map a `SymbolVisibility` to its display string for output.
+fn visibility_str(vis: &SymbolVisibility) -> &'static str {
+    match vis {
+        SymbolVisibility::Pub => "pub",
+        SymbolVisibility::PubCrate => "pub(crate)",
+        SymbolVisibility::Private => "private",
+    }
+}
+
+/// Returns true if any result has non-Private visibility.
+/// Used to suppress visibility column noise for pure TS/JS projects.
+fn any_non_private(results: &[FindResult]) -> bool {
+    results
+        .iter()
+        .any(|r| r.visibility != SymbolVisibility::Private)
+}
+
 /// Format and print find results to stdout according to the selected output format.
 pub fn format_find_results(results: &[FindResult], format: &OutputFormat, project_root: &Path) {
+    let show_vis = any_non_private(results);
+
     match format {
         OutputFormat::Compact => {
             for r in results {
@@ -19,13 +39,24 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
                     .file_path
                     .strip_prefix(project_root)
                     .unwrap_or(&r.file_path);
-                println!(
-                    "def {} {}:{} {}",
-                    r.symbol_name,
-                    rel.display(),
-                    r.line,
-                    kind_to_str(&r.kind)
-                );
+                if show_vis {
+                    println!(
+                        "def {} {}:{} {} {}",
+                        r.symbol_name,
+                        rel.display(),
+                        r.line,
+                        kind_to_str(&r.kind),
+                        visibility_str(&r.visibility),
+                    );
+                } else {
+                    println!(
+                        "def {} {}:{} {}",
+                        r.symbol_name,
+                        rel.display(),
+                        r.line,
+                        kind_to_str(&r.kind)
+                    );
+                }
             }
             println!("{} definitions found", results.len());
         }
@@ -53,41 +84,67 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
                 .unwrap_or(4)
                 .max(4);
 
-            if use_color {
-                println!(
-                    "\x1b[1m{:<name_w$}  {:<file_w$}  {:>4}  KIND\x1b[0m",
-                    "SYMBOL",
-                    "FILE",
-                    "LINE",
-                    name_w = name_w,
-                    file_w = file_w,
-                );
+            if show_vis {
+                if use_color {
+                    println!(
+                        "\x1b[1m{:<name_w$}  {:<file_w$}  {:>4}  {:<10}  KIND\x1b[0m",
+                        "SYMBOL", "FILE", "LINE", "VIS",
+                        name_w = name_w, file_w = file_w,
+                    );
+                } else {
+                    println!(
+                        "{:<name_w$}  {:<file_w$}  {:>4}  {:<10}  KIND",
+                        "SYMBOL", "FILE", "LINE", "VIS",
+                        name_w = name_w, file_w = file_w,
+                    );
+                }
+                println!("{}", "-".repeat(name_w + file_w + 26));
+                for r in results {
+                    let rel = r
+                        .file_path
+                        .strip_prefix(project_root)
+                        .unwrap_or(&r.file_path);
+                    println!(
+                        "{:<name_w$}  {:<file_w$}  {:>4}  {:<10}  {}",
+                        r.symbol_name,
+                        rel.display(),
+                        r.line,
+                        visibility_str(&r.visibility),
+                        kind_to_str(&r.kind),
+                        name_w = name_w,
+                        file_w = file_w,
+                    );
+                }
             } else {
-                println!(
-                    "{:<name_w$}  {:<file_w$}  {:>4}  KIND",
-                    "SYMBOL",
-                    "FILE",
-                    "LINE",
-                    name_w = name_w,
-                    file_w = file_w,
-                );
-            }
-            println!("{}", "-".repeat(name_w + file_w + 14));
-
-            for r in results {
-                let rel = r
-                    .file_path
-                    .strip_prefix(project_root)
-                    .unwrap_or(&r.file_path);
-                println!(
-                    "{:<name_w$}  {:<file_w$}  {:>4}  {}",
-                    r.symbol_name,
-                    rel.display(),
-                    r.line,
-                    kind_to_str(&r.kind),
-                    name_w = name_w,
-                    file_w = file_w,
-                );
+                if use_color {
+                    println!(
+                        "\x1b[1m{:<name_w$}  {:<file_w$}  {:>4}  KIND\x1b[0m",
+                        "SYMBOL", "FILE", "LINE",
+                        name_w = name_w, file_w = file_w,
+                    );
+                } else {
+                    println!(
+                        "{:<name_w$}  {:<file_w$}  {:>4}  KIND",
+                        "SYMBOL", "FILE", "LINE",
+                        name_w = name_w, file_w = file_w,
+                    );
+                }
+                println!("{}", "-".repeat(name_w + file_w + 14));
+                for r in results {
+                    let rel = r
+                        .file_path
+                        .strip_prefix(project_root)
+                        .unwrap_or(&r.file_path);
+                    println!(
+                        "{:<name_w$}  {:<file_w$}  {:>4}  {}",
+                        r.symbol_name,
+                        rel.display(),
+                        r.line,
+                        kind_to_str(&r.kind),
+                        name_w = name_w,
+                        file_w = file_w,
+                    );
+                }
             }
         }
 
@@ -107,6 +164,7 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
                         "col": r.col,
                         "exported": r.is_exported,
                         "default": r.is_default,
+                        "visibility": visibility_str(&r.visibility),
                     })
                 })
                 .collect();
@@ -140,6 +198,28 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat) {
                 "imports {} external {} unresolved {}",
                 stats.import_edges, stats.external_packages, stats.unresolved_imports,
             );
+            let has_rust = stats.rust_fns + stats.rust_structs + stats.rust_enums
+                + stats.rust_traits + stats.rust_impl_methods + stats.rust_type_aliases
+                + stats.rust_consts + stats.rust_statics + stats.rust_macros
+                + stats.rust_imports + stats.rust_reexports > 0;
+            if has_rust {
+                println!(
+                    "rust fn {} struct {} enum {} trait {} impl_method {} type {} const {} static {} macro {}",
+                    stats.rust_fns,
+                    stats.rust_structs,
+                    stats.rust_enums,
+                    stats.rust_traits,
+                    stats.rust_impl_methods,
+                    stats.rust_type_aliases,
+                    stats.rust_consts,
+                    stats.rust_statics,
+                    stats.rust_macros,
+                );
+                println!(
+                    "rust_use {} rust_pub_use {}",
+                    stats.rust_imports, stats.rust_reexports,
+                );
+            }
         }
 
         OutputFormat::Table => {
@@ -171,6 +251,27 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat) {
             println!("  Resolved imports:  {}", stats.import_edges);
             println!("  External packages: {}", stats.external_packages);
             println!("  Unresolved:        {}", stats.unresolved_imports);
+
+            // Rust section — only when Rust symbols are present
+            let has_rust = stats.rust_fns + stats.rust_structs + stats.rust_enums
+                + stats.rust_traits + stats.rust_impl_methods + stats.rust_type_aliases
+                + stats.rust_consts + stats.rust_statics + stats.rust_macros
+                + stats.rust_imports + stats.rust_reexports > 0;
+            if has_rust {
+                println!();
+                println!("{}", header("--- Rust Symbols ---"));
+                println!("  fn:          {}", stats.rust_fns);
+                println!("  struct:      {}", stats.rust_structs);
+                println!("  enum:        {}", stats.rust_enums);
+                println!("  trait:       {}", stats.rust_traits);
+                println!("  impl method: {}", stats.rust_impl_methods);
+                println!("  type:        {}", stats.rust_type_aliases);
+                println!("  const:       {}", stats.rust_consts);
+                println!("  static:      {}", stats.rust_statics);
+                println!("  macro:       {}", stats.rust_macros);
+                println!("  use (unresolved): {}", stats.rust_imports);
+                println!("  pub use (re-exports): {}", stats.rust_reexports);
+            }
         }
 
         OutputFormat::Json => {
@@ -189,6 +290,17 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat) {
                 "import_edges": stats.import_edges,
                 "external_packages": stats.external_packages,
                 "unresolved_imports": stats.unresolved_imports,
+                "rust_fns": stats.rust_fns,
+                "rust_structs": stats.rust_structs,
+                "rust_enums": stats.rust_enums,
+                "rust_traits": stats.rust_traits,
+                "rust_impl_methods": stats.rust_impl_methods,
+                "rust_type_aliases": stats.rust_type_aliases,
+                "rust_consts": stats.rust_consts,
+                "rust_statics": stats.rust_statics,
+                "rust_macros": stats.rust_macros,
+                "rust_imports": stats.rust_imports,
+                "rust_reexports": stats.rust_reexports,
             });
             println!(
                 "{}",
@@ -906,6 +1018,7 @@ pub fn format_context_results(
 /// so Claude can count-check results at a glance (CONTEXT.md locked decision).
 pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> String {
     use std::fmt::Write;
+    let show_vis = any_non_private(results);
     let mut buf = String::new();
     writeln!(buf, "{} definitions found", results.len()).unwrap();
     for r in results {
@@ -913,15 +1026,28 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
             .file_path
             .strip_prefix(project_root)
             .unwrap_or(&r.file_path);
-        writeln!(
-            buf,
-            "def {} {}:{} {}",
-            r.symbol_name,
-            rel.display(),
-            r.line,
-            kind_to_str(&r.kind)
-        )
-        .unwrap();
+        if show_vis {
+            writeln!(
+                buf,
+                "def {} {}:{} {} {}",
+                r.symbol_name,
+                rel.display(),
+                r.line,
+                kind_to_str(&r.kind),
+                visibility_str(&r.visibility),
+            )
+            .unwrap();
+        } else {
+            writeln!(
+                buf,
+                "def {} {}:{} {}",
+                r.symbol_name,
+                rel.display(),
+                r.line,
+                kind_to_str(&r.kind)
+            )
+            .unwrap();
+        }
     }
     buf
 }
@@ -959,6 +1085,32 @@ pub fn format_stats_to_string(stats: &ProjectStats) -> String {
         stats.import_edges, stats.external_packages, stats.unresolved_imports,
     )
     .unwrap();
+    // Rust section — only when Rust symbols are present
+    let has_rust = stats.rust_fns + stats.rust_structs + stats.rust_enums
+        + stats.rust_traits + stats.rust_impl_methods + stats.rust_type_aliases
+        + stats.rust_consts + stats.rust_statics + stats.rust_macros
+        + stats.rust_imports + stats.rust_reexports > 0;
+    if has_rust {
+        writeln!(
+            buf,
+            "rust fn {} struct {} enum {} trait {} impl_method {} type {} const {} static {} macro {}",
+            stats.rust_fns,
+            stats.rust_structs,
+            stats.rust_enums,
+            stats.rust_traits,
+            stats.rust_impl_methods,
+            stats.rust_type_aliases,
+            stats.rust_consts,
+            stats.rust_statics,
+            stats.rust_macros,
+        ).unwrap();
+        writeln!(
+            buf,
+            "rust_use {} rust_pub_use {}",
+            stats.rust_imports, stats.rust_reexports,
+        )
+        .unwrap();
+    }
     buf
 }
 

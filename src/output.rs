@@ -40,8 +40,20 @@ pub struct IndexStats {
     pub ts_file_count: usize,
     /// Number of JavaScript (.js/.jsx) files discovered.
     pub js_file_count: usize,
-    /// Number of Rust (.rs) files discovered (discovery only — not parsed in this version).
+    /// Number of Rust (.rs) files discovered and parsed.
     pub rust_file_count: usize,
+    // Rust symbol counts (Phase 8)
+    pub rust_fns: usize,
+    pub rust_structs: usize,
+    pub rust_enums: usize,
+    pub rust_traits: usize,
+    pub rust_impl_methods: usize,
+    pub rust_type_aliases: usize,
+    pub rust_consts: usize,
+    pub rust_statics: usize,
+    pub rust_macros: usize,
+    pub rust_use_statements: usize,
+    pub rust_pub_use_reexports: usize,
 }
 
 /// Print a summary of the indexing run.
@@ -74,7 +86,23 @@ pub fn print_summary(stats: &IndexStats, json: bool) {
         println!("  JavaScript: {} files", stats.js_file_count);
     }
     if stats.rust_file_count > 0 {
-        println!("  Rust: {} files (discovery only)", stats.rust_file_count);
+        println!("  Rust: {} files", stats.rust_file_count);
+        println!(
+            "    {} fn, {} struct, {} enum, {} trait, {} impl method, {} type, {} const, {} static, {} macro",
+            stats.rust_fns,
+            stats.rust_structs,
+            stats.rust_enums,
+            stats.rust_traits,
+            stats.rust_impl_methods,
+            stats.rust_type_aliases,
+            stats.rust_consts,
+            stats.rust_statics,
+            stats.rust_macros,
+        );
+        println!(
+            "    {} use statements (unresolved), {} pub use re-exports",
+            stats.rust_use_statements, stats.rust_pub_use_reexports,
+        );
     }
 
     println!(

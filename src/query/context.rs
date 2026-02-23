@@ -83,6 +83,7 @@ pub fn symbol_context(
                     col: sym_info.col,
                     is_exported: sym_info.is_exported,
                     is_default: sym_info.is_default,
+                    visibility: sym_info.visibility.clone(),
                 });
             }
         }

@@ -9,7 +9,7 @@ use regex::RegexBuilder;
 use crate::graph::{
     CodeGraph,
     edge::EdgeKind,
-    node::{GraphNode, SymbolKind},
+    node::{GraphNode, SymbolKind, SymbolVisibility},
 };
 
 /// A single matching symbol definition returned by `find_symbol`.
@@ -22,6 +22,7 @@ pub struct FindResult {
     pub col: usize,
     pub is_exported: bool,
     pub is_default: bool,
+    pub visibility: SymbolVisibility,
 }
 
 /// Convert a `SymbolKind` to its lowercase string representation used in output and filtering.
@@ -163,6 +164,7 @@ pub fn find_symbol(
                 col: sym_info.col,
                 is_exported: sym_info.is_exported,
                 is_default: sym_info.is_default,
+                visibility: sym_info.visibility.clone(),
             });
         }
     }

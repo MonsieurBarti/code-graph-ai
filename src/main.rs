@@ -16,16 +16,107 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::Parser;
+use petgraph::visit::EdgeRef;
 use rayon::prelude::*;
 
 use cli::{Cli, Commands};
 use config::CodeGraphConfig;
-use graph::{CodeGraph, node::SymbolKind};
+use graph::{CodeGraph, edge::EdgeKind, node::SymbolKind};
 use language::LanguageKind;
 use output::{IndexStats, print_summary};
 use parser::ParseResult;
 use parser::imports::ImportKind;
 use walker::walk_project;
+
+/// Rust-specific symbol counts, separated from TS/JS counts for mixed-language projects.
+struct RustSymbolCounts {
+    fns: usize,
+    structs: usize,
+    enums: usize,
+    traits: usize,
+    impl_methods: usize,
+    type_aliases: usize,
+    consts: usize,
+    statics: usize,
+    macros: usize,
+}
+
+/// Count symbols belonging to Rust files (language == "rust") in the graph.
+fn count_rust_symbols(graph: &CodeGraph) -> RustSymbolCounts {
+    use graph::node::GraphNode;
+    use petgraph::Direction;
+
+    let mut counts = RustSymbolCounts {
+        fns: 0,
+        structs: 0,
+        enums: 0,
+        traits: 0,
+        impl_methods: 0,
+        type_aliases: 0,
+        consts: 0,
+        statics: 0,
+        macros: 0,
+    };
+
+    for idx in graph.graph.node_indices() {
+        if let GraphNode::Symbol(ref s) = graph.graph[idx] {
+            // Check if this symbol belongs to a Rust file via a Contains edge.
+            let in_rust_file = graph
+                .graph
+                .edges_directed(idx, Direction::Incoming)
+                .any(|e| {
+                    if let EdgeKind::Contains = e.weight() {
+                        if let GraphNode::File(ref f) = graph.graph[e.source()] {
+                            return f.language == "rust";
+                        }
+                    }
+                    false
+                });
+            if !in_rust_file {
+                // Check ChildOf parent path (trait method children live under parent symbols)
+                let parent_in_rust = graph
+                    .graph
+                    .edges_directed(idx, Direction::Outgoing)
+                    .any(|e| {
+                        if let EdgeKind::ChildOf = e.weight() {
+                            let parent = e.target();
+                            graph
+                                .graph
+                                .edges_directed(parent, Direction::Incoming)
+                                .any(|pe| {
+                                    if let EdgeKind::Contains = pe.weight() {
+                                        if let GraphNode::File(ref f) =
+                                            graph.graph[pe.source()]
+                                        {
+                                            return f.language == "rust";
+                                        }
+                                    }
+                                    false
+                                })
+                        } else {
+                            false
+                        }
+                    });
+                if !parent_in_rust {
+                    continue;
+                }
+            }
+            match s.kind {
+                SymbolKind::Function => counts.fns += 1,
+                SymbolKind::Struct => counts.structs += 1,
+                SymbolKind::Enum => counts.enums += 1,
+                SymbolKind::Trait => counts.traits += 1,
+                SymbolKind::ImplMethod => counts.impl_methods += 1,
+                SymbolKind::TypeAlias => counts.type_aliases += 1,
+                SymbolKind::Const => counts.consts += 1,
+                SymbolKind::Static => counts.statics += 1,
+                SymbolKind::Macro => counts.macros += 1,
+                _ => {}
+            }
+        }
+    }
+    counts
+}
 
 /// Build the code graph for a project at `path` by walking, parsing, and resolving all files.
 ///
@@ -45,6 +136,7 @@ pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
                     "ts" => "typescript",
                     "tsx" => "tsx",
                     "js" | "jsx" => "javascript",
+                    "rs" => "rust",
                     _ => return None,
                 };
             let result = parser::parse_file_parallel(file_path, &source).ok()?;
@@ -63,6 +155,27 @@ pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
             let sym_idx = graph.add_symbol(file_idx, symbol.clone());
             for child in children {
                 graph.add_child_symbol(sym_idx, child.clone());
+            }
+        }
+
+        // Emit Rust use/pub-use edges (file -> file self-edge as placeholder; Phase 9 resolves)
+        for rust_use in &result.rust_uses {
+            if rust_use.is_pub_use {
+                graph.graph.add_edge(
+                    file_idx,
+                    file_idx,
+                    EdgeKind::ReExport {
+                        path: rust_use.path.clone(),
+                    },
+                );
+            } else {
+                graph.graph.add_edge(
+                    file_idx,
+                    file_idx,
+                    EdgeKind::RustImport {
+                        path: rust_use.path.clone(),
+                    },
+                );
             }
         }
 
@@ -164,13 +277,13 @@ async fn main() -> Result<()> {
             let mut esm_imports: usize = 0;
             let mut cjs_imports: usize = 0;
             let mut dynamic_imports: usize = 0;
+            let mut rust_use_count: usize = 0;
+            let mut rust_pub_use_count: usize = 0;
 
             // Parse results map — retained for the resolution step.
             let mut parse_results: HashMap<PathBuf, ParseResult> = HashMap::new();
 
-            // 7. Parse all TS/JS files in parallel (rayon par_iter).
-            // Rust files (.rs) hit the `_` arm and return None — they are counted
-            // above but intentionally not parsed until Phase 8.
+            // 7. Parse all TS/JS/RS files in parallel (rayon par_iter).
             let raw_results: Vec<(PathBuf, &'static str, ParseResult)> = files
                 .par_iter()
                 .filter_map(|file_path| {
@@ -180,16 +293,16 @@ async fn main() -> Result<()> {
                             "ts" => "typescript",
                             "tsx" => "tsx",
                             "js" | "jsx" => "javascript",
-                            _ => return None, // .rs and any unknown extensions skip parsing
+                            "rs" => "rust",
+                            _ => return None,
                         };
                     let result = parser::parse_file_parallel(file_path, &source).ok()?;
                     Some((file_path.clone(), language_str, result))
                 })
                 .collect();
 
-            // skipped = TS/JS files that couldn't be read or parsed.
-            // Rust files are intentionally not parsed — exclude them from skipped count.
-            let skipped = files.len() - raw_results.len() - rust_file_count;
+            // skipped = files that couldn't be read or parsed.
+            let skipped = files.len() - raw_results.len();
 
             // 8. Insert into graph sequentially + accumulate stats.
             for (file_path, language_str, result) in raw_results {
@@ -212,6 +325,29 @@ async fn main() -> Result<()> {
                         ImportKind::Esm => esm_imports += 1,
                         ImportKind::Cjs => cjs_imports += 1,
                         ImportKind::DynamicImport => dynamic_imports += 1,
+                    }
+                }
+
+                // Accumulate Rust use/pub-use counts and emit edges.
+                for rust_use in &result.rust_uses {
+                    if rust_use.is_pub_use {
+                        rust_pub_use_count += 1;
+                        graph.graph.add_edge(
+                            file_idx,
+                            file_idx,
+                            EdgeKind::ReExport {
+                                path: rust_use.path.clone(),
+                            },
+                        );
+                    } else {
+                        rust_use_count += 1;
+                        graph.graph.add_edge(
+                            file_idx,
+                            file_idx,
+                            EdgeKind::RustImport {
+                                path: rust_use.path.clone(),
+                            },
+                        );
                     }
                 }
 
@@ -250,6 +386,11 @@ async fn main() -> Result<()> {
             let elapsed_secs = start.elapsed().as_secs_f64();
             let breakdown: HashMap<SymbolKind, usize> = graph.symbols_by_kind();
 
+            // Compute per-language symbol counts for Rust-specific fields.
+            // Rust-only kinds (Struct, Trait, ImplMethod, Const, Static, Macro) map directly.
+            // For shared kinds (Function, Enum, TypeAlias) we count only Rust-file symbols.
+            let rust_symbol_counts = count_rust_symbols(&graph);
+
             let stats = IndexStats {
                 file_count: graph.file_count(),
                 functions: *breakdown.get(&SymbolKind::Function).unwrap_or(&0),
@@ -276,6 +417,17 @@ async fn main() -> Result<()> {
                 ts_file_count,
                 js_file_count,
                 rust_file_count,
+                rust_fns: rust_symbol_counts.fns,
+                rust_structs: rust_symbol_counts.structs,
+                rust_enums: rust_symbol_counts.enums,
+                rust_traits: rust_symbol_counts.traits,
+                rust_impl_methods: rust_symbol_counts.impl_methods,
+                rust_type_aliases: rust_symbol_counts.type_aliases,
+                rust_consts: rust_symbol_counts.consts,
+                rust_statics: rust_symbol_counts.statics,
+                rust_macros: rust_symbol_counts.macros,
+                rust_use_statements: rust_use_count,
+                rust_pub_use_reexports: rust_pub_use_count,
             };
 
             // 9. Print summary.
