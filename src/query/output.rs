@@ -874,6 +874,205 @@ pub fn format_context_results(
     }
 }
 
+// ---------------------------------------------------------------------------
+// MCP String-returning formatters (siblings of the println!-based CLI formatters)
+// ---------------------------------------------------------------------------
+
+/// Format find results to a String in compact format for MCP tool responses.
+///
+/// Summary header (total count) is written FIRST, before any result lines,
+/// so Claude can count-check results at a glance (CONTEXT.md locked decision).
+pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> String {
+    use std::fmt::Write;
+    let mut buf = String::new();
+    writeln!(buf, "{} definitions found", results.len()).unwrap();
+    for r in results {
+        let rel = r.file_path.strip_prefix(project_root).unwrap_or(&r.file_path);
+        writeln!(buf, "def {} {}:{} {}", r.symbol_name, rel.display(), r.line, kind_to_str(&r.kind)).unwrap();
+    }
+    buf
+}
+
+/// Format project stats to a String in compact format for MCP tool responses.
+///
+/// Summary header (file + symbol counts) is written FIRST.
+pub fn format_stats_to_string(stats: &ProjectStats) -> String {
+    use std::fmt::Write;
+    let mut buf = String::new();
+    writeln!(buf, "{} files, {} symbols", stats.file_count, stats.symbol_count).unwrap();
+    writeln!(buf, "files {}", stats.file_count).unwrap();
+    writeln!(buf, "symbols {}", stats.symbol_count).unwrap();
+    writeln!(
+        buf,
+        "functions {} classes {} interfaces {} types {} enums {} variables {} components {} methods {} properties {}",
+        stats.functions,
+        stats.classes,
+        stats.interfaces,
+        stats.type_aliases,
+        stats.enums,
+        stats.variables,
+        stats.components,
+        stats.methods,
+        stats.properties,
+    ).unwrap();
+    writeln!(
+        buf,
+        "imports {} external {} unresolved {}",
+        stats.import_edges, stats.external_packages, stats.unresolved_imports,
+    ).unwrap();
+    buf
+}
+
+/// Format reference results to a String in compact format for MCP tool responses.
+///
+/// Summary header (total count) is written FIRST.
+pub fn format_refs_to_string(results: &[RefResult], project_root: &Path) -> String {
+    use std::fmt::Write;
+    let mut buf = String::new();
+    writeln!(buf, "{} references found", results.len()).unwrap();
+    for r in results {
+        let rel = r.file_path.strip_prefix(project_root).unwrap_or(&r.file_path);
+        match r.ref_kind {
+            RefKind::Import => {
+                writeln!(buf, "ref {} import", rel.display()).unwrap();
+            }
+            RefKind::Call => {
+                let caller = r.symbol_name.as_deref().unwrap_or("?");
+                let line = r.line.map_or_else(|| "?".to_string(), |l| l.to_string());
+                writeln!(buf, "ref {}:{} call {}", rel.display(), line, caller).unwrap();
+            }
+        }
+    }
+    buf
+}
+
+/// Format impact (blast radius) results to a String in compact flat format for MCP tool responses.
+///
+/// Summary header (total count) is written FIRST. Uses flat (non-tree) format — MCP responses
+/// do not benefit from indentation and tree mode adds ambiguity when parsed by Claude.
+pub fn format_impact_to_string(results: &[ImpactResult], project_root: &Path) -> String {
+    use std::fmt::Write;
+    let mut buf = String::new();
+    writeln!(buf, "{} affected files", results.len()).unwrap();
+    for r in results {
+        let rel = r.file_path.strip_prefix(project_root).unwrap_or(&r.file_path);
+        writeln!(buf, "impact {}", rel.display()).unwrap();
+    }
+    buf
+}
+
+/// Format circular dependency results to a String in compact format for MCP tool responses.
+///
+/// Summary header (total count) is written FIRST.
+pub fn format_circular_to_string(cycles: &[CircularDep], project_root: &Path) -> String {
+    use std::fmt::Write;
+    let mut buf = String::new();
+    writeln!(buf, "{} circular dependencies found", cycles.len()).unwrap();
+    for cycle in cycles {
+        let parts: Vec<String> = cycle
+            .files
+            .iter()
+            .map(|p| {
+                p.strip_prefix(project_root)
+                    .unwrap_or(p)
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect();
+        writeln!(buf, "cycle {}", parts.join(" -> ")).unwrap();
+    }
+    buf
+}
+
+/// Format symbol context results to a String with labeled sections for MCP tool responses.
+///
+/// Summary header (`{N} symbols`) is written FIRST (CONTEXT.md locked decision).
+/// Each non-empty relationship group is preceded by a labeled section delimiter
+/// (`--- callers ---`, `--- callees ---`, etc.) so Claude can parse sections easily
+/// (CONTEXT.md locked decision on context/360-degree labeled sections).
+pub fn format_context_to_string(contexts: &[SymbolContext], project_root: &Path) -> String {
+    use std::fmt::Write;
+    let mut buf = String::new();
+    writeln!(buf, "{} symbols", contexts.len()).unwrap();
+    for ctx in contexts {
+        writeln!(buf, "symbol {}", ctx.symbol_name).unwrap();
+
+        if !ctx.definitions.is_empty() {
+            writeln!(buf, "--- definitions ---").unwrap();
+            for def in &ctx.definitions {
+                let rel = def.file_path.strip_prefix(project_root).unwrap_or(&def.file_path);
+                writeln!(buf, "def {}:{} {}", rel.display(), def.line, kind_to_str(&def.kind)).unwrap();
+            }
+        }
+
+        if !ctx.references.is_empty() {
+            writeln!(buf, "--- references ---").unwrap();
+            for r in &ctx.references {
+                let rel = r.file_path.strip_prefix(project_root).unwrap_or(&r.file_path);
+                match r.ref_kind {
+                    RefKind::Import => {
+                        writeln!(buf, "ref {} import", rel.display()).unwrap();
+                    }
+                    RefKind::Call => {
+                        let caller = r.symbol_name.as_deref().unwrap_or("?");
+                        let line = r.line.map_or_else(|| "?".to_string(), |l| l.to_string());
+                        writeln!(buf, "ref {}:{} call {}", rel.display(), line, caller).unwrap();
+                    }
+                }
+            }
+        }
+
+        if !ctx.callers.is_empty() {
+            writeln!(buf, "--- callers ---").unwrap();
+            for caller in &ctx.callers {
+                let rel = caller.file_path.strip_prefix(project_root).unwrap_or(&caller.file_path);
+                writeln!(buf, "called-by {} {}:{}", caller.symbol_name, rel.display(), caller.line).unwrap();
+            }
+        }
+
+        if !ctx.callees.is_empty() {
+            writeln!(buf, "--- callees ---").unwrap();
+            for callee in &ctx.callees {
+                let rel = callee.file_path.strip_prefix(project_root).unwrap_or(&callee.file_path);
+                writeln!(buf, "calls {} {}:{}", callee.symbol_name, rel.display(), callee.line).unwrap();
+            }
+        }
+
+        if !ctx.extends.is_empty() {
+            writeln!(buf, "--- extends ---").unwrap();
+            for ext in &ctx.extends {
+                let rel = ext.file_path.strip_prefix(project_root).unwrap_or(&ext.file_path);
+                writeln!(buf, "extends {} {}:{}", ext.symbol_name, rel.display(), ext.line).unwrap();
+            }
+        }
+
+        if !ctx.implements.is_empty() {
+            writeln!(buf, "--- implements ---").unwrap();
+            for imp in &ctx.implements {
+                let rel = imp.file_path.strip_prefix(project_root).unwrap_or(&imp.file_path);
+                writeln!(buf, "implements {} {}:{}", imp.symbol_name, rel.display(), imp.line).unwrap();
+            }
+        }
+
+        if !ctx.extended_by.is_empty() {
+            writeln!(buf, "--- extended-by ---").unwrap();
+            for ext_by in &ctx.extended_by {
+                let rel = ext_by.file_path.strip_prefix(project_root).unwrap_or(&ext_by.file_path);
+                writeln!(buf, "extended-by {} {}:{}", ext_by.symbol_name, rel.display(), ext_by.line).unwrap();
+            }
+        }
+
+        if !ctx.implemented_by.is_empty() {
+            writeln!(buf, "--- implemented-by ---").unwrap();
+            for impl_by in &ctx.implemented_by {
+                let rel = impl_by.file_path.strip_prefix(project_root).unwrap_or(&impl_by.file_path);
+                writeln!(buf, "implemented-by {} {}:{}", impl_by.symbol_name, rel.display(), impl_by.line).unwrap();
+            }
+        }
+    }
+    buf
+}
+
 /// Format and print circular dependency results to stdout.
 pub fn format_circular_results(cycles: &[CircularDep], format: &OutputFormat, project_root: &Path) {
     match format {
