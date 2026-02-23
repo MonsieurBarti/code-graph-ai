@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 2: Import Resolution & Graph Completion** - Full import resolution (tsconfig paths, barrel files, monorepo workspaces) and complete symbol-level graph
 - [x] **Phase 3: Query Engine & CLI** - All graph queries (definition, references, impact, circular deps, context) exposed via CLI commands (completed 2026-02-23)
 - [x] **Phase 4: MCP Integration** - rmcp stdio server exposing graph tools to Claude Code with token-optimized responses (completed 2026-02-23)
-- [ ] **Phase 5: Watch Mode & Persistence** - File watcher, incremental re-indexing (<100ms), graph persistence for fast cold starts
+- [x] **Phase 5: Watch Mode & Persistence** - File watcher, incremental re-indexing (<100ms), graph persistence for fast cold starts (completed 2026-02-23)
 - [ ] **Phase 6: Performance & Distribution** - Parallel parsing, memory optimization, single-binary distribution via cargo install
 
 ## Phase Details
@@ -91,7 +91,7 @@ Plans:
   1. Saving a file in an indexed project triggers an automatic incremental re-index with no user action
   2. A single-file change is fully re-indexed and the graph updated in under 100ms
   3. After stopping and restarting the daemon, the graph is available immediately (cold start reads persisted graph, skips parsing unchanged files)
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 Plans:
 - [ ] 05-01-PLAN.md — Serde derives on graph types, bincode cache envelope, remove_file helper (PERF-04)
 - [ ] 05-02-PLAN.md — File watcher with notify-debouncer-mini, incremental re-index pipeline (INTG-04, INTG-05)
@@ -119,5 +119,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 2. Import Resolution & Graph Completion | 4/4 | Complete | 2026-02-22 |
 | 3. Query Engine & CLI | 3/3 | Complete   | 2026-02-23 |
 | 4. MCP Integration | 2/2 | Complete   | 2026-02-23 |
-| 5. Watch Mode & Persistence | 2/3 | In Progress|  |
+| 5. Watch Mode & Persistence | 3/3 | Complete   | 2026-02-23 |
 | 6. Performance & Distribution | 0/TBD | Not started | - |
