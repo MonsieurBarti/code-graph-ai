@@ -1,6 +1,7 @@
 mod cli;
 mod config;
 mod graph;
+mod mcp;
 mod output;
 mod parser;
 mod query;
@@ -90,7 +91,8 @@ fn build_graph(path: &PathBuf, verbose: bool) -> Result<CodeGraph> {
     Ok(graph)
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -370,6 +372,11 @@ fn main() -> Result<()> {
                 .collect();
 
             query::output::format_context_results(&results, &format, &path, &symbol);
+        }
+
+        Commands::Mcp { path } => {
+            println!("MCP server not yet implemented");
+            let _ = path;
         }
     }
 
