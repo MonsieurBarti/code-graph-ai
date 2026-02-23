@@ -8,6 +8,7 @@ mod parser;
 mod query;
 mod resolver;
 mod walker;
+mod watcher;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

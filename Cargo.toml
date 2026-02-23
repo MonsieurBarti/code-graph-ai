@@ -23,3 +23,5 @@ regex = "1"
 rmcp = { version = "0.16", features = ["server", "transport-io", "macros"] }
 tokio = { version = "1", features = ["full"] }
 schemars = "1"
+notify = "8"
+notify-debouncer-mini = "0.7"
