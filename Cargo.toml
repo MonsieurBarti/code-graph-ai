@@ -1,7 +1,7 @@
 [package]
 name = "code-graph-cli"
-version = "0.1.0"
-edition = "2024"
+version = "1.0.0"
+edition = "2026"
 description = "Code intelligence engine for TypeScript/JavaScript — query the dependency graph instead of reading source files."
 license = "MIT"
 repository = "https://github.com/MonsieurBarti/code-graph-ai"
