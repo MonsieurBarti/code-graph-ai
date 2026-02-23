@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Phase: 5 of 6 (Watch Mode Persistence)
-Plan: 2 of 3 in current phase
+Plan: 3 of 3 in current phase
 Status: Executing
-Last activity: 2026-02-23 — Completed 05-02-PLAN.md (file watcher + incremental re-index pipeline)
+Last activity: 2026-02-23 — Completed 05-03-PLAN.md (MCP watcher+cache integration, Watch CLI command)
 
-Progress: [███████████] 65%
+Progress: [████████████] 70%
 
 ## Performance Metrics
 
@@ -50,6 +50,7 @@ Progress: [███████████] 65%
 | Phase 04 P02 | 23 | 2 tasks | 4 files |
 | Phase 05 P01 | 3 | 2 tasks | 7 files |
 | Phase 05 P02 | 4 | 2 tasks | 5 files |
+| Phase 05 P03 | 5 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -118,6 +119,10 @@ Recent decisions affecting current work:
 - [05-02]: classify_event uses path.exists() to distinguish Modified vs Deleted — debouncer-mini does not provide create/modify distinction
 - [05-02]: is_external_package/extract_package_name duplicated from resolver::mod.rs (private there) — 15 lines, stable, no visibility change needed
 - [05-02]: handle_file_event returns false for ConfigChanged — caller triggers full rebuild via build_graph
+- [05-03]: graph_cache upgraded from Mutex to RwLock — concurrent reads allowed for all MCP tool calls simultaneously
+- [05-03]: ensure_watcher_running lazy init: write lock held ONLY for HashMap insert (nanoseconds), never during parse/resolve/IO
+- [05-03]: apply_staleness_diff threshold: >=10% files changed triggers full rebuild instead of scoped re-resolve
+- [05-03]: Index command saves cache to .code-graph/graph.bin after indexing for fast MCP cold starts
 
 ### Pending Todos
 
@@ -132,6 +137,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 05-02-PLAN.md
-Resume file: .planning/phases/05-watch-mode-persistence/05-02-SUMMARY.md
-Resume file: .planning/phases/05-watch-mode-persistence/05-01-SUMMARY.md
+Stopped at: Completed 05-03-PLAN.md
+Resume file: .planning/phases/05-watch-mode-persistence/05-03-SUMMARY.md
