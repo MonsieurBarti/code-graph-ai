@@ -11,7 +11,7 @@ mod walker;
 mod watcher;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::Parser;
@@ -28,7 +28,7 @@ use walker::walk_project;
 ///
 /// This is the shared pipeline used by all query subcommands. The Index command has its own
 /// inline copy so it can also compute detailed stats without a second pass.
-pub(crate) fn build_graph(path: &PathBuf, verbose: bool) -> Result<CodeGraph> {
+pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
     let config = CodeGraphConfig::load(path);
     let files = walk_project(path, &config, verbose)?;
 
@@ -210,11 +210,10 @@ async fn main() -> Result<()> {
             print_summary(&stats, json);
 
             // 10. Save graph to disk cache for fast cold starts.
-            if let Err(e) = cache::save_cache(&path, &graph) {
-                if verbose {
+            if let Err(e) = cache::save_cache(&path, &graph)
+                && verbose {
                     eprintln!("  Cache save failed: {}", e);
                 }
-            }
         }
 
         Commands::Find {

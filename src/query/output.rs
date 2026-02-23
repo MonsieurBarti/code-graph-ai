@@ -55,21 +55,19 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
 
             if use_color {
                 println!(
-                    "\x1b[1m{:<name_w$}  {:<file_w$}  {:>4}  {}\x1b[0m",
+                    "\x1b[1m{:<name_w$}  {:<file_w$}  {:>4}  KIND\x1b[0m",
                     "SYMBOL",
                     "FILE",
                     "LINE",
-                    "KIND",
                     name_w = name_w,
                     file_w = file_w,
                 );
             } else {
                 println!(
-                    "{:<name_w$}  {:<file_w$}  {:>4}  {}",
+                    "{:<name_w$}  {:<file_w$}  {:>4}  KIND",
                     "SYMBOL",
                     "FILE",
                     "LINE",
-                    "KIND",
                     name_w = name_w,
                     file_w = file_w,
                 );

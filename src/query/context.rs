@@ -258,11 +258,10 @@ fn find_containing_file(
 ) -> Option<crate::graph::node::FileInfo> {
     // Direct Contains edge from file to symbol.
     for edge_ref in graph.graph.edges_directed(sym_idx, Direction::Incoming) {
-        if matches!(edge_ref.weight(), EdgeKind::Contains) {
-            if let GraphNode::File(ref fi) = graph.graph[edge_ref.source()] {
+        if matches!(edge_ref.weight(), EdgeKind::Contains)
+            && let GraphNode::File(ref fi) = graph.graph[edge_ref.source()] {
                 return Some(fi.clone());
             }
-        }
     }
 
     // Child symbol: follow ChildOf edge to parent, then Contains on parent.

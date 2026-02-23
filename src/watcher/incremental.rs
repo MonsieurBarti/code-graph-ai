@@ -236,8 +236,8 @@ fn fix_unresolved_pointing_to(
         .graph
         .node_indices()
         .filter_map(|idx| {
-            if let GraphNode::UnresolvedImport { specifier, reason } = &graph.graph[idx] {
-                if reason != "builtin" {
+            if let GraphNode::UnresolvedImport { specifier, reason } = &graph.graph[idx]
+                && reason != "builtin" {
                     // Find the importer (the node with an edge to this unresolved node)
                     let importer = graph
                         .graph
@@ -248,7 +248,6 @@ fn fix_unresolved_pointing_to(
                         return Some((idx, importer_idx, specifier.clone()));
                     }
                 }
-            }
             None
         })
         .collect();
@@ -275,13 +274,12 @@ fn fix_unresolved_pointing_to(
         };
 
         let outcome = resolve_import(&resolver, &importer_path, &specifier);
-        if let ResolutionOutcome::Resolved(resolved_path) = outcome {
-            if resolved_path == new_file_path {
+        if let ResolutionOutcome::Resolved(resolved_path) = outcome
+            && resolved_path == new_file_path {
                 // This unresolved import now resolves to the new file!
                 graph.graph.remove_node(unresolved_idx);
                 graph.add_resolved_import(importer_idx, new_file_idx, &specifier);
             }
-        }
     }
 }
 
