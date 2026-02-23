@@ -78,7 +78,7 @@ Plans:
   1. Adding the code-graph MCP server to Claude Code's config makes graph query tools appear in Claude's tool list automatically
   2. Claude can call a `find_symbol` tool and receive a location response compact enough that a 10-symbol result fits in under 200 tokens
   3. Each MCP tool description is under 100 tokens so per-turn overhead is negligible
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
 - [ ] 04-01-PLAN.md — Dependencies, async main, Mcp CLI subcommand, output formatter refactoring (INTG-02)
 - [ ] 04-02-PLAN.md — MCP stdio server with 6 tool handlers, param structs, error handling (INTG-01, INTG-02, INTG-03)
@@ -114,6 +114,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 1. Foundation & Core Parsing | 3/3 | Complete    | 2026-02-22 |
 | 2. Import Resolution & Graph Completion | 4/4 | Complete | 2026-02-22 |
 | 3. Query Engine & CLI | 3/3 | Complete   | 2026-02-23 |
-| 4. MCP Integration | 0/2 | Planning complete | - |
+| 4. MCP Integration | 1/2 | In Progress|  |
 | 5. Watch Mode & Persistence | 0/TBD | Not started | - |
 | 6. Performance & Distribution | 0/TBD | Not started | - |

@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Phase: 4 of 6 (MCP Integration)
-Plan: 0 of TBD in current phase
-Status: Context gathered, ready for planning
-Last activity: 2026-02-23 — Phase 4 context gathered (discuss-phase complete)
+Plan: 1 of TBD in current phase
+Status: Executing
+Last activity: 2026-02-23 — Completed 04-01-PLAN.md (MCP infrastructure layer)
 
-Progress: [█████████░] 53%
+Progress: [█████████░] 55%
 
 ## Performance Metrics
 
@@ -46,6 +46,7 @@ Progress: [█████████░] 53%
 | Phase 03 P01 | 7 | 2 tasks | 7 files |
 | Phase 03 P02 | 5 | 2 tasks | 7 files |
 | Phase 03 P03 | 127 | 1 tasks | 5 files |
+| Phase 04 P01 | 3 | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -97,6 +98,10 @@ Recent decisions affecting current work:
 - [03-02]: edge_ref.weight() used instead of graph.graph[edge_ref.id()] for EdgeKind matching — avoids type inference issue
 - [Phase 03]: symbol_context() walks both symbol-to-symbol Calls edges AND file-to-symbol Calls from parent file — required by Phase 2 resolver's file-level Calls emission
 - [Phase 03]: FindResult needed Clone derive for storage in SymbolContext.definitions — added #[derive(Clone)] to FindResult
+- [Phase 04-01]: format_*_to_string functions write summary header FIRST per CONTEXT.md locked decision
+- [Phase 04-01]: Converted main() to #[tokio::main] async fn — cleaner than block_on approach
+- [Phase 04-01]: format_impact_to_string uses flat format (no tree) for MCP — reduces parsing ambiguity
+- [Phase 04-01]: format_context_to_string uses labeled section delimiters per CONTEXT.md locked decision
 
 ### Pending Todos
 
@@ -111,5 +116,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Phase 4 context gathered
+Stopped at: Completed 04-01-PLAN.md
 Resume file: .planning/phases/04-mcp-integration/04-CONTEXT.md
