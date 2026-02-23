@@ -17,22 +17,30 @@ Gives [Claude Code](https://docs.anthropic.com/en/docs/claude-code) direct acces
 
 ## Install
 
+```bash
+cargo install code-graph-cli
+```
+
+This installs the `code-graph` binary to `~/.cargo/bin/`.
+
 ### From source
 
 ```bash
+git clone https://github.com/MonsieurBarti/code-graph-ai.git
+cd code-graph-ai
 cargo install --path .
 ```
 
 ### Build manually
 
 ```bash
-git clone https://github.com/user/code-graph.git
-cd code-graph
+git clone https://github.com/MonsieurBarti/code-graph-ai.git
+cd code-graph-ai
 cargo build --release
 # Binary at target/release/code-graph
 ```
 
-Requires Rust 1.85+ (edition 2024). No system dependencies — tree-sitter grammars are bundled.
+Requires Rust 1.85+ (edition 2024). No runtime dependencies — tree-sitter grammars are statically linked.
 
 ## Quick start
 
