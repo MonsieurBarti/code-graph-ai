@@ -1,11 +1,15 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use petgraph::Direction;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::EdgeRef;
-use petgraph::Direction;
 
-use crate::graph::{CodeGraph, edge::EdgeKind, node::{GraphNode, SymbolKind}};
+use crate::graph::{
+    CodeGraph,
+    edge::EdgeKind,
+    node::{GraphNode, SymbolKind},
+};
 use crate::query::find::FindResult;
 use crate::query::refs::RefResult;
 
@@ -88,7 +92,8 @@ pub fn symbol_context(
     // -------------------------------------------------------------------------
     // References: reuse find_refs for import and call references.
     // -------------------------------------------------------------------------
-    let references = crate::query::refs::find_refs(graph, symbol_name, symbol_indices, project_root);
+    let references =
+        crate::query::refs::find_refs(graph, symbol_name, symbol_indices, project_root);
 
     // -------------------------------------------------------------------------
     // Callers: symbols that have an outgoing Calls edge to any of our symbol nodes
@@ -259,9 +264,10 @@ fn find_containing_file(
     // Direct Contains edge from file to symbol.
     for edge_ref in graph.graph.edges_directed(sym_idx, Direction::Incoming) {
         if matches!(edge_ref.weight(), EdgeKind::Contains)
-            && let GraphNode::File(ref fi) = graph.graph[edge_ref.source()] {
-                return Some(fi.clone());
-            }
+            && let GraphNode::File(ref fi) = graph.graph[edge_ref.source()]
+        {
+            return Some(fi.clone());
+        }
     }
 
     // Child symbol: follow ChildOf edge to parent, then Contains on parent.
@@ -329,7 +335,10 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use crate::graph::{CodeGraph, node::{SymbolInfo, SymbolKind}};
+    use crate::graph::{
+        CodeGraph,
+        node::{SymbolInfo, SymbolKind},
+    };
 
     fn root() -> PathBuf {
         PathBuf::from("/proj")
@@ -385,7 +394,10 @@ mod tests {
 
         // handleRequest calls UserService, so UserService has no callees of its own
         let _ = handle_request; // suppress unused warning
-        assert!(ctx.callees.is_empty(), "UserService has no outgoing Calls edges");
+        assert!(
+            ctx.callees.is_empty(),
+            "UserService has no outgoing Calls edges"
+        );
     }
 
     #[test]

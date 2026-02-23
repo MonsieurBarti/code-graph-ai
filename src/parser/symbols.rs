@@ -138,21 +138,16 @@ static TSX_QUERY: OnceLock<Query> = OnceLock::new();
 static JS_QUERY: OnceLock<Query> = OnceLock::new();
 
 fn ts_query(language: &Language) -> &'static Query {
-    TS_QUERY.get_or_init(|| {
-        Query::new(language, SYMBOL_QUERY_TS).expect("invalid TS symbol query")
-    })
+    TS_QUERY.get_or_init(|| Query::new(language, SYMBOL_QUERY_TS).expect("invalid TS symbol query"))
 }
 
 fn tsx_query(language: &Language) -> &'static Query {
-    TSX_QUERY.get_or_init(|| {
-        Query::new(language, SYMBOL_QUERY_TSX).expect("invalid TSX symbol query")
-    })
+    TSX_QUERY
+        .get_or_init(|| Query::new(language, SYMBOL_QUERY_TSX).expect("invalid TSX symbol query"))
 }
 
 fn js_query(language: &Language) -> &'static Query {
-    JS_QUERY.get_or_init(|| {
-        Query::new(language, SYMBOL_QUERY_JS).expect("invalid JS symbol query")
-    })
+    JS_QUERY.get_or_init(|| Query::new(language, SYMBOL_QUERY_JS).expect("invalid JS symbol query"))
 }
 
 // ---------------------------------------------------------------------------
@@ -303,13 +298,14 @@ fn classify_lexical_declaration(lex_decl: Node) -> Option<String> {
     let mut cursor = lex_decl.walk();
     for child in lex_decl.children(&mut cursor) {
         if child.kind() == "variable_declarator"
-            && let Some(value_node) = child.child_by_field_name("value") {
-                if is_arrow_or_function_value(value_node) {
-                    return Some("arrow_function_decl".into());
-                } else {
-                    return Some("exported_variable".into());
-                }
+            && let Some(value_node) = child.child_by_field_name("value")
+        {
+            if is_arrow_or_function_value(value_node) {
+                return Some("arrow_function_decl".into());
+            } else {
+                return Some("exported_variable".into());
             }
+        }
     }
     None
 }
@@ -334,11 +330,12 @@ fn arrow_body_contains_jsx(symbol_node: Node, name_node: Node) -> bool {
 fn find_arrow_body<'a>(node: Node<'a>, name_node: Node<'a>) -> Option<Node<'a>> {
     if node.kind() == "variable_declarator"
         && let Some(decl_name) = node.child_by_field_name("name")
-            && decl_name.id() == name_node.id()
-                && let Some(value) = node.child_by_field_name("value")
-                    && is_arrow_or_function_value(value) {
-                        return value.child_by_field_name("body");
-                    }
+        && decl_name.id() == name_node.id()
+        && let Some(value) = node.child_by_field_name("value")
+        && is_arrow_or_function_value(value)
+    {
+        return value.child_by_field_name("body");
+    }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if let Some(found) = find_arrow_body(child, name_node) {
@@ -417,18 +414,19 @@ fn extract_class_children(class_node: Node, source: &[u8]) -> Vec<SymbolInfo> {
     let mut cursor = body.walk();
     for child in body.children(&mut cursor) {
         if child.kind() == "method_definition"
-            && let Some(name_node) = child.child_by_field_name("name") {
-                let name = node_text(name_node, source).to_owned();
-                let pos = name_node.start_position();
-                children.push(SymbolInfo {
-                    name,
-                    kind: SymbolKind::Method,
-                    line: pos.row + 1,
-                    col: pos.column,
-                    is_exported: false,
-                    is_default: false,
-                });
-            }
+            && let Some(name_node) = child.child_by_field_name("name")
+        {
+            let name = node_text(name_node, source).to_owned();
+            let pos = name_node.start_position();
+            children.push(SymbolInfo {
+                name,
+                kind: SymbolKind::Method,
+                line: pos.row + 1,
+                col: pos.column,
+                is_exported: false,
+                is_default: false,
+            });
+        }
     }
     children
 }
@@ -532,9 +530,10 @@ pub fn extract_symbols(
         // For exported-variable matches that are actually arrow functions — skip.
         if kind == SymbolKind::Variable
             && let Some(val) = val_node
-                && is_arrow_or_function_value(val) {
-                    continue;
-                }
+            && is_arrow_or_function_value(val)
+        {
+            continue;
+        }
 
         let (is_exported, is_default) = detect_export(sym_node, source);
 

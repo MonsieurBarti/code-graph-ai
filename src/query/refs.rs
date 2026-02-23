@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use petgraph::Direction;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::EdgeRef;
-use petgraph::Direction;
 
 use crate::graph::{CodeGraph, edge::EdgeKind, node::GraphNode};
 
@@ -177,7 +177,10 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use crate::graph::{CodeGraph, node::{SymbolInfo, SymbolKind}};
+    use crate::graph::{
+        CodeGraph,
+        node::{SymbolInfo, SymbolKind},
+    };
 
     fn make_graph() -> (CodeGraph, PathBuf) {
         let root = PathBuf::from("/proj");
@@ -223,7 +226,11 @@ mod tests {
             .filter(|r| matches!(r.ref_kind, RefKind::Import))
             .collect();
 
-        assert_eq!(import_refs.len(), 1, "exactly one import reference expected");
+        assert_eq!(
+            import_refs.len(),
+            1,
+            "exactly one import reference expected"
+        );
         assert!(
             import_refs[0].file_path.ends_with("importer.ts"),
             "importer.ts should appear as import ref"

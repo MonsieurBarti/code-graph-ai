@@ -190,7 +190,10 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat) {
                 "external_packages": stats.external_packages,
                 "unresolved_imports": stats.unresolved_imports,
             });
-            println!("{}", serde_json::to_string_pretty(&json).unwrap_or_default());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json).unwrap_or_default()
+            );
         }
     }
 }
@@ -378,12 +381,7 @@ pub fn format_impact_results(
                     file_w = file_w,
                 );
             } else {
-                println!(
-                    "{:>5}  {:<file_w$}",
-                    "DEPTH",
-                    "FILE",
-                    file_w = file_w,
-                );
+                println!("{:>5}  {:<file_w$}", "DEPTH", "FILE", file_w = file_w,);
             }
             println!("{}", "-".repeat(file_w + 8));
 
@@ -451,7 +449,12 @@ pub fn format_context_results(
                         .file_path
                         .strip_prefix(project_root)
                         .unwrap_or(&def.file_path);
-                    println!("def {}:{} {}", rel.display(), def.line, kind_to_str(&def.kind));
+                    println!(
+                        "def {}:{} {}",
+                        rel.display(),
+                        def.line,
+                        kind_to_str(&def.kind)
+                    );
                 }
 
                 for r in &ctx.references {
@@ -476,7 +479,12 @@ pub fn format_context_results(
                         .file_path
                         .strip_prefix(project_root)
                         .unwrap_or(&callee.file_path);
-                    println!("calls {} {}:{}", callee.symbol_name, rel.display(), callee.line);
+                    println!(
+                        "calls {} {}:{}",
+                        callee.symbol_name,
+                        rel.display(),
+                        callee.line
+                    );
                 }
 
                 for caller in &ctx.callers {
@@ -731,8 +739,10 @@ pub fn format_context_results(
                         .definitions
                         .iter()
                         .map(|d| {
-                            let rel =
-                                d.file_path.strip_prefix(project_root).unwrap_or(&d.file_path);
+                            let rel = d
+                                .file_path
+                                .strip_prefix(project_root)
+                                .unwrap_or(&d.file_path);
                             serde_json::json!({
                                 "file": rel.to_string_lossy(),
                                 "line": d.line,
@@ -746,8 +756,10 @@ pub fn format_context_results(
                         .references
                         .iter()
                         .map(|r| {
-                            let rel =
-                                r.file_path.strip_prefix(project_root).unwrap_or(&r.file_path);
+                            let rel = r
+                                .file_path
+                                .strip_prefix(project_root)
+                                .unwrap_or(&r.file_path);
                             let kind_str = match r.ref_kind {
                                 RefKind::Import => "import",
                                 RefKind::Call => "call",
@@ -765,8 +777,10 @@ pub fn format_context_results(
                         .callees
                         .iter()
                         .map(|c| {
-                            let rel =
-                                c.file_path.strip_prefix(project_root).unwrap_or(&c.file_path);
+                            let rel = c
+                                .file_path
+                                .strip_prefix(project_root)
+                                .unwrap_or(&c.file_path);
                             serde_json::json!({
                                 "name": c.symbol_name,
                                 "kind": kind_to_str(&c.kind),
@@ -780,8 +794,10 @@ pub fn format_context_results(
                         .callers
                         .iter()
                         .map(|c| {
-                            let rel =
-                                c.file_path.strip_prefix(project_root).unwrap_or(&c.file_path);
+                            let rel = c
+                                .file_path
+                                .strip_prefix(project_root)
+                                .unwrap_or(&c.file_path);
                             serde_json::json!({
                                 "name": c.symbol_name,
                                 "kind": kind_to_str(&c.kind),
@@ -795,8 +811,10 @@ pub fn format_context_results(
                         .extends
                         .iter()
                         .map(|e| {
-                            let rel =
-                                e.file_path.strip_prefix(project_root).unwrap_or(&e.file_path);
+                            let rel = e
+                                .file_path
+                                .strip_prefix(project_root)
+                                .unwrap_or(&e.file_path);
                             serde_json::json!({
                                 "name": e.symbol_name,
                                 "kind": kind_to_str(&e.kind),
@@ -810,8 +828,10 @@ pub fn format_context_results(
                         .implements
                         .iter()
                         .map(|i| {
-                            let rel =
-                                i.file_path.strip_prefix(project_root).unwrap_or(&i.file_path);
+                            let rel = i
+                                .file_path
+                                .strip_prefix(project_root)
+                                .unwrap_or(&i.file_path);
                             serde_json::json!({
                                 "name": i.symbol_name,
                                 "kind": kind_to_str(&i.kind),
@@ -825,8 +845,10 @@ pub fn format_context_results(
                         .extended_by
                         .iter()
                         .map(|e| {
-                            let rel =
-                                e.file_path.strip_prefix(project_root).unwrap_or(&e.file_path);
+                            let rel = e
+                                .file_path
+                                .strip_prefix(project_root)
+                                .unwrap_or(&e.file_path);
                             serde_json::json!({
                                 "name": e.symbol_name,
                                 "kind": kind_to_str(&e.kind),
@@ -840,8 +862,10 @@ pub fn format_context_results(
                         .implemented_by
                         .iter()
                         .map(|i| {
-                            let rel =
-                                i.file_path.strip_prefix(project_root).unwrap_or(&i.file_path);
+                            let rel = i
+                                .file_path
+                                .strip_prefix(project_root)
+                                .unwrap_or(&i.file_path);
                             serde_json::json!({
                                 "name": i.symbol_name,
                                 "kind": kind_to_str(&i.kind),
@@ -885,8 +909,19 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
     let mut buf = String::new();
     writeln!(buf, "{} definitions found", results.len()).unwrap();
     for r in results {
-        let rel = r.file_path.strip_prefix(project_root).unwrap_or(&r.file_path);
-        writeln!(buf, "def {} {}:{} {}", r.symbol_name, rel.display(), r.line, kind_to_str(&r.kind)).unwrap();
+        let rel = r
+            .file_path
+            .strip_prefix(project_root)
+            .unwrap_or(&r.file_path);
+        writeln!(
+            buf,
+            "def {} {}:{} {}",
+            r.symbol_name,
+            rel.display(),
+            r.line,
+            kind_to_str(&r.kind)
+        )
+        .unwrap();
     }
     buf
 }
@@ -897,7 +932,12 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
 pub fn format_stats_to_string(stats: &ProjectStats) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
-    writeln!(buf, "{} files, {} symbols", stats.file_count, stats.symbol_count).unwrap();
+    writeln!(
+        buf,
+        "{} files, {} symbols",
+        stats.file_count, stats.symbol_count
+    )
+    .unwrap();
     writeln!(buf, "files {}", stats.file_count).unwrap();
     writeln!(buf, "symbols {}", stats.symbol_count).unwrap();
     writeln!(
@@ -917,7 +957,8 @@ pub fn format_stats_to_string(stats: &ProjectStats) -> String {
         buf,
         "imports {} external {} unresolved {}",
         stats.import_edges, stats.external_packages, stats.unresolved_imports,
-    ).unwrap();
+    )
+    .unwrap();
     buf
 }
 
@@ -929,7 +970,10 @@ pub fn format_refs_to_string(results: &[RefResult], project_root: &Path) -> Stri
     let mut buf = String::new();
     writeln!(buf, "{} references found", results.len()).unwrap();
     for r in results {
-        let rel = r.file_path.strip_prefix(project_root).unwrap_or(&r.file_path);
+        let rel = r
+            .file_path
+            .strip_prefix(project_root)
+            .unwrap_or(&r.file_path);
         match r.ref_kind {
             RefKind::Import => {
                 writeln!(buf, "ref {} import", rel.display()).unwrap();
@@ -953,7 +997,10 @@ pub fn format_impact_to_string(results: &[ImpactResult], project_root: &Path) ->
     let mut buf = String::new();
     writeln!(buf, "{} affected files", results.len()).unwrap();
     for r in results {
-        let rel = r.file_path.strip_prefix(project_root).unwrap_or(&r.file_path);
+        let rel = r
+            .file_path
+            .strip_prefix(project_root)
+            .unwrap_or(&r.file_path);
         writeln!(buf, "impact {}", rel.display()).unwrap();
     }
     buf
@@ -998,15 +1045,28 @@ pub fn format_context_to_string(contexts: &[SymbolContext], project_root: &Path)
         if !ctx.definitions.is_empty() {
             writeln!(buf, "--- definitions ---").unwrap();
             for def in &ctx.definitions {
-                let rel = def.file_path.strip_prefix(project_root).unwrap_or(&def.file_path);
-                writeln!(buf, "def {}:{} {}", rel.display(), def.line, kind_to_str(&def.kind)).unwrap();
+                let rel = def
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&def.file_path);
+                writeln!(
+                    buf,
+                    "def {}:{} {}",
+                    rel.display(),
+                    def.line,
+                    kind_to_str(&def.kind)
+                )
+                .unwrap();
             }
         }
 
         if !ctx.references.is_empty() {
             writeln!(buf, "--- references ---").unwrap();
             for r in &ctx.references {
-                let rel = r.file_path.strip_prefix(project_root).unwrap_or(&r.file_path);
+                let rel = r
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&r.file_path);
                 match r.ref_kind {
                     RefKind::Import => {
                         writeln!(buf, "ref {} import", rel.display()).unwrap();
@@ -1023,48 +1083,108 @@ pub fn format_context_to_string(contexts: &[SymbolContext], project_root: &Path)
         if !ctx.callers.is_empty() {
             writeln!(buf, "--- callers ---").unwrap();
             for caller in &ctx.callers {
-                let rel = caller.file_path.strip_prefix(project_root).unwrap_or(&caller.file_path);
-                writeln!(buf, "called-by {} {}:{}", caller.symbol_name, rel.display(), caller.line).unwrap();
+                let rel = caller
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&caller.file_path);
+                writeln!(
+                    buf,
+                    "called-by {} {}:{}",
+                    caller.symbol_name,
+                    rel.display(),
+                    caller.line
+                )
+                .unwrap();
             }
         }
 
         if !ctx.callees.is_empty() {
             writeln!(buf, "--- callees ---").unwrap();
             for callee in &ctx.callees {
-                let rel = callee.file_path.strip_prefix(project_root).unwrap_or(&callee.file_path);
-                writeln!(buf, "calls {} {}:{}", callee.symbol_name, rel.display(), callee.line).unwrap();
+                let rel = callee
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&callee.file_path);
+                writeln!(
+                    buf,
+                    "calls {} {}:{}",
+                    callee.symbol_name,
+                    rel.display(),
+                    callee.line
+                )
+                .unwrap();
             }
         }
 
         if !ctx.extends.is_empty() {
             writeln!(buf, "--- extends ---").unwrap();
             for ext in &ctx.extends {
-                let rel = ext.file_path.strip_prefix(project_root).unwrap_or(&ext.file_path);
-                writeln!(buf, "extends {} {}:{}", ext.symbol_name, rel.display(), ext.line).unwrap();
+                let rel = ext
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&ext.file_path);
+                writeln!(
+                    buf,
+                    "extends {} {}:{}",
+                    ext.symbol_name,
+                    rel.display(),
+                    ext.line
+                )
+                .unwrap();
             }
         }
 
         if !ctx.implements.is_empty() {
             writeln!(buf, "--- implements ---").unwrap();
             for imp in &ctx.implements {
-                let rel = imp.file_path.strip_prefix(project_root).unwrap_or(&imp.file_path);
-                writeln!(buf, "implements {} {}:{}", imp.symbol_name, rel.display(), imp.line).unwrap();
+                let rel = imp
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&imp.file_path);
+                writeln!(
+                    buf,
+                    "implements {} {}:{}",
+                    imp.symbol_name,
+                    rel.display(),
+                    imp.line
+                )
+                .unwrap();
             }
         }
 
         if !ctx.extended_by.is_empty() {
             writeln!(buf, "--- extended-by ---").unwrap();
             for ext_by in &ctx.extended_by {
-                let rel = ext_by.file_path.strip_prefix(project_root).unwrap_or(&ext_by.file_path);
-                writeln!(buf, "extended-by {} {}:{}", ext_by.symbol_name, rel.display(), ext_by.line).unwrap();
+                let rel = ext_by
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&ext_by.file_path);
+                writeln!(
+                    buf,
+                    "extended-by {} {}:{}",
+                    ext_by.symbol_name,
+                    rel.display(),
+                    ext_by.line
+                )
+                .unwrap();
             }
         }
 
         if !ctx.implemented_by.is_empty() {
             writeln!(buf, "--- implemented-by ---").unwrap();
             for impl_by in &ctx.implemented_by {
-                let rel = impl_by.file_path.strip_prefix(project_root).unwrap_or(&impl_by.file_path);
-                writeln!(buf, "implemented-by {} {}:{}", impl_by.symbol_name, rel.display(), impl_by.line).unwrap();
+                let rel = impl_by
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&impl_by.file_path);
+                writeln!(
+                    buf,
+                    "implemented-by {} {}:{}",
+                    impl_by.symbol_name,
+                    rel.display(),
+                    impl_by.line
+                )
+                .unwrap();
             }
         }
     }

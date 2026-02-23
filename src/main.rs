@@ -37,16 +37,13 @@ pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
         .par_iter()
         .filter_map(|file_path| {
             let source = std::fs::read(file_path).ok()?;
-            let language_str: &'static str = match file_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-            {
-                "ts" => "typescript",
-                "tsx" => "tsx",
-                "js" | "jsx" => "javascript",
-                _ => return None,
-            };
+            let language_str: &'static str =
+                match file_path.extension().and_then(|e| e.to_str()).unwrap_or("") {
+                    "ts" => "typescript",
+                    "tsx" => "tsx",
+                    "js" | "jsx" => "javascript",
+                    _ => return None,
+                };
             let result = parser::parse_file_parallel(file_path, &source).ok()?;
             Some((file_path.clone(), language_str, result))
         })
@@ -89,7 +86,11 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Index { path, verbose, json } => {
+        Commands::Index {
+            path,
+            verbose,
+            json,
+        } => {
             // 1. Load config (always succeeds — defaults when file is absent).
             let config = CodeGraphConfig::load(&path);
 
@@ -114,16 +115,13 @@ async fn main() -> Result<()> {
                 .par_iter()
                 .filter_map(|file_path| {
                     let source = std::fs::read(file_path).ok()?;
-                    let language_str: &'static str = match file_path
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .unwrap_or("")
-                    {
-                        "ts" => "typescript",
-                        "tsx" => "tsx",
-                        "js" | "jsx" => "javascript",
-                        _ => return None,
-                    };
+                    let language_str: &'static str =
+                        match file_path.extension().and_then(|e| e.to_str()).unwrap_or("") {
+                            "ts" => "typescript",
+                            "tsx" => "tsx",
+                            "js" | "jsx" => "javascript",
+                            _ => return None,
+                        };
                     let result = parser::parse_file_parallel(file_path, &source).ok()?;
                     Some((file_path.clone(), language_str, result))
                 })
@@ -211,9 +209,10 @@ async fn main() -> Result<()> {
 
             // 10. Save graph to disk cache for fast cold starts.
             if let Err(e) = cache::save_cache(&path, &graph)
-                && verbose {
-                    eprintln!("  Cache save failed: {}", e);
-                }
+                && verbose
+            {
+                eprintln!("  Cache save failed: {}", e);
+            }
         }
 
         Commands::Find {
@@ -277,8 +276,10 @@ async fn main() -> Result<()> {
             }
 
             // Collect all matched NodeIndices.
-            let all_indices: Vec<petgraph::stable_graph::NodeIndex> =
-                matches.iter().flat_map(|(_, indices)| indices.iter().copied()).collect();
+            let all_indices: Vec<petgraph::stable_graph::NodeIndex> = matches
+                .iter()
+                .flat_map(|(_, indices)| indices.iter().copied())
+                .collect();
 
             let results = query::refs::find_refs(&graph, &symbol, &all_indices, &path);
 
@@ -310,8 +311,10 @@ async fn main() -> Result<()> {
                 std::process::exit(1);
             }
 
-            let all_indices: Vec<petgraph::stable_graph::NodeIndex> =
-                matches.iter().flat_map(|(_, indices)| indices.iter().copied()).collect();
+            let all_indices: Vec<petgraph::stable_graph::NodeIndex> = matches
+                .iter()
+                .flat_map(|(_, indices)| indices.iter().copied())
+                .collect();
 
             let results = query::impact::blast_radius(&graph, &all_indices, &path);
             query::output::format_impact_results(&results, &format, &path, tree);
@@ -351,9 +354,7 @@ async fn main() -> Result<()> {
             // Build one SymbolContext per matched symbol name.
             let results: Vec<query::context::SymbolContext> = matches
                 .iter()
-                .map(|(name, indices)| {
-                    query::context::symbol_context(&graph, name, indices, &path)
-                })
+                .map(|(name, indices)| query::context::symbol_context(&graph, name, indices, &path))
                 .collect();
 
             query::output::format_context_results(&results, &format, &path, &symbol);

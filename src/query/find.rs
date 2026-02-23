@@ -1,12 +1,16 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use petgraph::Direction;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::EdgeRef;
-use petgraph::Direction;
 use regex::RegexBuilder;
 
-use crate::graph::{CodeGraph, edge::EdgeKind, node::{GraphNode, SymbolKind}};
+use crate::graph::{
+    CodeGraph,
+    edge::EdgeKind,
+    node::{GraphNode, SymbolKind},
+};
 
 /// A single matching symbol definition returned by `find_symbol`.
 #[derive(Debug, Clone)]
@@ -40,7 +44,10 @@ pub fn kind_to_str(kind: &SymbolKind) -> &'static str {
 /// `Contains` edges go FILE -> SYMBOL (outgoing from file, incoming to symbol).
 /// We must filter specifically to `EdgeKind::Contains` because other edges (e.g. `Calls`)
 /// also arrive at symbol nodes with a File as source.
-fn find_containing_file(graph: &CodeGraph, sym_idx: petgraph::stable_graph::NodeIndex) -> Option<crate::graph::node::FileInfo> {
+fn find_containing_file(
+    graph: &CodeGraph,
+    sym_idx: petgraph::stable_graph::NodeIndex,
+) -> Option<crate::graph::node::FileInfo> {
     graph
         .graph
         .edges_directed(sym_idx, Direction::Incoming)
@@ -59,7 +66,10 @@ fn find_containing_file(graph: &CodeGraph, sym_idx: petgraph::stable_graph::Node
 ///
 /// ChildOf edges go CHILD -> PARENT (outgoing from child). So we traverse Outgoing to get
 /// the parent symbol, then use `find_containing_file` on the parent.
-fn find_containing_file_of_child(graph: &CodeGraph, child_idx: petgraph::stable_graph::NodeIndex) -> Option<crate::graph::node::FileInfo> {
+fn find_containing_file_of_child(
+    graph: &CodeGraph,
+    child_idx: petgraph::stable_graph::NodeIndex,
+) -> Option<crate::graph::node::FileInfo> {
     graph
         .graph
         .edges_directed(child_idx, Direction::Outgoing)
@@ -187,7 +197,10 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use crate::graph::{CodeGraph, node::{SymbolInfo, SymbolKind}};
+    use crate::graph::{
+        CodeGraph,
+        node::{SymbolInfo, SymbolKind},
+    };
 
     fn make_graph_with_symbols() -> (CodeGraph, PathBuf) {
         let root = PathBuf::from("/proj");

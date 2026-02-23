@@ -24,9 +24,7 @@ impl CodeGraphConfig {
             Ok(contents) => match toml::from_str::<Self>(&contents) {
                 Ok(config) => config,
                 Err(err) => {
-                    eprintln!(
-                        "warning: failed to parse code-graph.toml: {err}. Using defaults."
-                    );
+                    eprintln!("warning: failed to parse code-graph.toml: {err}. Using defaults.");
                     Self::default()
                 }
             },

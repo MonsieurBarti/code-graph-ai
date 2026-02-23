@@ -16,14 +16,17 @@ pub fn discover_workspace_packages(root: &Path) -> HashMap<String, PathBuf> {
             for pkg_json_path in paths.flatten() {
                 if let Some(pkg_dir) = pkg_json_path.parent()
                     && let Ok(content) = std::fs::read_to_string(&pkg_json_path)
-                        && let Ok(json) =
-                            serde_json::from_str::<serde_json::Value>(&content)
-                            && let Some(name) = json["name"].as_str() {
-                                let src = pkg_dir.join("src");
-                                let target =
-                                    if src.exists() { src } else { pkg_dir.to_path_buf() };
-                                result.insert(name.to_owned(), target);
-                            }
+                    && let Ok(json) = serde_json::from_str::<serde_json::Value>(&content)
+                    && let Some(name) = json["name"].as_str()
+                {
+                    let src = pkg_dir.join("src");
+                    let target = if src.exists() {
+                        src
+                    } else {
+                        pkg_dir.to_path_buf()
+                    };
+                    result.insert(name.to_owned(), target);
+                }
             }
         }
     }
@@ -38,17 +41,22 @@ fn read_workspace_globs(root: &Path) -> Vec<String> {
     // pnpm: pnpm-workspace.yaml with 'packages:' array
     let pnpm_yaml = root.join("pnpm-workspace.yaml");
     if pnpm_yaml.exists()
-        && let Ok(content) = std::fs::read_to_string(&pnpm_yaml) {
-            return parse_pnpm_workspace_yaml(&content);
-        }
+        && let Ok(content) = std::fs::read_to_string(&pnpm_yaml)
+    {
+        return parse_pnpm_workspace_yaml(&content);
+    }
 
     // npm/yarn: package.json with 'workspaces' array
     let pkg_json = root.join("package.json");
     if let Ok(content) = std::fs::read_to_string(&pkg_json)
         && let Ok(json) = serde_json::from_str::<serde_json::Value>(&content)
-            && let Some(arr) = json["workspaces"].as_array() {
-                return arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
-            }
+        && let Some(arr) = json["workspaces"].as_array()
+    {
+        return arr
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+    }
 
     vec![]
 }

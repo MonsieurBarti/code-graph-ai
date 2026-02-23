@@ -164,15 +164,13 @@ fn import_query(language: &Language, is_tsx: bool) -> &'static Query {
 
 fn require_query(language: &Language, is_tsx: bool) -> &'static Query {
     match lang_group(language, is_tsx) {
-        LangGroup::TypeScript => TS_REQUIRE_QUERY.get_or_init(|| {
-            Query::new(language, REQUIRE_QUERY).expect("invalid TS require query")
-        }),
+        LangGroup::TypeScript => TS_REQUIRE_QUERY
+            .get_or_init(|| Query::new(language, REQUIRE_QUERY).expect("invalid TS require query")),
         LangGroup::Tsx => TSX_REQUIRE_QUERY.get_or_init(|| {
             Query::new(language, REQUIRE_QUERY).expect("invalid TSX require query")
         }),
-        LangGroup::JavaScript => JS_REQUIRE_QUERY.get_or_init(|| {
-            Query::new(language, REQUIRE_QUERY).expect("invalid JS require query")
-        }),
+        LangGroup::JavaScript => JS_REQUIRE_QUERY
+            .get_or_init(|| Query::new(language, REQUIRE_QUERY).expect("invalid JS require query")),
     }
 }
 
@@ -192,15 +190,12 @@ fn dynamic_import_query(language: &Language, is_tsx: bool) -> &'static Query {
 
 fn export_query(language: &Language, is_tsx: bool) -> &'static Query {
     match lang_group(language, is_tsx) {
-        LangGroup::TypeScript => TS_EXPORT_QUERY.get_or_init(|| {
-            Query::new(language, EXPORT_QUERY).expect("invalid TS export query")
-        }),
-        LangGroup::Tsx => TSX_EXPORT_QUERY.get_or_init(|| {
-            Query::new(language, EXPORT_QUERY).expect("invalid TSX export query")
-        }),
-        LangGroup::JavaScript => JS_EXPORT_QUERY.get_or_init(|| {
-            Query::new(language, EXPORT_QUERY).expect("invalid JS export query")
-        }),
+        LangGroup::TypeScript => TS_EXPORT_QUERY
+            .get_or_init(|| Query::new(language, EXPORT_QUERY).expect("invalid TS export query")),
+        LangGroup::Tsx => TSX_EXPORT_QUERY
+            .get_or_init(|| Query::new(language, EXPORT_QUERY).expect("invalid TSX export query")),
+        LangGroup::JavaScript => JS_EXPORT_QUERY
+            .get_or_init(|| Query::new(language, EXPORT_QUERY).expect("invalid JS export query")),
     }
 }
 
@@ -317,7 +312,7 @@ fn extract_named_imports(
                 (Some(n), Some(a)) => {
                     // `import { foo as bar }` — n="foo", a="bar"
                     specifiers.push(ImportSpecifier {
-                        name: node_text(a, source).to_owned(), // local binding
+                        name: node_text(a, source).to_owned(),        // local binding
                         alias: Some(node_text(n, source).to_owned()), // original name
                         is_default: false,
                         is_namespace: false,
@@ -358,7 +353,12 @@ fn find_require_binding(call_node: Node, source: &[u8]) -> Option<String> {
 ///
 /// `is_tsx` must be `true` for `.tsx` and `.jsx` files — used to select the correct
 /// per-grammar query cache. This mirrors the `is_tsx` convention from `extract_symbols`.
-pub fn extract_imports(tree: &Tree, source: &[u8], language: &Language, is_tsx: bool) -> Vec<ImportInfo> {
+pub fn extract_imports(
+    tree: &Tree,
+    source: &[u8],
+    language: &Language,
+    is_tsx: bool,
+) -> Vec<ImportInfo> {
     let mut imports = Vec::new();
 
     // --- ESM static imports ---
@@ -449,14 +449,15 @@ pub fn extract_imports(tree: &Tree, source: &[u8], language: &Language, is_tsx: 
 
                 let mut specifiers = Vec::new();
                 if let Some(call) = call_expr
-                    && let Some(binding) = find_require_binding(call, source) {
-                        specifiers.push(ImportSpecifier {
-                            name: binding,
-                            alias: None,
-                            is_default: false,
-                            is_namespace: false,
-                        });
-                    }
+                    && let Some(binding) = find_require_binding(call, source)
+                {
+                    specifiers.push(ImportSpecifier {
+                        name: binding,
+                        alias: None,
+                        is_default: false,
+                        is_namespace: false,
+                    });
+                }
 
                 imports.push(ImportInfo {
                     kind: ImportKind::Cjs,
@@ -507,7 +508,12 @@ pub fn extract_imports(tree: &Tree, source: &[u8], language: &Language, is_tsx: 
 ///
 /// `is_tsx` must be `true` for `.tsx` and `.jsx` files — used to select the correct
 /// per-grammar query cache. This mirrors the `is_tsx` convention from `extract_symbols`.
-pub fn extract_exports(tree: &Tree, source: &[u8], language: &Language, is_tsx: bool) -> Vec<ExportInfo> {
+pub fn extract_exports(
+    tree: &Tree,
+    source: &[u8],
+    language: &Language,
+    is_tsx: bool,
+) -> Vec<ExportInfo> {
     let mut exports = Vec::new();
 
     let query = export_query(language, is_tsx);
@@ -528,9 +534,10 @@ pub fn extract_exports(tree: &Tree, source: &[u8], language: &Language, is_tsx: 
         }
 
         if let Some(node) = export_node
-            && let Some(info) = classify_export(node, source) {
-                exports.push(info);
-            }
+            && let Some(info) = classify_export(node, source)
+        {
+            exports.push(info);
+        }
     }
 
     exports
@@ -616,7 +623,8 @@ fn find_export_source(export_node: Node, source: &[u8]) -> Option<String> {
 /// Find the first direct child of `node` with the given kind.
 fn find_child_of_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
     let mut cursor = node.walk();
-    node.children(&mut cursor).find(|child| child.kind() == kind)
+    node.children(&mut cursor)
+        .find(|child| child.kind() == kind)
 }
 
 /// Extract the exported names from an export_clause node.
@@ -681,7 +689,11 @@ mod tests {
         let names: Vec<_> = imp.specifiers.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"useState"), "missing useState");
         assert!(names.contains(&"useEffect"), "missing useEffect");
-        assert!(imp.specifiers.iter().all(|s| !s.is_default && !s.is_namespace));
+        assert!(
+            imp.specifiers
+                .iter()
+                .all(|s| !s.is_default && !s.is_namespace)
+        );
     }
 
     // Test 2: ESM default import
@@ -799,8 +811,18 @@ mod tests {
         let src = "import { useState } from 'react';\nimport * as path from 'path';\nconst fs = require('fs');";
         let (tree, lang) = parse_ts(src);
         let imports = extract_imports(&tree, src.as_bytes(), &lang, false);
-        let summary = imports.iter().map(|i| format!("{:?}:{}", i.kind, i.module_path)).collect::<Vec<_>>().join(", ");
-        assert_eq!(imports.len(), 3, "Expected 3 imports, got {}: [{}]", imports.len(), summary);
+        let summary = imports
+            .iter()
+            .map(|i| format!("{:?}:{}", i.kind, i.module_path))
+            .collect::<Vec<_>>()
+            .join(", ");
+        assert_eq!(
+            imports.len(),
+            3,
+            "Expected 3 imports, got {}: [{}]",
+            imports.len(),
+            summary
+        );
     }
 
     // This test verifies that TSX processing does not contaminate TS import statics.
@@ -816,6 +838,10 @@ mod tests {
         let ts_src = "import { useState } from 'react';";
         let (ts_tree, ts_lang) = parse_ts(ts_src);
         let ts_imports = extract_imports(&ts_tree, ts_src.as_bytes(), &ts_lang, false);
-        assert_eq!(ts_imports.len(), 1, "TS file after TSX should still find 1 import");
+        assert_eq!(
+            ts_imports.len(),
+            1,
+            "TS file after TSX should still find 1 import"
+        );
     }
 }

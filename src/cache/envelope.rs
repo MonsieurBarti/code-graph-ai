@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use crate::graph::CodeGraph;
 
@@ -89,10 +89,8 @@ pub fn save_cache(project_root: &Path, graph: &CodeGraph) -> anyhow::Result<()> 
 pub fn load_cache(project_root: &Path) -> Option<CacheEnvelope> {
     let target = cache_path(project_root);
     let bytes = std::fs::read(&target).ok()?;
-    let result = bincode::serde::decode_from_slice::<CacheEnvelope, _>(
-        &bytes,
-        bincode::config::standard(),
-    );
+    let result =
+        bincode::serde::decode_from_slice::<CacheEnvelope, _>(&bytes, bincode::config::standard());
     match result {
         Ok((envelope, _)) if envelope.version == CACHE_VERSION => Some(envelope),
         _ => None, // version mismatch or corrupt — caller will do full rebuild

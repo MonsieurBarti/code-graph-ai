@@ -6,7 +6,7 @@ pub mod symbols;
 use std::cell::RefCell;
 use std::path::Path;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use tree_sitter::Parser;
 
 use crate::graph::node::SymbolInfo;
@@ -73,10 +73,7 @@ pub struct ParseResult {
 /// - The file extension is unsupported (not `.ts`/`.tsx`/`.js`/`.jsx`)
 /// - `tree-sitter` returns `None` (malformed / truncated source)
 pub fn parse_file(path: &Path, source: &[u8]) -> Result<ParseResult> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     let language = language_for_extension(ext)
         .ok_or_else(|| anyhow!("unsupported file extension: {:?}", ext))?;
@@ -120,10 +117,7 @@ pub fn parse_file(path: &Path, source: &[u8]) -> Result<ParseResult> {
 /// - The file extension is unsupported (not `.ts`/`.tsx`/`.js`/`.jsx`)
 /// - `tree-sitter` returns `None` (malformed / truncated source)
 pub fn parse_file_parallel(path: &Path, source: &[u8]) -> Result<ParseResult> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     let is_tsx = matches!(ext, "tsx" | "jsx");
 

@@ -2,7 +2,9 @@ pub mod barrel;
 pub mod file_resolver;
 pub mod workspace;
 
-pub use file_resolver::{build_resolver, resolve_import, workspace_map_to_aliases, ResolutionOutcome};
+pub use file_resolver::{
+    ResolutionOutcome, build_resolver, resolve_import, workspace_map_to_aliases,
+};
 pub use workspace::discover_workspace_packages;
 
 use std::collections::HashMap;
@@ -129,7 +131,9 @@ pub fn resolve_all(
                     if verbose {
                         eprintln!(
                             "  resolve: {} imports '{}' -> builtin:{}",
-                            file_path.display(), specifier, name
+                            file_path.display(),
+                            specifier,
+                            name
                         );
                     }
                 }
@@ -142,7 +146,9 @@ pub fn resolve_all(
                         if verbose {
                             eprintln!(
                                 "  resolve: {} imports '{}' -> external:{}",
-                                file_path.display(), specifier, pkg_name
+                                file_path.display(),
+                                specifier,
+                                pkg_name
                             );
                         }
                     } else {
@@ -151,7 +157,9 @@ pub fn resolve_all(
                         if verbose {
                             eprintln!(
                                 "  resolve: {} imports '{}' -> unresolved: {}",
-                                file_path.display(), specifier, _reason
+                                file_path.display(),
+                                specifier,
+                                _reason
                             );
                         }
                     }
@@ -192,15 +200,25 @@ pub fn resolve_all(
 
         for rel in relationships {
             match rel.kind {
-                RelationshipKind::Extends | RelationshipKind::Implements | RelationshipKind::InterfaceExtends => {
+                RelationshipKind::Extends
+                | RelationshipKind::Implements
+                | RelationshipKind::InterfaceExtends => {
                     // Both from_name and to_name should be present for inheritance.
                     let from_name = match &rel.from_name {
                         Some(n) => n,
                         None => continue,
                     };
 
-                    let from_candidates = graph.symbol_index.get(from_name).cloned().unwrap_or_default();
-                    let to_candidates = graph.symbol_index.get(&rel.to_name).cloned().unwrap_or_default();
+                    let from_candidates = graph
+                        .symbol_index
+                        .get(from_name)
+                        .cloned()
+                        .unwrap_or_default();
+                    let to_candidates = graph
+                        .symbol_index
+                        .get(&rel.to_name)
+                        .cloned()
+                        .unwrap_or_default();
 
                     if from_candidates.is_empty() || to_candidates.is_empty() {
                         continue;
@@ -220,9 +238,7 @@ pub fn resolve_all(
                     let same_file_to: Vec<_> = to_candidates
                         .iter()
                         .copied()
-                        .filter(|&idx| {
-                            graph.graph.edges(from_file_idx).any(|e| e.target() == idx)
-                        })
+                        .filter(|&idx| graph.graph.edges(from_file_idx).any(|e| e.target() == idx))
                         .collect();
 
                     let to_indices = if same_file_to.is_empty() {
@@ -251,7 +267,9 @@ pub fn resolve_all(
                     }
                 }
 
-                RelationshipKind::Calls | RelationshipKind::MethodCall | RelationshipKind::TypeReference => {
+                RelationshipKind::Calls
+                | RelationshipKind::MethodCall
+                | RelationshipKind::TypeReference => {
                     // Look up the callee / type name in the symbol index.
                     let to_candidates = match graph.symbol_index.get(&rel.to_name) {
                         Some(c) if !c.is_empty() => c.clone(),
