@@ -1,8 +1,19 @@
 [package]
-name = "code-graph"
+name = "code-graph-cli"
 version = "0.1.0"
 edition = "2024"
-description = "High-performance code intelligence engine for TypeScript/JavaScript codebases"
+description = "Code intelligence engine for TypeScript/JavaScript — query the dependency graph instead of reading source files."
+license = "MIT"
+repository = "https://github.com/MonsieurBarti/code-graph-ai"
+homepage = "https://github.com/MonsieurBarti/code-graph-ai"
+readme = "README.md"
+keywords = ["typescript", "code-graph", "mcp", "dependency-analysis", "cli"]
+categories = ["development-tools", "command-line-utilities"]
+exclude = [".planning/", ".github/", ".claude/", ".devcontainer/", ".entire/", "target/"]
+
+[[bin]]
+name = "code-graph"
+path = "src/main.rs"
 
 [dependencies]
 tree-sitter = "0.26"
