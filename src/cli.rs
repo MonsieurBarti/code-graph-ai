@@ -166,4 +166,10 @@ pub enum Commands {
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
         format: OutputFormat,
     },
+
+    /// Start an MCP stdio server exposing graph queries as tools for Claude Code.
+    Mcp {
+        /// Path to the project root (defaults to current directory if omitted).
+        path: Option<PathBuf>,
+    },
 }
