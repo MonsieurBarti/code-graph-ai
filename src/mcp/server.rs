@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use rayon::prelude::*;
+
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{ServerCapabilities, ServerInfo};
@@ -273,26 +275,29 @@ fn apply_staleness_diff(
         graph.remove_file_from_graph(path);
     }
 
+    // Remove changed files from graph before re-parsing
     for path in &files_to_reparse {
         graph.remove_file_from_graph(path);
+    }
 
-        let source = match std::fs::read(path) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
+    // Re-parse changed/new files in parallel
+    let reparsed: Vec<(PathBuf, &'static str, crate::parser::ParseResult)> = files_to_reparse
+        .par_iter()
+        .filter_map(|path| {
+            let source = std::fs::read(path).ok()?;
+            let language_str: &'static str =
+                match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
+                    "ts" => "typescript",
+                    "tsx" => "tsx",
+                    "js" | "jsx" => "javascript",
+                    _ => return None,
+                };
+            let result = crate::parser::parse_file_parallel(path, &source).ok()?;
+            Some((path.clone(), language_str, result))
+        })
+        .collect();
 
-        let language_str = match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
-            "ts" => "typescript",
-            "tsx" => "tsx",
-            "js" | "jsx" => "javascript",
-            _ => continue,
-        };
-
-        let result = match crate::parser::parse_file(path, &source) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-
+    for (path, language_str, result) in &reparsed {
         let file_idx = graph.add_file(path.clone(), language_str);
         for (symbol, children) in &result.symbols {
             let sym_idx = graph.add_symbol(file_idx, symbol.clone());
@@ -306,14 +311,19 @@ fn apply_staleness_diff(
     // collect parse results for ALL current files, then resolve all.
     // This is acceptable on cold start (runs once).
     if !files_to_reparse.is_empty() || !deleted_files.is_empty() {
-        // Build parse results for all files in the updated graph
+        // Build parse results for all files in the updated graph (parallel re-parse for resolve)
+        let all_file_paths: Vec<PathBuf> = graph.file_index.keys().cloned().collect();
+        let parsed: Vec<(PathBuf, crate::parser::ParseResult)> = all_file_paths
+            .par_iter()
+            .filter_map(|file_path| {
+                let source = std::fs::read(file_path).ok()?;
+                let result = crate::parser::parse_file_parallel(file_path, &source).ok()?;
+                Some((file_path.clone(), result))
+            })
+            .collect();
         let mut all_parse_results = std::collections::HashMap::new();
-        for file_path in graph.file_index.keys() {
-            if let Ok(source) = std::fs::read(file_path) {
-                if let Ok(result) = crate::parser::parse_file(file_path, &source) {
-                    all_parse_results.insert(file_path.clone(), result);
-                }
-            }
+        for (path, result) in parsed {
+            all_parse_results.insert(path, result);
         }
         crate::resolver::resolve_all(&mut graph, project_root, &all_parse_results, false);
     }

@@ -15,6 +15,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
+use rayon::prelude::*;
 
 use cli::{Cli, Commands};
 use config::CodeGraphConfig;
@@ -31,41 +32,31 @@ pub(crate) fn build_graph(path: &PathBuf, verbose: bool) -> Result<CodeGraph> {
     let config = CodeGraphConfig::load(path);
     let files = walk_project(path, &config, verbose)?;
 
+    // Phase 1: Parse all files in parallel (CPU-bound — rayon par_iter).
+    let raw_results: Vec<(PathBuf, &'static str, ParseResult)> = files
+        .par_iter()
+        .filter_map(|file_path| {
+            let source = std::fs::read(file_path).ok()?;
+            let language_str: &'static str = match file_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+            {
+                "ts" => "typescript",
+                "tsx" => "tsx",
+                "js" | "jsx" => "javascript",
+                _ => return None,
+            };
+            let result = parser::parse_file_parallel(file_path, &source).ok()?;
+            Some((file_path.clone(), language_str, result))
+        })
+        .collect();
+
+    // Phase 2: Insert into graph sequentially (petgraph is not Send).
     let mut graph = CodeGraph::new();
     let mut parse_results: HashMap<PathBuf, ParseResult> = HashMap::new();
 
-    for file_path in &files {
-        let source = match std::fs::read(file_path) {
-            Ok(s) => s,
-            Err(e) => {
-                if verbose {
-                    eprintln!("skip: {}: {}", file_path.display(), e);
-                }
-                continue;
-            }
-        };
-
-        let language_str = match file_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-        {
-            "ts" => "typescript",
-            "tsx" => "tsx",
-            "js" | "jsx" => "javascript",
-            _ => "unknown",
-        };
-
-        let result = match parser::parse_file(file_path, &source) {
-            Ok(r) => r,
-            Err(e) => {
-                if verbose {
-                    eprintln!("skip: {}: {}", file_path.display(), e);
-                }
-                continue;
-            }
-        };
-
+    for (file_path, language_str, result) in raw_results {
         let file_idx = graph.add_file(file_path.clone(), language_str);
 
         for (symbol, children) in &result.symbols {
@@ -85,7 +76,7 @@ pub(crate) fn build_graph(path: &PathBuf, verbose: bool) -> Result<CodeGraph> {
             );
         }
 
-        parse_results.insert(file_path.clone(), result);
+        parse_results.insert(file_path, result);
     }
 
     resolver::resolve_all(&mut graph, path, &parse_results, verbose);
@@ -114,49 +105,35 @@ async fn main() -> Result<()> {
             // Import/export counts (accumulated across all files).
             let mut total_imports: usize = 0;
             let mut total_exports: usize = 0;
-            let mut skipped: usize = 0;
 
             // Parse results map — retained for the resolution step.
             let mut parse_results: HashMap<PathBuf, ParseResult> = HashMap::new();
 
-            // 5. Parse each file (serial — parallel is Phase 6).
-            for file_path in &files {
-                // Read source bytes.
-                let source = match std::fs::read(file_path) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        if verbose {
-                            eprintln!("skip: {}: {}", file_path.display(), e);
-                        }
-                        skipped += 1;
-                        continue;
-                    }
-                };
+            // 5. Parse all files in parallel (rayon par_iter).
+            let raw_results: Vec<(PathBuf, &'static str, ParseResult)> = files
+                .par_iter()
+                .filter_map(|file_path| {
+                    let source = std::fs::read(file_path).ok()?;
+                    let language_str: &'static str = match file_path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                    {
+                        "ts" => "typescript",
+                        "tsx" => "tsx",
+                        "js" | "jsx" => "javascript",
+                        _ => return None,
+                    };
+                    let result = parser::parse_file_parallel(file_path, &source).ok()?;
+                    Some((file_path.clone(), language_str, result))
+                })
+                .collect();
 
-                // Determine language string for graph node.
-                let language_str = match file_path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("")
-                {
-                    "ts" => "typescript",
-                    "tsx" => "tsx",
-                    "js" | "jsx" => "javascript",
-                    _ => "unknown",
-                };
+            // skipped = files that couldn't be read or parsed (filter_map silently drops them)
+            let skipped = files.len() - raw_results.len();
 
-                // Parse: tree-sitter + symbol/import/export/relationship extraction.
-                let result = match parser::parse_file(file_path, &source) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        if verbose {
-                            eprintln!("skip: {}: {}", file_path.display(), e);
-                        }
-                        skipped += 1;
-                        continue;
-                    }
-                };
-
+            // 6. Insert into graph sequentially + accumulate stats.
+            for (file_path, language_str, result) in raw_results {
                 // Add file node to graph.
                 let file_idx = graph.add_file(file_path.clone(), language_str);
 
@@ -183,10 +160,10 @@ async fn main() -> Result<()> {
                 }
 
                 // Store parse result for the resolution pass.
-                parse_results.insert(file_path.clone(), result);
+                parse_results.insert(file_path, result);
             }
 
-            // 6. Resolve imports, barrel chains, and symbol relationships.
+            // 7. Resolve imports, barrel chains, and symbol relationships.
             let resolve_stats = resolver::resolve_all(&mut graph, &path, &parse_results, verbose);
 
             if verbose {
@@ -203,7 +180,7 @@ async fn main() -> Result<()> {
                 );
             }
 
-            // 7. Compute stats from graph.
+            // 8. Compute stats from graph.
             let elapsed_secs = start.elapsed().as_secs_f64();
             let breakdown: HashMap<SymbolKind, usize> = graph.symbols_by_kind();
 
@@ -229,10 +206,10 @@ async fn main() -> Result<()> {
                 relationship_edges: resolve_stats.relationships_added,
             };
 
-            // 8. Print summary.
+            // 9. Print summary.
             print_summary(&stats, json);
 
-            // 9. Save graph to disk cache for fast cold starts.
+            // 10. Save graph to disk cache for fast cold starts.
             if let Err(e) = cache::save_cache(&path, &graph) {
                 if verbose {
                     eprintln!("  Cache save failed: {}", e);

@@ -467,13 +467,6 @@ mod tests {
             imports: vec![],
             exports,
             relationships: vec![],
-            tree: {
-                // Build a trivial tree-sitter tree for an empty TS file.
-                let lang = crate::parser::languages::language_for_extension("ts").unwrap();
-                let mut parser = tree_sitter::Parser::new();
-                parser.set_language(&lang).unwrap();
-                parser.parse(b"", None).unwrap()
-            },
         }
     }
 
@@ -484,12 +477,6 @@ mod tests {
             imports,
             exports,
             relationships: vec![],
-            tree: {
-                let lang = crate::parser::languages::language_for_extension("ts").unwrap();
-                let mut parser = tree_sitter::Parser::new();
-                parser.set_language(&lang).unwrap();
-                parser.parse(b"", None).unwrap()
-            },
         }
     }
 
