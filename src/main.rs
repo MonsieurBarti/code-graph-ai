@@ -231,6 +231,13 @@ async fn main() -> Result<()> {
 
             // 8. Print summary.
             print_summary(&stats, json);
+
+            // 9. Save graph to disk cache for fast cold starts.
+            if let Err(e) = cache::save_cache(&path, &graph) {
+                if verbose {
+                    eprintln!("  Cache save failed: {}", e);
+                }
+            }
         }
 
         Commands::Find {
@@ -381,6 +388,85 @@ async fn main() -> Result<()> {
                 std::env::current_dir().expect("cannot determine current directory")
             });
             mcp::run(project_root).await?;
+        }
+
+        Commands::Watch { path } => {
+            eprintln!("Indexing {}...", path.display());
+            let mut graph = build_graph(&path, false)?;
+            eprintln!(
+                "Indexed {} files, {} symbols. Starting watcher...",
+                graph.file_count(),
+                graph.symbol_count()
+            );
+
+            // Save initial cache
+            if let Err(e) = cache::save_cache(&path, &graph) {
+                eprintln!("[cache] failed to save: {}", e);
+            }
+
+            // Start watcher
+            let (handle, mut rx) = watcher::start_watcher(&path)
+                .map_err(|e| anyhow::anyhow!("failed to start watcher: {}", e))?;
+
+            // Keep handle alive — dropping it stops the watcher
+            let _handle = handle;
+
+            eprintln!("Watching for changes... (press Ctrl+C to stop)");
+
+            // Process events — terminal status output goes to stderr (Phase 1 convention)
+            while let Some(event) = rx.recv().await {
+                match &event {
+                    watcher::event::WatchEvent::Modified(p) => {
+                        let start = std::time::Instant::now();
+                        watcher::incremental::handle_file_event(&mut graph, &event, &path);
+                        let elapsed = start.elapsed();
+                        eprintln!(
+                            "[watch] modified: {} ({:.1}ms, {} files, {} symbols)",
+                            p.strip_prefix(&path).unwrap_or(p).display(),
+                            elapsed.as_secs_f64() * 1000.0,
+                            graph.file_count(),
+                            graph.symbol_count()
+                        );
+                        let _ = cache::save_cache(&path, &graph);
+                    }
+                    watcher::event::WatchEvent::Created(p) => {
+                        let start = std::time::Instant::now();
+                        watcher::incremental::handle_file_event(&mut graph, &event, &path);
+                        let elapsed = start.elapsed();
+                        eprintln!(
+                            "[watch] created: {} ({:.1}ms, {} files, {} symbols)",
+                            p.strip_prefix(&path).unwrap_or(p).display(),
+                            elapsed.as_secs_f64() * 1000.0,
+                            graph.file_count(),
+                            graph.symbol_count()
+                        );
+                        let _ = cache::save_cache(&path, &graph);
+                    }
+                    watcher::event::WatchEvent::Deleted(p) => {
+                        watcher::incremental::handle_file_event(&mut graph, &event, &path);
+                        eprintln!(
+                            "[watch] deleted: {} ({} files, {} symbols)",
+                            p.strip_prefix(&path).unwrap_or(p).display(),
+                            graph.file_count(),
+                            graph.symbol_count()
+                        );
+                        let _ = cache::save_cache(&path, &graph);
+                    }
+                    watcher::event::WatchEvent::ConfigChanged => {
+                        eprintln!("[watch] config changed — full re-index...");
+                        let start = std::time::Instant::now();
+                        graph = build_graph(&path, false)?;
+                        let elapsed = start.elapsed();
+                        eprintln!(
+                            "[watch] re-indexed in {:.1}ms ({} files, {} symbols)",
+                            elapsed.as_secs_f64() * 1000.0,
+                            graph.file_count(),
+                            graph.symbol_count()
+                        );
+                        let _ = cache::save_cache(&path, &graph);
+                    }
+                }
+            }
         }
     }
 
