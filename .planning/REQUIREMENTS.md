@@ -28,7 +28,7 @@
 ### Integration
 
 - [ ] **INTG-01**: Tool runs as an MCP server over stdio, exposing graph queries as tools to Claude Code
-- [ ] **INTG-02**: MCP tool responses use a token-optimized compact format (target: ~60% fewer tokens than verbose JSON)
+- [x] **INTG-02**: MCP tool responses use a token-optimized compact format (target: ~60% fewer tokens than verbose JSON)
 - [ ] **INTG-03**: MCP tool descriptions are concise (under 100 tokens each) to minimize per-turn overhead
 - [ ] **INTG-04**: Tool runs as a background daemon with file watching, re-indexing incrementally on file changes
 - [ ] **INTG-05**: Incremental re-index completes in under 100ms for single-file changes
@@ -99,7 +99,7 @@
 | QURY-05 | Phase 3 | Complete |
 | INTG-06 | Phase 3 | Complete |
 | INTG-01 | Phase 4 | Pending |
-| INTG-02 | Phase 4 | Pending |
+| INTG-02 | Phase 4 | Complete |
 | INTG-03 | Phase 4 | Pending |
 | INTG-04 | Phase 5 | Pending |
 | INTG-05 | Phase 5 | Pending |
