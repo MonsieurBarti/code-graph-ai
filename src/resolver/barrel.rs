@@ -483,7 +483,7 @@ mod tests {
     /// Build a simple named ImportInfo (e.g. `import { name } from specifier`).
     fn make_named_import(specifier: &str, names: &[&str]) -> ImportInfo {
         ImportInfo {
-            kind: ImportKind::ESM,
+            kind: ImportKind::Esm,
             module_path: specifier.to_owned(),
             specifiers: names
                 .iter()
