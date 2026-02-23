@@ -3,6 +3,7 @@ use std::path::Path;
 
 use crate::cli::OutputFormat;
 use crate::query::circular::CircularDep;
+use crate::query::context::SymbolContext;
 use crate::query::find::FindResult;
 use crate::query::find::kind_to_str;
 use crate::query::impact::ImpactResult;
@@ -427,6 +428,451 @@ pub fn format_impact_results(
 // ---------------------------------------------------------------------------
 // Circular output
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Context output
+// ---------------------------------------------------------------------------
+
+/// Format and print symbol context results to stdout.
+///
+/// Compact format is token-optimized: prefixed lines with relative paths, no decoration.
+/// Sections only appear when non-empty.
+pub fn format_context_results(
+    contexts: &[SymbolContext],
+    format: &OutputFormat,
+    project_root: &Path,
+    _symbol_name: &str,
+) {
+    match format {
+        OutputFormat::Compact => {
+            for ctx in contexts {
+                println!("symbol {}", ctx.symbol_name);
+
+                for def in &ctx.definitions {
+                    let rel = def
+                        .file_path
+                        .strip_prefix(project_root)
+                        .unwrap_or(&def.file_path);
+                    println!("def {}:{} {}", rel.display(), def.line, kind_to_str(&def.kind));
+                }
+
+                for r in &ctx.references {
+                    let rel = r
+                        .file_path
+                        .strip_prefix(project_root)
+                        .unwrap_or(&r.file_path);
+                    match r.ref_kind {
+                        RefKind::Import => {
+                            println!("ref {} import", rel.display());
+                        }
+                        RefKind::Call => {
+                            let caller = r.symbol_name.as_deref().unwrap_or("?");
+                            let line = r.line.map_or_else(|| "?".to_string(), |l| l.to_string());
+                            println!("ref {}:{} call {}", rel.display(), line, caller);
+                        }
+                    }
+                }
+
+                for callee in &ctx.callees {
+                    let rel = callee
+                        .file_path
+                        .strip_prefix(project_root)
+                        .unwrap_or(&callee.file_path);
+                    println!("calls {} {}:{}", callee.symbol_name, rel.display(), callee.line);
+                }
+
+                for caller in &ctx.callers {
+                    let rel = caller
+                        .file_path
+                        .strip_prefix(project_root)
+                        .unwrap_or(&caller.file_path);
+                    println!(
+                        "called-by {} {}:{}",
+                        caller.symbol_name,
+                        rel.display(),
+                        caller.line
+                    );
+                }
+
+                for ext in &ctx.extends {
+                    let rel = ext
+                        .file_path
+                        .strip_prefix(project_root)
+                        .unwrap_or(&ext.file_path);
+                    println!("extends {} {}:{}", ext.symbol_name, rel.display(), ext.line);
+                }
+
+                for imp in &ctx.implements {
+                    let rel = imp
+                        .file_path
+                        .strip_prefix(project_root)
+                        .unwrap_or(&imp.file_path);
+                    println!(
+                        "implements {} {}:{}",
+                        imp.symbol_name,
+                        rel.display(),
+                        imp.line
+                    );
+                }
+
+                for ext_by in &ctx.extended_by {
+                    let rel = ext_by
+                        .file_path
+                        .strip_prefix(project_root)
+                        .unwrap_or(&ext_by.file_path);
+                    println!(
+                        "extended-by {} {}:{}",
+                        ext_by.symbol_name,
+                        rel.display(),
+                        ext_by.line
+                    );
+                }
+
+                for impl_by in &ctx.implemented_by {
+                    let rel = impl_by
+                        .file_path
+                        .strip_prefix(project_root)
+                        .unwrap_or(&impl_by.file_path);
+                    println!(
+                        "implemented-by {} {}:{}",
+                        impl_by.symbol_name,
+                        rel.display(),
+                        impl_by.line
+                    );
+                }
+
+                // Summary line.
+                println!(
+                    "{} refs, {} callers, {} callees",
+                    ctx.references.len(),
+                    ctx.callers.len(),
+                    ctx.callees.len()
+                );
+            }
+        }
+
+        OutputFormat::Table => {
+            let use_color = std::io::stdout().is_terminal();
+            let bold = |s: &str| -> String {
+                if use_color {
+                    format!("\x1b[1m{s}\x1b[0m")
+                } else {
+                    s.to_string()
+                }
+            };
+
+            for ctx in contexts {
+                // Determine the primary kind from the first definition.
+                let kind_label = ctx
+                    .definitions
+                    .first()
+                    .map(|d| format!(" ({})", kind_to_str(&d.kind)))
+                    .unwrap_or_default();
+
+                println!(
+                    "{}",
+                    bold(&format!("=== {}{} ===", ctx.symbol_name, kind_label))
+                );
+                println!();
+
+                // Definition section.
+                println!("{}", bold("Definition:"));
+                if ctx.definitions.is_empty() {
+                    println!("  (none)");
+                } else {
+                    for def in &ctx.definitions {
+                        let rel = def
+                            .file_path
+                            .strip_prefix(project_root)
+                            .unwrap_or(&def.file_path);
+                        println!("  {}:{}", rel.display(), def.line);
+                    }
+                }
+                println!();
+
+                // References section.
+                if !ctx.references.is_empty() {
+                    println!(
+                        "{}",
+                        bold(&format!("References ({}):", ctx.references.len()))
+                    );
+                    for r in &ctx.references {
+                        let rel = r
+                            .file_path
+                            .strip_prefix(project_root)
+                            .unwrap_or(&r.file_path);
+                        match r.ref_kind {
+                            RefKind::Import => {
+                                println!("  {}  import", rel.display());
+                            }
+                            RefKind::Call => {
+                                let caller = r.symbol_name.as_deref().unwrap_or("?");
+                                let line =
+                                    r.line.map_or_else(|| "?".to_string(), |l| l.to_string());
+                                println!("  {}:{}  call  {}", rel.display(), line, caller);
+                            }
+                        }
+                    }
+                    println!();
+                }
+
+                // Calls section.
+                if !ctx.callees.is_empty() {
+                    println!("{}", bold(&format!("Calls ({}):", ctx.callees.len())));
+                    for callee in &ctx.callees {
+                        let rel = callee
+                            .file_path
+                            .strip_prefix(project_root)
+                            .unwrap_or(&callee.file_path);
+                        println!(
+                            "  {}  {}:{}",
+                            callee.symbol_name,
+                            rel.display(),
+                            callee.line
+                        );
+                    }
+                    println!();
+                }
+
+                // Called By section.
+                if !ctx.callers.is_empty() {
+                    println!("{}", bold(&format!("Called By ({}):", ctx.callers.len())));
+                    for caller in &ctx.callers {
+                        let rel = caller
+                            .file_path
+                            .strip_prefix(project_root)
+                            .unwrap_or(&caller.file_path);
+                        println!(
+                            "  {}  {}:{}",
+                            caller.symbol_name,
+                            rel.display(),
+                            caller.line
+                        );
+                    }
+                    println!();
+                }
+
+                // Extends section.
+                if !ctx.extends.is_empty() {
+                    println!("{}", bold(&format!("Extends ({}):", ctx.extends.len())));
+                    for ext in &ctx.extends {
+                        let rel = ext
+                            .file_path
+                            .strip_prefix(project_root)
+                            .unwrap_or(&ext.file_path);
+                        println!("  {}  {}:{}", ext.symbol_name, rel.display(), ext.line);
+                    }
+                    println!();
+                }
+
+                // Implements section.
+                if !ctx.implements.is_empty() {
+                    println!(
+                        "{}",
+                        bold(&format!("Implements ({}):", ctx.implements.len()))
+                    );
+                    for imp in &ctx.implements {
+                        let rel = imp
+                            .file_path
+                            .strip_prefix(project_root)
+                            .unwrap_or(&imp.file_path);
+                        println!("  {}  {}:{}", imp.symbol_name, rel.display(), imp.line);
+                    }
+                    println!();
+                }
+
+                // Extended By section.
+                if !ctx.extended_by.is_empty() {
+                    println!(
+                        "{}",
+                        bold(&format!("Extended By ({}):", ctx.extended_by.len()))
+                    );
+                    for ext_by in &ctx.extended_by {
+                        let rel = ext_by
+                            .file_path
+                            .strip_prefix(project_root)
+                            .unwrap_or(&ext_by.file_path);
+                        println!(
+                            "  {}  {}:{}",
+                            ext_by.symbol_name,
+                            rel.display(),
+                            ext_by.line
+                        );
+                    }
+                    println!();
+                }
+
+                // Implemented By section.
+                if !ctx.implemented_by.is_empty() {
+                    println!(
+                        "{}",
+                        bold(&format!("Implemented By ({}):", ctx.implemented_by.len()))
+                    );
+                    for impl_by in &ctx.implemented_by {
+                        let rel = impl_by
+                            .file_path
+                            .strip_prefix(project_root)
+                            .unwrap_or(&impl_by.file_path);
+                        println!(
+                            "  {}  {}:{}",
+                            impl_by.symbol_name,
+                            rel.display(),
+                            impl_by.line
+                        );
+                    }
+                    println!();
+                }
+            }
+        }
+
+        OutputFormat::Json => {
+            let json_results: Vec<serde_json::Value> = contexts
+                .iter()
+                .map(|ctx| {
+                    let definitions: Vec<serde_json::Value> = ctx
+                        .definitions
+                        .iter()
+                        .map(|d| {
+                            let rel =
+                                d.file_path.strip_prefix(project_root).unwrap_or(&d.file_path);
+                            serde_json::json!({
+                                "file": rel.to_string_lossy(),
+                                "line": d.line,
+                                "kind": kind_to_str(&d.kind),
+                                "exported": d.is_exported,
+                            })
+                        })
+                        .collect();
+
+                    let references: Vec<serde_json::Value> = ctx
+                        .references
+                        .iter()
+                        .map(|r| {
+                            let rel =
+                                r.file_path.strip_prefix(project_root).unwrap_or(&r.file_path);
+                            let kind_str = match r.ref_kind {
+                                RefKind::Import => "import",
+                                RefKind::Call => "call",
+                            };
+                            serde_json::json!({
+                                "file": rel.to_string_lossy(),
+                                "kind": kind_str,
+                                "caller": r.symbol_name,
+                                "line": r.line,
+                            })
+                        })
+                        .collect();
+
+                    let callees: Vec<serde_json::Value> = ctx
+                        .callees
+                        .iter()
+                        .map(|c| {
+                            let rel =
+                                c.file_path.strip_prefix(project_root).unwrap_or(&c.file_path);
+                            serde_json::json!({
+                                "name": c.symbol_name,
+                                "kind": kind_to_str(&c.kind),
+                                "file": rel.to_string_lossy(),
+                                "line": c.line,
+                            })
+                        })
+                        .collect();
+
+                    let callers: Vec<serde_json::Value> = ctx
+                        .callers
+                        .iter()
+                        .map(|c| {
+                            let rel =
+                                c.file_path.strip_prefix(project_root).unwrap_or(&c.file_path);
+                            serde_json::json!({
+                                "name": c.symbol_name,
+                                "kind": kind_to_str(&c.kind),
+                                "file": rel.to_string_lossy(),
+                                "line": c.line,
+                            })
+                        })
+                        .collect();
+
+                    let extends: Vec<serde_json::Value> = ctx
+                        .extends
+                        .iter()
+                        .map(|e| {
+                            let rel =
+                                e.file_path.strip_prefix(project_root).unwrap_or(&e.file_path);
+                            serde_json::json!({
+                                "name": e.symbol_name,
+                                "kind": kind_to_str(&e.kind),
+                                "file": rel.to_string_lossy(),
+                                "line": e.line,
+                            })
+                        })
+                        .collect();
+
+                    let implements: Vec<serde_json::Value> = ctx
+                        .implements
+                        .iter()
+                        .map(|i| {
+                            let rel =
+                                i.file_path.strip_prefix(project_root).unwrap_or(&i.file_path);
+                            serde_json::json!({
+                                "name": i.symbol_name,
+                                "kind": kind_to_str(&i.kind),
+                                "file": rel.to_string_lossy(),
+                                "line": i.line,
+                            })
+                        })
+                        .collect();
+
+                    let extended_by: Vec<serde_json::Value> = ctx
+                        .extended_by
+                        .iter()
+                        .map(|e| {
+                            let rel =
+                                e.file_path.strip_prefix(project_root).unwrap_or(&e.file_path);
+                            serde_json::json!({
+                                "name": e.symbol_name,
+                                "kind": kind_to_str(&e.kind),
+                                "file": rel.to_string_lossy(),
+                                "line": e.line,
+                            })
+                        })
+                        .collect();
+
+                    let implemented_by: Vec<serde_json::Value> = ctx
+                        .implemented_by
+                        .iter()
+                        .map(|i| {
+                            let rel =
+                                i.file_path.strip_prefix(project_root).unwrap_or(&i.file_path);
+                            serde_json::json!({
+                                "name": i.symbol_name,
+                                "kind": kind_to_str(&i.kind),
+                                "file": rel.to_string_lossy(),
+                                "line": i.line,
+                            })
+                        })
+                        .collect();
+
+                    serde_json::json!({
+                        "symbol": ctx.symbol_name,
+                        "definitions": definitions,
+                        "references": references,
+                        "callees": callees,
+                        "callers": callers,
+                        "extends": extends,
+                        "implements": implements,
+                        "extended_by": extended_by,
+                        "implemented_by": implemented_by,
+                    })
+                })
+                .collect();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json_results).unwrap_or_default()
+            );
+        }
+    }
+}
 
 /// Format and print circular dependency results to stdout.
 pub fn format_circular_results(cycles: &[CircularDep], format: &OutputFormat, project_root: &Path) {

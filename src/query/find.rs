@@ -9,7 +9,7 @@ use regex::RegexBuilder;
 use crate::graph::{CodeGraph, edge::EdgeKind, node::{GraphNode, SymbolKind}};
 
 /// A single matching symbol definition returned by `find_symbol`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FindResult {
     pub symbol_name: String,
     pub kind: SymbolKind,
