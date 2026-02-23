@@ -1,13 +1,13 @@
 [package]
 name = "code-graph-cli"
-version = "1.0.1"
+version = "1.1.0"
 edition = "2024"
-description = "Code intelligence engine for TypeScript/JavaScript — query the dependency graph instead of reading source files."
+description = "Code intelligence engine for TypeScript/JavaScript/Rust — query the dependency graph instead of reading source files."
 license = "MIT"
 repository = "https://github.com/MonsieurBarti/code-graph-ai"
 homepage = "https://github.com/MonsieurBarti/code-graph-ai"
 readme = "README.md"
-keywords = ["typescript", "code-graph", "mcp", "dependency-analysis", "cli"]
+keywords = ["typescript", "rust", "code-graph", "mcp", "dependency-analysis"]
 categories = ["development-tools", "command-line-utilities"]
 exclude = [".planning/", ".github/", ".claude/", ".devcontainer/", ".entire/", "target/"]
 
