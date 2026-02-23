@@ -337,7 +337,7 @@ mod tests {
 
     use crate::graph::{
         CodeGraph,
-        node::{SymbolInfo, SymbolKind},
+        node::{SymbolInfo, SymbolKind, SymbolVisibility},
     };
 
     fn root() -> PathBuf {
@@ -361,6 +361,8 @@ mod tests {
                 col: 0,
                 is_exported: true,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
 
@@ -374,6 +376,8 @@ mod tests {
                 col: 0,
                 is_exported: true,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
         // handleRequest calls UserService
@@ -426,6 +430,8 @@ mod tests {
                 col: 0,
                 is_exported: true,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
 
@@ -439,6 +445,8 @@ mod tests {
                 col: 0,
                 is_exported: true,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
 
@@ -486,6 +494,8 @@ mod tests {
                 col: 0,
                 is_exported: true,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
 
@@ -499,6 +509,8 @@ mod tests {
                 col: 0,
                 is_exported: true,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
 

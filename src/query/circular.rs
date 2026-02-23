@@ -108,7 +108,7 @@ mod tests {
 
     use crate::graph::{
         CodeGraph,
-        node::{SymbolInfo, SymbolKind},
+        node::{SymbolInfo, SymbolKind, SymbolVisibility},
     };
 
     #[test]
@@ -241,6 +241,8 @@ mod tests {
                 col: 0,
                 is_exported: true,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
 

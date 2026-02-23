@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use crate::graph::CodeGraph;
 
 /// Current cache format version. Bump when graph struct layout changes.
-pub const CACHE_VERSION: u32 = 1;
+/// Bumped to 2 in Phase 8 when new SymbolKind variants (Struct, Trait, ImplMethod, Const,
+/// Static, Macro), SymbolVisibility field, trait_impl field, and EdgeKind variants
+/// (ReExport, RustImport) were added — bincode discriminant layout changed.
+pub const CACHE_VERSION: u32 = 2;
 
 /// Cache directory name (created in project root).
 pub const CACHE_DIR: &str = ".code-graph";
@@ -100,7 +103,7 @@ pub fn load_cache(project_root: &Path) -> Option<CacheEnvelope> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::node::{SymbolInfo, SymbolKind};
+    use crate::graph::node::{SymbolInfo, SymbolKind, SymbolVisibility};
 
     #[test]
     fn test_roundtrip_cache() {
@@ -119,6 +122,8 @@ mod tests {
                 col: 0,
                 is_exported: true,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
 

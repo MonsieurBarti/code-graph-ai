@@ -1,5 +1,19 @@
 use std::path::PathBuf;
 
+/// Visibility level of a Rust symbol.
+///
+/// TypeScript/JavaScript symbols always use `Private` here; their export status is tracked
+/// separately via `SymbolInfo::is_exported`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum SymbolVisibility {
+    /// `pub` — visible everywhere.
+    Pub,
+    /// `pub(crate)`, `pub(super)`, `pub(in path)` — all collapse to this variant.
+    PubCrate,
+    /// No visibility modifier (default in Rust).
+    Private,
+}
+
 /// The kind of symbol extracted from source code.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum SymbolKind {
@@ -21,6 +35,18 @@ pub enum SymbolKind {
     Method,
     /// An interface property or method signature (child symbol of an interface).
     Property,
+    /// A Rust struct declaration.
+    Struct,
+    /// A Rust trait declaration.
+    Trait,
+    /// A method inside a Rust impl block (named as `Type::method`).
+    ImplMethod,
+    /// A Rust const item.
+    Const,
+    /// A Rust static item.
+    Static,
+    /// A Rust macro_rules! definition.
+    Macro,
 }
 
 /// Metadata about a symbol extracted from source code.
@@ -38,6 +64,12 @@ pub struct SymbolInfo {
     pub is_exported: bool,
     /// Whether the symbol is a default export.
     pub is_default: bool,
+    /// Rust visibility level. TypeScript/JavaScript symbols default to `Private`
+    /// (they use `is_exported` instead).
+    pub visibility: SymbolVisibility,
+    /// For Rust impl methods: the trait name if this is a trait impl (e.g. `"Display"`).
+    /// `None` for inherent impls and all TypeScript/JavaScript symbols.
+    pub trait_impl: Option<String>,
 }
 
 /// Metadata about a source file.

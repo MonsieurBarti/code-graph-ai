@@ -34,6 +34,19 @@ thread_local! {
         p.set_language(&tree_sitter_javascript::LANGUAGE.into()).unwrap();
         p
     });
+    static PARSER_RS: RefCell<Parser> = RefCell::new({
+        let mut p = Parser::new();
+        p.set_language(&tree_sitter_rust::LANGUAGE.into()).unwrap();
+        p
+    });
+}
+
+/// Parsed information from a Rust `use` declaration.
+pub struct RustUseInfo {
+    /// Raw use path string as written in source (e.g. `"std::collections::HashMap"`).
+    pub path: String,
+    /// `true` for `pub use` re-exports, `false` for regular `use`.
+    pub is_pub_use: bool,
 }
 
 /// The result of parsing a single source file.
@@ -42,6 +55,7 @@ thread_local! {
 /// - `imports`: ESM / CJS / dynamic imports extracted from the file
 /// - `exports`: named / default / re-export statements extracted from the file
 /// - `relationships`: symbol-level relationships (calls, extends, implements, type refs)
+/// - `rust_uses`: Rust `use`/`pub use` declarations (empty for TS/JS files)
 ///
 /// Note: the tree-sitter `Tree` is NOT retained — ASTs are dropped after extraction
 /// to keep RSS well under the 100 MB budget for large codebases (Phase 6 memory opt).
@@ -56,6 +70,9 @@ pub struct ParseResult {
     /// Includes direct calls, method calls, class extends/implements, interface extends,
     /// and type annotation references.
     pub relationships: Vec<RelationshipInfo>,
+    /// Rust `use` and `pub use` declarations. Always empty for TS/JS files.
+    /// Phase 8 populates this for `.rs` files; Plan 02 adds actual extraction logic.
+    pub rust_uses: Vec<RustUseInfo>,
 }
 
 /// Parse a source file and extract all symbols, imports, exports, and relationships.
@@ -74,6 +91,26 @@ pub struct ParseResult {
 /// - `tree-sitter` returns `None` (malformed / truncated source)
 pub fn parse_file(path: &Path, source: &[u8]) -> Result<ParseResult> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+    // "rs" arm: parse with a fresh parser and return an empty placeholder result.
+    // Plan 02 will fill in the actual symbol/use extraction for Rust files.
+    if ext == "rs" {
+        let language = language_for_extension("rs").expect("rs language is always Some");
+        let mut parser = Parser::new();
+        parser
+            .set_language(&language)
+            .with_context(|| "failed to set tree-sitter language for extension \"rs\"")?;
+        let _tree = parser
+            .parse(source, None)
+            .ok_or_else(|| anyhow!("tree-sitter returned None for {:?}", path))?;
+        return Ok(ParseResult {
+            symbols: Vec::new(),
+            imports: Vec::new(),
+            exports: Vec::new(),
+            relationships: Vec::new(),
+            rust_uses: Vec::new(),
+        });
+    }
 
     let language = language_for_extension(ext)
         .ok_or_else(|| anyhow!("unsupported file extension: {:?}", ext))?;
@@ -99,6 +136,7 @@ pub fn parse_file(path: &Path, source: &[u8]) -> Result<ParseResult> {
         imports,
         exports,
         relationships: relationships_vec,
+        rust_uses: Vec::new(),
     })
 }
 
@@ -121,6 +159,22 @@ pub fn parse_file_parallel(path: &Path, source: &[u8]) -> Result<ParseResult> {
 
     let is_tsx = matches!(ext, "tsx" | "jsx");
 
+    // "rs" arm: parse with PARSER_RS and return an empty placeholder result.
+    // Plan 02 will fill in the actual symbol/use extraction for Rust files.
+    if ext == "rs" {
+        let tree = PARSER_RS
+            .with(|p| p.borrow_mut().parse(source, None))
+            .ok_or_else(|| anyhow!("tree-sitter returned None for {:?}", path))?;
+        let _ = tree; // tree is available; Plan 02 will use it
+        return Ok(ParseResult {
+            symbols: Vec::new(),
+            imports: Vec::new(),
+            exports: Vec::new(),
+            relationships: Vec::new(),
+            rust_uses: Vec::new(),
+        });
+    }
+
     let tree = match ext {
         "ts" => PARSER_TS.with(|p| p.borrow_mut().parse(source, None)),
         "tsx" => PARSER_TSX.with(|p| p.borrow_mut().parse(source, None)),
@@ -142,5 +196,6 @@ pub fn parse_file_parallel(path: &Path, source: &[u8]) -> Result<ParseResult> {
         imports,
         exports,
         relationships: relationships_vec,
+        rust_uses: Vec::new(),
     })
 }

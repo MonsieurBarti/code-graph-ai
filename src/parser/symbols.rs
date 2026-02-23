@@ -2,7 +2,7 @@ use std::sync::OnceLock;
 
 use tree_sitter::{Language, Node, Query, QueryCursor, StreamingIterator, Tree};
 
-use crate::graph::node::{SymbolInfo, SymbolKind};
+use crate::graph::node::{SymbolInfo, SymbolKind, SymbolVisibility};
 
 // ---------------------------------------------------------------------------
 // Query strings
@@ -383,6 +383,8 @@ fn extract_interface_children(iface_node: Node, source: &[u8]) -> Vec<SymbolInfo
                         col: pos.column,
                         is_exported: false,
                         is_default: false,
+                        visibility: SymbolVisibility::Private,
+                        trait_impl: None,
                     });
                 }
             }
@@ -425,6 +427,8 @@ fn extract_class_children(class_node: Node, source: &[u8]) -> Vec<SymbolInfo> {
                 col: pos.column,
                 is_exported: false,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             });
         }
     }
@@ -544,6 +548,8 @@ pub fn extract_symbols(
             col: pos.column,
             is_exported,
             is_default,
+            visibility: SymbolVisibility::Private,
+            trait_impl: None,
         };
 
         // Extract child symbols

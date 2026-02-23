@@ -26,4 +26,12 @@ pub enum EdgeKind {
     /// File -> file: barrel file re-exports everything from source (export * from './x').
     /// Resolved lazily at query time per user decision.
     BarrelReExportAll,
+
+    // Phase 8 additions (Rust):
+    /// Rust `pub use` re-export: source file -> unresolved target path.
+    /// Created in Phase 8; resolved to an actual node in Phase 9.
+    ReExport { path: String },
+    /// Rust `use` statement (non-pub): unresolved import edge.
+    /// `path` is the raw use path string. Resolution deferred to Phase 9.
+    RustImport { path: String },
 }

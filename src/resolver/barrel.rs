@@ -493,6 +493,7 @@ mod tests {
             imports: vec![],
             exports,
             relationships: vec![],
+            rust_uses: vec![],
         }
     }
 
@@ -506,6 +507,7 @@ mod tests {
             imports,
             exports,
             relationships: vec![],
+            rust_uses: vec![],
         }
     }
 

@@ -254,7 +254,7 @@ impl Default for CodeGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use node::SymbolKind;
+    use node::{SymbolKind, SymbolVisibility};
 
     #[test]
     fn test_add_file_and_symbol() {
@@ -269,6 +269,8 @@ mod tests {
                 col: 0,
                 is_exported: true,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
         assert_eq!(graph.file_count(), 1, "should have one file node");
@@ -305,6 +307,8 @@ mod tests {
                 col: 0,
                 is_exported: true,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
         let prop = graph.add_child_symbol(
@@ -316,6 +320,8 @@ mod tests {
                 col: 2,
                 is_exported: false,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
         assert_eq!(
@@ -349,6 +355,8 @@ mod tests {
                     col: 0,
                     is_exported: false,
                     is_default: false,
+                    visibility: SymbolVisibility::Private,
+                    trait_impl: None,
                 },
             );
         }

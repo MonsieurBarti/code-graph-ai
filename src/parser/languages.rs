@@ -14,6 +14,7 @@ pub fn language_for_extension(ext: &str) -> Option<Language> {
         "ts" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
         "tsx" => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
         "js" | "jsx" => Some(tree_sitter_javascript::LANGUAGE.into()),
+        "rs" => Some(tree_sitter_rust::LANGUAGE.into()),
         _ => None,
     }
 }

@@ -132,7 +132,7 @@ mod tests {
 
     use crate::graph::{
         CodeGraph,
-        node::{SymbolInfo, SymbolKind},
+        node::{SymbolInfo, SymbolKind, SymbolVisibility},
     };
 
     /// Build a three-file graph:
@@ -158,6 +158,8 @@ mod tests {
                 col: 0,
                 is_exported: true,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
 
@@ -221,6 +223,8 @@ mod tests {
                 col: 0,
                 is_exported: true,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
 
@@ -272,6 +276,8 @@ mod tests {
                 col: 0,
                 is_exported: true,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
 

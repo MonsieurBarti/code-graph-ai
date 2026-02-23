@@ -36,6 +36,13 @@ pub fn kind_to_str(kind: &SymbolKind) -> &'static str {
         SymbolKind::Component => "component",
         SymbolKind::Method => "method",
         SymbolKind::Property => "property",
+        // Rust-specific kinds (Phase 8)
+        SymbolKind::Struct => "struct",
+        SymbolKind::Trait => "trait",
+        SymbolKind::ImplMethod => "impl_method",
+        SymbolKind::Const => "const",
+        SymbolKind::Static => "static",
+        SymbolKind::Macro => "macro",
     }
 }
 
@@ -199,7 +206,7 @@ mod tests {
 
     use crate::graph::{
         CodeGraph,
-        node::{SymbolInfo, SymbolKind},
+        node::{SymbolInfo, SymbolKind, SymbolVisibility},
     };
 
     fn make_graph_with_symbols() -> (CodeGraph, PathBuf) {
@@ -216,6 +223,8 @@ mod tests {
                 col: 0,
                 is_exported: true,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
 
@@ -229,6 +238,8 @@ mod tests {
                 col: 0,
                 is_exported: true,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
         graph.add_symbol(
@@ -240,6 +251,8 @@ mod tests {
                 col: 0,
                 is_exported: false,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
 
@@ -312,6 +325,8 @@ mod tests {
                 col: 16,
                 is_exported: true,
                 is_default: false,
+                visibility: SymbolVisibility::Private,
+                trait_impl: None,
             },
         );
 
