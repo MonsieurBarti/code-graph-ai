@@ -133,7 +133,8 @@ impl CodeGraphServer {
                         let graph_cache = Arc::clone(&graph_cache);
 
                         match event {
-                            crate::watcher::event::WatchEvent::ConfigChanged => {
+                            crate::watcher::event::WatchEvent::ConfigChanged
+                            | crate::watcher::event::WatchEvent::CrateRootChanged(_) => {
                                 // Full rebuild — all CPU work happens in spawn_blocking
                                 // with NO lock held. Write lock acquired only to swap result.
                                 let root_clone = root.clone();

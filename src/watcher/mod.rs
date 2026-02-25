@@ -21,10 +21,23 @@ pub struct WatcherHandle {
 }
 
 /// File extensions we care about for incremental re-index.
-const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx"];
+const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "rs"];
 
-/// Config file basenames that trigger full re-index.
-const CONFIG_FILES: &[&str] = &["tsconfig.json", "package.json", "pnpm-workspace.yaml"];
+/// File basenames that trigger a full re-index.
+/// TypeScript/JS config files and Rust crate root files are all treated as full re-index triggers.
+const FULL_REINDEX_FILES: &[&str] = &[
+    "tsconfig.json",
+    "package.json",
+    "pnpm-workspace.yaml",
+    "Cargo.toml",
+    "lib.rs",
+    "main.rs",
+    "mod.rs",
+];
+
+/// Rust crate root / module-tree files (subset of FULL_REINDEX_FILES).
+/// Any mod.rs change triggers full re-index because it changes module tree structure.
+const CRATE_ROOT_FILES: &[&str] = &["Cargo.toml", "lib.rs", "main.rs", "mod.rs"];
 
 /// Build a Gitignore matcher from the project root's .gitignore file.
 /// This is the same source of truth used by `walker::walk_project` via `ignore::WalkBuilder`.
@@ -51,7 +64,7 @@ fn build_gitignore_matcher(project_root: &Path) -> Gitignore {
 /// - Debounces at 75ms (within the locked 50-100ms range)
 /// - Filters out node_modules and .code-graph paths (hardcoded)
 /// - Filters out .gitignore'd paths (same rules as initial indexing)
-/// - Classifies events into Modified/Deleted/ConfigChanged
+/// - Classifies events into Modified/Deleted/ConfigChanged/CrateRootChanged
 pub fn start_watcher(
     watch_root: &Path,
 ) -> anyhow::Result<(WatcherHandle, tokio_mpsc::Receiver<WatchEvent>)> {
@@ -107,8 +120,8 @@ pub fn start_watcher(
 /// Filtering order:
 /// 1. Hardcoded exclusions: node_modules, .code-graph (always excluded)
 /// 2. .gitignore rules via the `gitignore` matcher (same source of truth as initial indexing)
-/// 3. Config file detection (tsconfig.json, package.json → ConfigChanged)
-/// 4. Source extension filter (.ts, .tsx, .js, .jsx)
+/// 3. Full-reindex trigger detection (FULL_REINDEX_FILES → ConfigChanged or CrateRootChanged)
+/// 4. Source extension filter (.ts, .tsx, .js, .jsx, .rs)
 /// 5. File existence check (Modified vs Deleted)
 fn classify_event(path: &Path, _project_root: &Path, gitignore: &Gitignore) -> Option<WatchEvent> {
     // Filter: skip node_modules (hardcoded, regardless of .gitignore — per CONTEXT.md)
@@ -127,11 +140,17 @@ fn classify_event(path: &Path, _project_root: &Path, gitignore: &Gitignore) -> O
         return None;
     }
 
-    // Check if it's a config file
+    // Check if it's a full-reindex trigger file.
+    // Rust crate roots (Cargo.toml, lib.rs, main.rs, mod.rs) emit CrateRootChanged.
+    // TS/JS config files (tsconfig.json, package.json, pnpm-workspace.yaml) emit ConfigChanged.
     if let Some(file_name) = path.file_name().and_then(|n| n.to_str())
-        && CONFIG_FILES.contains(&file_name)
+        && FULL_REINDEX_FILES.contains(&file_name)
     {
-        return Some(WatchEvent::ConfigChanged);
+        if CRATE_ROOT_FILES.contains(&file_name) {
+            return Some(WatchEvent::CrateRootChanged(path.to_path_buf()));
+        } else {
+            return Some(WatchEvent::ConfigChanged);
+        }
     }
 
     // Check if it's a source file we care about

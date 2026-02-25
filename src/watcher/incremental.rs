@@ -6,6 +6,8 @@ use crate::graph::CodeGraph;
 use crate::graph::edge::EdgeKind;
 use crate::graph::node::GraphNode;
 use crate::parser;
+use std::collections::HashMap;
+
 use crate::resolver::{
     ResolutionOutcome, build_resolver, discover_workspace_packages, resolve_import,
     workspace_map_to_aliases,
@@ -23,7 +25,9 @@ use super::event::WatchEvent;
 ///
 /// For ConfigChanged: triggers a full rebuild (caller handles this by calling build_graph).
 ///
-/// Returns `true` if the graph was modified, `false` if ConfigChanged (caller must full-rebuild).
+/// For CrateRootChanged: triggers a full rebuild (caller handles this by calling build_graph).
+///
+/// Returns `true` if the graph was modified, `false` if caller must full-rebuild.
 pub fn handle_file_event(graph: &mut CodeGraph, event: &WatchEvent, project_root: &Path) -> bool {
     match event {
         WatchEvent::Modified(path) => {
@@ -36,6 +40,10 @@ pub fn handle_file_event(graph: &mut CodeGraph, event: &WatchEvent, project_root
         }
         WatchEvent::ConfigChanged => {
             // Caller must perform full rebuild
+            false
+        }
+        WatchEvent::CrateRootChanged(_) => {
+            // Crate root changed — caller must perform full rebuild
             false
         }
     }
@@ -56,6 +64,7 @@ fn handle_modified(graph: &mut CodeGraph, path: &Path, project_root: &Path) {
         "ts" => "typescript",
         "tsx" => "tsx",
         "js" | "jsx" => "javascript",
+        "rs" => "rust",
         _ => return,
     };
 
@@ -73,40 +82,70 @@ fn handle_modified(graph: &mut CodeGraph, path: &Path, project_root: &Path) {
         }
     }
 
-    // 4. Resolve this file's imports (scoped — not full resolve_all)
-    let workspace_map = discover_workspace_packages(project_root);
-    let aliases = workspace_map_to_aliases(&workspace_map);
-    let resolver = build_resolver(project_root, aliases);
+    if language_str == "rust" {
+        // 4a. Rust path: emit use/pub-use placeholder edges, then run resolve_all scoped to this file.
+        // Emit Rust use/pub-use edges (file -> file self-edges as placeholders).
+        for rust_use in &result.rust_uses {
+            if rust_use.is_pub_use {
+                graph.graph.add_edge(
+                    file_idx,
+                    file_idx,
+                    EdgeKind::ReExport {
+                        path: rust_use.path.clone(),
+                    },
+                );
+            } else {
+                graph.graph.add_edge(
+                    file_idx,
+                    file_idx,
+                    EdgeKind::RustImport {
+                        path: rust_use.path.clone(),
+                    },
+                );
+            }
+        }
 
-    for import in &result.imports {
-        let specifier = &import.module_path;
-        let outcome = resolve_import(&resolver, path, specifier);
+        // Run resolve_all scoped to just this file's parse result.
+        // resolve_all handles Rust use-path resolution and self-edge replacement.
+        let mut parse_results = HashMap::new();
+        parse_results.insert(path.to_path_buf(), result);
+        crate::resolver::resolve_all(graph, project_root, &parse_results, false);
+    } else {
+        // 4b. TS/JS path: resolve imports using TS resolver, wire relationships.
+        let workspace_map = discover_workspace_packages(project_root);
+        let aliases = workspace_map_to_aliases(&workspace_map);
+        let resolver = build_resolver(project_root, aliases);
 
-        match outcome {
-            ResolutionOutcome::Resolved(target_path) => {
-                if let Some(&target_idx) = graph.file_index.get(&target_path) {
-                    graph.add_resolved_import(file_idx, target_idx, specifier);
+        for import in &result.imports {
+            let specifier = &import.module_path;
+            let outcome = resolve_import(&resolver, path, specifier);
+
+            match outcome {
+                ResolutionOutcome::Resolved(target_path) => {
+                    if let Some(&target_idx) = graph.file_index.get(&target_path) {
+                        graph.add_resolved_import(file_idx, target_idx, specifier);
+                    }
                 }
-            }
-            ResolutionOutcome::BuiltinModule(_) => {
-                graph.add_unresolved_import(file_idx, specifier, "builtin");
-            }
-            ResolutionOutcome::Unresolved(reason) => {
-                if is_external_package(specifier) {
-                    let pkg_name = extract_package_name(specifier);
-                    graph.add_external_package(file_idx, pkg_name, specifier);
-                } else {
-                    graph.add_unresolved_import(file_idx, specifier, &reason);
+                ResolutionOutcome::BuiltinModule(_) => {
+                    graph.add_unresolved_import(file_idx, specifier, "builtin");
+                }
+                ResolutionOutcome::Unresolved(reason) => {
+                    if is_external_package(specifier) {
+                        let pkg_name = extract_package_name(specifier);
+                        graph.add_external_package(file_idx, pkg_name, specifier);
+                    } else {
+                        graph.add_unresolved_import(file_idx, specifier, &reason);
+                    }
                 }
             }
         }
+
+        // 5. Wire symbol relationships for this file only
+        wire_relationships_for_file(graph, &result.relationships, file_idx);
+
+        // 6. Check if existing unresolved imports now resolve to this file
+        fix_unresolved_pointing_to(graph, path, project_root);
     }
-
-    // 5. Wire symbol relationships for this file only
-    wire_relationships_for_file(graph, &result.relationships, file_idx);
-
-    // 6. Check if existing unresolved imports now resolve to this file
-    fix_unresolved_pointing_to(graph, path, project_root);
 }
 
 /// Handle a deleted file.

@@ -687,11 +687,9 @@ async fn main() -> Result<()> {
                         watcher::incremental::handle_file_event(&mut graph, &event, &path);
                         let elapsed = start.elapsed();
                         eprintln!(
-                            "[watch] modified: {} ({:.1}ms, {} files, {} symbols)",
+                            "[watch] incremental: {} ({:.1}ms)",
                             p.strip_prefix(&path).unwrap_or(p).display(),
                             elapsed.as_secs_f64() * 1000.0,
-                            graph.file_count(),
-                            graph.symbol_count()
                         );
                         let _ = cache::save_cache(&path, &graph);
                     }
@@ -707,6 +705,20 @@ async fn main() -> Result<()> {
                     }
                     watcher::event::WatchEvent::ConfigChanged => {
                         eprintln!("[watch] config changed — full re-index...");
+                        let start = std::time::Instant::now();
+                        graph = build_graph(&path, false)?;
+                        let elapsed = start.elapsed();
+                        eprintln!(
+                            "[watch] re-indexed in {:.1}ms ({} files, {} symbols)",
+                            elapsed.as_secs_f64() * 1000.0,
+                            graph.file_count(),
+                            graph.symbol_count()
+                        );
+                        let _ = cache::save_cache(&path, &graph);
+                    }
+                    watcher::event::WatchEvent::CrateRootChanged(p) => {
+                        let filename = p.file_name().unwrap_or_default().to_string_lossy();
+                        eprintln!("[watch] full re-index: {} changed", filename);
                         let start = std::time::Instant::now();
                         graph = build_graph(&path, false)?;
                         let elapsed = start.elapsed();
