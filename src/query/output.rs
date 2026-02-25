@@ -219,6 +219,26 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat) {
                     "rust_use {} rust_pub_use {}",
                     stats.rust_imports, stats.rust_reexports,
                 );
+                // Dependencies section (Phase 9)
+                let has_deps = stats.external_packages > 0 || stats.builtin_count > 0;
+                if has_deps {
+                    println!(
+                        "dependencies external_crates {} (usages {}) builtins {} (usages {})",
+                        stats.external_packages,
+                        stats.external_usage_count,
+                        stats.builtin_count,
+                        stats.builtin_usage_count,
+                    );
+                }
+                // Per-crate breakdown (Phase 9, only for workspaces with multiple crates)
+                if !stats.rust_crate_stats.is_empty() {
+                    for cs in &stats.rust_crate_stats {
+                        println!(
+                            "crate {} files {} symbols {}",
+                            cs.crate_name, cs.file_count, cs.symbol_count
+                        );
+                    }
+                }
             }
         }
 
@@ -271,10 +291,70 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat) {
                 println!("  macro:       {}", stats.rust_macros);
                 println!("  use (unresolved): {}", stats.rust_imports);
                 println!("  pub use (re-exports): {}", stats.rust_reexports);
+
+                // Dependencies section (Phase 9)
+                let has_deps = stats.external_packages > 0 || stats.builtin_count > 0;
+                if has_deps {
+                    println!();
+                    println!("{}", header("--- Dependencies ---"));
+                    if stats.external_packages > 0 {
+                        println!(
+                            "  External crates: {} ({} usages)",
+                            stats.external_packages, stats.external_usage_count
+                        );
+                    }
+                    if stats.builtin_count > 0 {
+                        println!(
+                            "  Builtins (std/core/alloc): {} ({} usages)",
+                            stats.builtin_count, stats.builtin_usage_count
+                        );
+                    }
+                }
+
+                // Per-crate breakdown (Phase 9, only for workspaces with multiple crates)
+                if !stats.rust_crate_stats.is_empty() {
+                    println!();
+                    println!("{}", header("--- Per-Crate Breakdown ---"));
+                    for cs in &stats.rust_crate_stats {
+                        println!(
+                            "  {} ({} files, {} symbols: fn={} struct={} enum={} trait={} impl={})",
+                            cs.crate_name,
+                            cs.file_count,
+                            cs.symbol_count,
+                            cs.fn_count,
+                            cs.struct_count,
+                            cs.enum_count,
+                            cs.trait_count,
+                            cs.impl_method_count,
+                        );
+                    }
+                }
             }
         }
 
         OutputFormat::Json => {
+            // Build per-crate breakdown as JSON array
+            let crate_stats_json: Vec<serde_json::Value> = stats
+                .rust_crate_stats
+                .iter()
+                .map(|cs| {
+                    serde_json::json!({
+                        "crate_name": cs.crate_name,
+                        "file_count": cs.file_count,
+                        "symbol_count": cs.symbol_count,
+                        "fn_count": cs.fn_count,
+                        "struct_count": cs.struct_count,
+                        "enum_count": cs.enum_count,
+                        "trait_count": cs.trait_count,
+                        "impl_method_count": cs.impl_method_count,
+                        "type_alias_count": cs.type_alias_count,
+                        "const_count": cs.const_count,
+                        "static_count": cs.static_count,
+                        "macro_count": cs.macro_count,
+                    })
+                })
+                .collect();
+
             let json = serde_json::json!({
                 "file_count": stats.file_count,
                 "symbol_count": stats.symbol_count,
@@ -301,6 +381,13 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat) {
                 "rust_macros": stats.rust_macros,
                 "rust_imports": stats.rust_imports,
                 "rust_reexports": stats.rust_reexports,
+                "dependencies": {
+                    "external_crates": stats.external_packages,
+                    "external_usage_count": stats.external_usage_count,
+                    "builtin_crates": stats.builtin_count,
+                    "builtin_usage_count": stats.builtin_usage_count,
+                },
+                "crate_stats": crate_stats_json,
             });
             println!(
                 "{}",
@@ -1110,6 +1197,30 @@ pub fn format_stats_to_string(stats: &ProjectStats) -> String {
             stats.rust_imports, stats.rust_reexports,
         )
         .unwrap();
+        // Dependencies section (Phase 9)
+        let has_deps = stats.external_packages > 0 || stats.builtin_count > 0;
+        if has_deps {
+            writeln!(
+                buf,
+                "dependencies external_crates {} (usages {}) builtins {} (usages {})",
+                stats.external_packages,
+                stats.external_usage_count,
+                stats.builtin_count,
+                stats.builtin_usage_count,
+            )
+            .unwrap();
+        }
+        // Per-crate breakdown (Phase 9, only for workspaces with multiple crates)
+        if !stats.rust_crate_stats.is_empty() {
+            for cs in &stats.rust_crate_stats {
+                writeln!(
+                    buf,
+                    "crate {} files {} symbols {}",
+                    cs.crate_name, cs.file_count, cs.symbol_count
+                )
+                .unwrap();
+            }
+        }
     }
     buf
 }
