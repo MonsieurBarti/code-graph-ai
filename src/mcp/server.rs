@@ -387,6 +387,7 @@ impl CodeGraphServer {
             &kind_filter,
             file_filter,
             &root,
+            None, // MCP operates on full project — no language filter
         )
         .map_err(|e| e.to_string())?;
 
@@ -554,7 +555,7 @@ impl CodeGraphServer {
         let (graph, _root) = self.resolve_graph(p.project_path.as_deref()).await?;
 
         let stats = crate::query::stats::project_stats(&graph);
-        Ok(crate::query::output::format_stats_to_string(&stats))
+        Ok(crate::query::output::format_stats_to_string(&stats, None))
     }
 }
 

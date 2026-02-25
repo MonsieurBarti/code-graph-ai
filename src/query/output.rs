@@ -11,6 +11,35 @@ use crate::query::impact::ImpactResult;
 use crate::query::refs::{RefKind, RefResult};
 use crate::query::stats::ProjectStats;
 
+/// Determine the display language name of a file from its extension.
+fn language_of_file(path: &Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
+        "ts" | "tsx" => "TypeScript",
+        "js" | "jsx" => "JavaScript",
+        "rs" => "Rust",
+        _ => "Unknown",
+    }
+}
+
+/// Returns true if a slice of file paths spans multiple distinct languages.
+fn is_mixed_language<F: Fn(&T) -> &Path, T>(items: &[T], get_path: F) -> bool {
+    if items.is_empty() {
+        return false;
+    }
+    let first_lang = language_of_file(get_path(&items[0]));
+    items[1..].iter().any(|i| language_of_file(get_path(i)) != first_lang)
+}
+
+/// Sort key for language grouping: Rust < TypeScript < JavaScript < Unknown (alphabetical).
+fn language_sort_key(lang: &str) -> u8 {
+    match lang {
+        "JavaScript" => 1,
+        "Rust" => 2,
+        "TypeScript" => 3,
+        _ => 4,
+    }
+}
+
 /// Map a `SymbolVisibility` to its display string for output.
 fn visibility_str(vis: &SymbolVisibility) -> &'static str {
     match vis {
@@ -29,12 +58,37 @@ fn any_non_private(results: &[FindResult]) -> bool {
 }
 
 /// Format and print find results to stdout according to the selected output format.
+///
+/// In compact and table modes, if results span multiple languages, groups them under
+/// `--- {Language} ---` section headers. JSON mode adds a "language" field per result.
 pub fn format_find_results(results: &[FindResult], format: &OutputFormat, project_root: &Path) {
     let show_vis = any_non_private(results);
+    let mixed = is_mixed_language(results, |r: &FindResult| r.file_path.as_path());
+
+    // Sort results: by language first (for grouping), then file path, then line.
+    let mut sorted = results.to_vec();
+    if mixed {
+        sorted.sort_by(|a, b| {
+            let la = language_of_file(&a.file_path);
+            let lb = language_of_file(&b.file_path);
+            language_sort_key(la)
+                .cmp(&language_sort_key(lb))
+                .then(a.file_path.cmp(&b.file_path))
+                .then(a.line.cmp(&b.line))
+        });
+    }
 
     match format {
         OutputFormat::Compact => {
-            for r in results {
+            let mut last_lang: Option<&'static str> = None;
+            for r in &sorted {
+                if mixed {
+                    let lang = language_of_file(&r.file_path);
+                    if last_lang != Some(lang) {
+                        println!("--- {} ---", lang);
+                        last_lang = Some(lang);
+                    }
+                }
                 let rel = r
                     .file_path
                     .strip_prefix(project_root)
@@ -65,13 +119,13 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
             let use_color = std::io::stdout().is_terminal();
 
             // Column widths: auto-sized to data.
-            let name_w = results
+            let name_w = sorted
                 .iter()
                 .map(|r| r.symbol_name.len())
                 .max()
                 .unwrap_or(6)
                 .max(6);
-            let file_w = results
+            let file_w = sorted
                 .iter()
                 .map(|r| {
                     r.file_path
@@ -99,7 +153,15 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
                     );
                 }
                 println!("{}", "-".repeat(name_w + file_w + 26));
-                for r in results {
+                let mut last_lang: Option<&'static str> = None;
+                for r in &sorted {
+                    if mixed {
+                        let lang = language_of_file(&r.file_path);
+                        if last_lang != Some(lang) {
+                            println!("--- {} ---", lang);
+                            last_lang = Some(lang);
+                        }
+                    }
                     let rel = r
                         .file_path
                         .strip_prefix(project_root)
@@ -130,7 +192,15 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
                     );
                 }
                 println!("{}", "-".repeat(name_w + file_w + 14));
-                for r in results {
+                let mut last_lang: Option<&'static str> = None;
+                for r in &sorted {
+                    if mixed {
+                        let lang = language_of_file(&r.file_path);
+                        if last_lang != Some(lang) {
+                            println!("--- {} ---", lang);
+                            last_lang = Some(lang);
+                        }
+                    }
                     let rel = r
                         .file_path
                         .strip_prefix(project_root)
@@ -149,7 +219,7 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
         }
 
         OutputFormat::Json => {
-            let json_results: Vec<serde_json::Value> = results
+            let json_results: Vec<serde_json::Value> = sorted
                 .iter()
                 .map(|r| {
                     let rel = r
@@ -160,6 +230,7 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
                         "name": r.symbol_name,
                         "kind": kind_to_str(&r.kind),
                         "file": rel.to_string_lossy(),
+                        "language": language_of_file(&r.file_path),
                         "line": r.line,
                         "col": r.col,
                         "exported": r.is_exported,
@@ -176,44 +247,52 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
     }
 }
 
+/// Determine if the stats have Rust symbols present.
+fn stats_has_rust(stats: &ProjectStats) -> bool {
+    stats.rust_fns + stats.rust_structs + stats.rust_enums
+        + stats.rust_traits + stats.rust_impl_methods + stats.rust_type_aliases
+        + stats.rust_consts + stats.rust_statics + stats.rust_macros
+        + stats.rust_imports + stats.rust_reexports > 0
+}
+
+/// Determine if the stats have TypeScript/JavaScript symbols present.
+fn stats_has_ts_js(stats: &ProjectStats) -> bool {
+    // Total symbols minus Rust-specific symbols indicates TS/JS presence.
+    let rust_total = stats.rust_fns + stats.rust_structs + stats.rust_enums
+        + stats.rust_traits + stats.rust_impl_methods + stats.rust_type_aliases
+        + stats.rust_consts + stats.rust_statics + stats.rust_macros;
+    stats.symbol_count > rust_total
+        || stats.functions > stats.rust_fns
+        || stats.classes > 0
+        || stats.interfaces > 0
+        || stats.variables > 0
+        || stats.components > 0
+}
+
 /// Format and print project stats to stdout according to the selected output format.
-pub fn format_stats(stats: &ProjectStats, format: &OutputFormat) {
+///
+/// `language_filter`: if Some("rust"), show only Rust section; if Some("typescript"),
+/// show only TypeScript section; if None, show all sections with totals.
+pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter: Option<&str>) {
+    let show_rust = language_filter.is_none() || language_filter == Some("rust");
+    let show_ts = language_filter.is_none() || language_filter == Some("typescript") || language_filter == Some("javascript");
+    let show_totals = language_filter.is_none();
+
+    let has_rust = stats_has_rust(stats);
+    let has_ts = stats_has_ts_js(stats);
+
     match format {
         OutputFormat::Compact => {
-            println!("files {}", stats.file_count);
-            println!("symbols {}", stats.symbol_count);
-            println!(
-                "functions {} classes {} interfaces {} types {} enums {} variables {} components {} methods {} properties {}",
-                stats.functions,
-                stats.classes,
-                stats.interfaces,
-                stats.type_aliases,
-                stats.enums,
-                stats.variables,
-                stats.components,
-                stats.methods,
-                stats.properties,
-            );
-            println!(
-                "imports {} external {} unresolved {}",
-                stats.import_edges, stats.external_packages, stats.unresolved_imports,
-            );
-            let has_rust = stats.rust_fns + stats.rust_structs + stats.rust_enums
-                + stats.rust_traits + stats.rust_impl_methods + stats.rust_type_aliases
-                + stats.rust_consts + stats.rust_statics + stats.rust_macros
-                + stats.rust_imports + stats.rust_reexports > 0;
-            if has_rust {
-                println!(
-                    "rust fn {} struct {} enum {} trait {} impl_method {} type {} const {} static {} macro {}",
-                    stats.rust_fns,
-                    stats.rust_structs,
-                    stats.rust_enums,
-                    stats.rust_traits,
-                    stats.rust_impl_methods,
-                    stats.rust_type_aliases,
-                    stats.rust_consts,
-                    stats.rust_statics,
-                    stats.rust_macros,
+            // Per-language sections with per-language counts and combined totals.
+            if show_rust && has_rust {
+                let rust_symbol_total = stats.rust_fns + stats.rust_structs + stats.rust_enums
+                    + stats.rust_traits + stats.rust_impl_methods + stats.rust_type_aliases
+                    + stats.rust_consts + stats.rust_statics + stats.rust_macros;
+                println!("Rust: {} symbols (fn: {} struct: {} enum: {} trait: {} impl_method: {} type: {} const: {} static: {} macro: {})",
+                    rust_symbol_total,
+                    stats.rust_fns, stats.rust_structs, stats.rust_enums,
+                    stats.rust_traits, stats.rust_impl_methods, stats.rust_type_aliases,
+                    stats.rust_consts, stats.rust_statics, stats.rust_macros,
                 );
                 println!(
                     "rust_use {} rust_pub_use {}",
@@ -240,6 +319,37 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat) {
                     }
                 }
             }
+            if show_ts && has_ts {
+                let ts_fns = stats.functions.saturating_sub(stats.rust_fns);
+                let ts_enums = stats.enums.saturating_sub(stats.rust_enums);
+                let ts_type_aliases = stats.type_aliases.saturating_sub(stats.rust_type_aliases);
+                println!("TypeScript: {} symbols (function: {} class: {} interface: {} type: {} enum: {} variable: {} component: {} method: {} property: {})",
+                    stats.symbol_count.saturating_sub(stats.rust_fns + stats.rust_structs + stats.rust_enums
+                        + stats.rust_traits + stats.rust_impl_methods + stats.rust_type_aliases
+                        + stats.rust_consts + stats.rust_statics + stats.rust_macros),
+                    ts_fns, stats.classes, stats.interfaces,
+                    ts_type_aliases, ts_enums,
+                    stats.variables, stats.components, stats.methods, stats.properties,
+                );
+                println!(
+                    "imports {} external {} unresolved {}",
+                    stats.import_edges, stats.external_packages, stats.unresolved_imports,
+                );
+            }
+            if show_totals && has_rust && has_ts {
+                println!("---");
+                println!("Total: {} files, {} symbols", stats.file_count, stats.symbol_count);
+            } else if show_totals {
+                println!("files {}", stats.file_count);
+                println!("symbols {}", stats.symbol_count);
+            }
+            // Fallback: show full stats if neither Rust nor TS-specific sections match
+            if !has_rust && !has_ts {
+                println!("files {}", stats.file_count);
+                println!("symbols {}", stats.symbol_count);
+                println!("imports {} external {} unresolved {}",
+                    stats.import_edges, stats.external_packages, stats.unresolved_imports);
+            }
         }
 
         OutputFormat::Table => {
@@ -252,32 +362,52 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat) {
                 }
             };
 
-            println!("{}", header("=== Project Overview ==="));
-            println!("Files:    {}", stats.file_count);
-            println!("Symbols:  {}", stats.symbol_count);
-            println!();
-            println!("{}", header("--- Symbol Breakdown ---"));
-            println!("  Functions:   {}", stats.functions);
-            println!("  Classes:     {}", stats.classes);
-            println!("  Interfaces:  {}", stats.interfaces);
-            println!("  Type Aliases:{}", stats.type_aliases);
-            println!("  Enums:       {}", stats.enums);
-            println!("  Variables:   {}", stats.variables);
-            println!("  Components:  {}", stats.components);
-            println!("  Methods:     {}", stats.methods);
-            println!("  Properties:  {}", stats.properties);
-            println!();
-            println!("{}", header("--- Import Summary ---"));
-            println!("  Resolved imports:  {}", stats.import_edges);
-            println!("  External packages: {}", stats.external_packages);
-            println!("  Unresolved:        {}", stats.unresolved_imports);
+            if show_totals || show_rust && !show_ts || show_ts && !show_rust {
+                println!("{}", header("=== Project Overview ==="));
+                println!("Files:    {}", stats.file_count);
+                println!("Symbols:  {}", stats.symbol_count);
+                println!();
+            }
 
-            // Rust section — only when Rust symbols are present
-            let has_rust = stats.rust_fns + stats.rust_structs + stats.rust_enums
-                + stats.rust_traits + stats.rust_impl_methods + stats.rust_type_aliases
-                + stats.rust_consts + stats.rust_statics + stats.rust_macros
-                + stats.rust_imports + stats.rust_reexports > 0;
-            if has_rust {
+            if show_ts && has_ts {
+                let ts_fns = stats.functions.saturating_sub(stats.rust_fns);
+                let ts_enums = stats.enums.saturating_sub(stats.rust_enums);
+                let ts_type_aliases = stats.type_aliases.saturating_sub(stats.rust_type_aliases);
+                println!("{}", header("--- TypeScript/JavaScript ---"));
+                println!("  Functions:    {}", ts_fns);
+                println!("  Classes:      {}", stats.classes);
+                println!("  Interfaces:   {}", stats.interfaces);
+                println!("  Type Aliases: {}", ts_type_aliases);
+                println!("  Enums:        {}", ts_enums);
+                println!("  Variables:    {}", stats.variables);
+                println!("  Components:   {}", stats.components);
+                println!("  Methods:      {}", stats.methods);
+                println!("  Properties:   {}", stats.properties);
+                println!();
+                println!("{}", header("--- Import Summary ---"));
+                println!("  Resolved imports:  {}", stats.import_edges);
+                println!("  External packages: {}", stats.external_packages);
+                println!("  Unresolved:        {}", stats.unresolved_imports);
+            } else if show_totals && !has_rust {
+                println!("{}", header("--- Symbol Breakdown ---"));
+                println!("  Functions:   {}", stats.functions);
+                println!("  Classes:     {}", stats.classes);
+                println!("  Interfaces:  {}", stats.interfaces);
+                println!("  Type Aliases:{}", stats.type_aliases);
+                println!("  Enums:       {}", stats.enums);
+                println!("  Variables:   {}", stats.variables);
+                println!("  Components:  {}", stats.components);
+                println!("  Methods:     {}", stats.methods);
+                println!("  Properties:  {}", stats.properties);
+                println!();
+                println!("{}", header("--- Import Summary ---"));
+                println!("  Resolved imports:  {}", stats.import_edges);
+                println!("  External packages: {}", stats.external_packages);
+                println!("  Unresolved:        {}", stats.unresolved_imports);
+            }
+
+            // Rust section — only when Rust symbols are present and filter allows
+            if show_rust && has_rust {
                 println!();
                 println!("{}", header("--- Rust Symbols ---"));
                 println!("  fn:          {}", stats.rust_fns);
@@ -1103,12 +1233,35 @@ pub fn format_context_results(
 ///
 /// Summary header (total count) is written FIRST, before any result lines,
 /// so Claude can count-check results at a glance (CONTEXT.md locked decision).
+/// In mixed-language results, groups by language with `--- {Language} ---` headers.
 pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> String {
     use std::fmt::Write;
     let show_vis = any_non_private(results);
+    let mixed = is_mixed_language(results, |r: &FindResult| r.file_path.as_path());
+
+    let mut sorted = results.to_vec();
+    if mixed {
+        sorted.sort_by(|a, b| {
+            let la = language_of_file(&a.file_path);
+            let lb = language_of_file(&b.file_path);
+            language_sort_key(la)
+                .cmp(&language_sort_key(lb))
+                .then(a.file_path.cmp(&b.file_path))
+                .then(a.line.cmp(&b.line))
+        });
+    }
+
     let mut buf = String::new();
     writeln!(buf, "{} definitions found", results.len()).unwrap();
-    for r in results {
+    let mut last_lang: Option<&'static str> = None;
+    for r in &sorted {
+        if mixed {
+            let lang = language_of_file(&r.file_path);
+            if last_lang != Some(lang) {
+                writeln!(buf, "--- {} ---", lang).unwrap();
+                last_lang = Some(lang);
+            }
+        }
         let rel = r
             .file_path
             .strip_prefix(project_root)
@@ -1142,54 +1295,34 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
 /// Format project stats to a String in compact format for MCP tool responses.
 ///
 /// Summary header (file + symbol counts) is written FIRST.
-pub fn format_stats_to_string(stats: &ProjectStats) -> String {
+/// `language_filter`: if Some, only show the matching language section.
+pub fn format_stats_to_string(stats: &ProjectStats, language_filter: Option<&str>) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
+
+    let show_rust = language_filter.is_none() || language_filter == Some("rust");
+    let show_ts = language_filter.is_none() || language_filter == Some("typescript") || language_filter == Some("javascript");
+    let show_totals = language_filter.is_none();
+
+    let has_rust = stats_has_rust(stats);
+    let has_ts = stats_has_ts_js(stats);
+
     writeln!(
         buf,
         "{} files, {} symbols",
         stats.file_count, stats.symbol_count
     )
     .unwrap();
-    writeln!(buf, "files {}", stats.file_count).unwrap();
-    writeln!(buf, "symbols {}", stats.symbol_count).unwrap();
-    writeln!(
-        buf,
-        "functions {} classes {} interfaces {} types {} enums {} variables {} components {} methods {} properties {}",
-        stats.functions,
-        stats.classes,
-        stats.interfaces,
-        stats.type_aliases,
-        stats.enums,
-        stats.variables,
-        stats.components,
-        stats.methods,
-        stats.properties,
-    ).unwrap();
-    writeln!(
-        buf,
-        "imports {} external {} unresolved {}",
-        stats.import_edges, stats.external_packages, stats.unresolved_imports,
-    )
-    .unwrap();
-    // Rust section — only when Rust symbols are present
-    let has_rust = stats.rust_fns + stats.rust_structs + stats.rust_enums
-        + stats.rust_traits + stats.rust_impl_methods + stats.rust_type_aliases
-        + stats.rust_consts + stats.rust_statics + stats.rust_macros
-        + stats.rust_imports + stats.rust_reexports > 0;
-    if has_rust {
-        writeln!(
-            buf,
-            "rust fn {} struct {} enum {} trait {} impl_method {} type {} const {} static {} macro {}",
-            stats.rust_fns,
-            stats.rust_structs,
-            stats.rust_enums,
-            stats.rust_traits,
-            stats.rust_impl_methods,
-            stats.rust_type_aliases,
-            stats.rust_consts,
-            stats.rust_statics,
-            stats.rust_macros,
+
+    if show_rust && has_rust {
+        let rust_symbol_total = stats.rust_fns + stats.rust_structs + stats.rust_enums
+            + stats.rust_traits + stats.rust_impl_methods + stats.rust_type_aliases
+            + stats.rust_consts + stats.rust_statics + stats.rust_macros;
+        writeln!(buf, "Rust: {} symbols (fn: {} struct: {} enum: {} trait: {} impl_method: {} type: {} const: {} static: {} macro: {})",
+            rust_symbol_total,
+            stats.rust_fns, stats.rust_structs, stats.rust_enums,
+            stats.rust_traits, stats.rust_impl_methods, stats.rust_type_aliases,
+            stats.rust_consts, stats.rust_statics, stats.rust_macros,
         ).unwrap();
         writeln!(
             buf,
@@ -1222,6 +1355,53 @@ pub fn format_stats_to_string(stats: &ProjectStats) -> String {
             }
         }
     }
+
+    if show_ts && has_ts {
+        let ts_fns = stats.functions.saturating_sub(stats.rust_fns);
+        let ts_enums = stats.enums.saturating_sub(stats.rust_enums);
+        let ts_type_aliases = stats.type_aliases.saturating_sub(stats.rust_type_aliases);
+        writeln!(
+            buf,
+            "TypeScript: functions {} classes {} interfaces {} types {} enums {} variables {} components {} methods {} properties {}",
+            ts_fns, stats.classes, stats.interfaces,
+            ts_type_aliases, ts_enums,
+            stats.variables, stats.components, stats.methods, stats.properties,
+        ).unwrap();
+        writeln!(
+            buf,
+            "imports {} external {} unresolved {}",
+            stats.import_edges, stats.external_packages, stats.unresolved_imports,
+        )
+        .unwrap();
+    }
+
+    if show_totals && has_rust && has_ts {
+        writeln!(buf, "---").unwrap();
+        writeln!(buf, "Total: {} files, {} symbols", stats.file_count, stats.symbol_count).unwrap();
+    } else if show_totals && !has_rust {
+        writeln!(buf, "files {}", stats.file_count).unwrap();
+        writeln!(buf, "symbols {}", stats.symbol_count).unwrap();
+        writeln!(
+            buf,
+            "functions {} classes {} interfaces {} types {} enums {} variables {} components {} methods {} properties {}",
+            stats.functions,
+            stats.classes,
+            stats.interfaces,
+            stats.type_aliases,
+            stats.enums,
+            stats.variables,
+            stats.components,
+            stats.methods,
+            stats.properties,
+        ).unwrap();
+        writeln!(
+            buf,
+            "imports {} external {} unresolved {}",
+            stats.import_edges, stats.external_packages, stats.unresolved_imports,
+        )
+        .unwrap();
+    }
+
     buf
 }
 

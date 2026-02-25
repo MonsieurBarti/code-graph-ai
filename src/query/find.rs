@@ -98,6 +98,8 @@ fn find_containing_file_of_child(
 /// - `file_filter`: if Some, only include symbols whose file path starts with this prefix
 ///   (matched as a relative path against `project_root`)
 /// - `project_root`: used for relativizing file paths when applying `file_filter`
+/// - `language_filter`: if Some, only include symbols from files with this language string
+///   (e.g. "rust", "typescript", "javascript")
 ///
 /// Returns results sorted by file path then line number.
 pub fn find_symbol(
@@ -107,6 +109,7 @@ pub fn find_symbol(
     kind_filter: &[String],
     file_filter: Option<&Path>,
     project_root: &Path,
+    language_filter: Option<&str>,
 ) -> Result<Vec<FindResult>> {
     let re = RegexBuilder::new(pattern)
         .case_insensitive(case_insensitive)
@@ -152,6 +155,13 @@ pub fn find_symbol(
                     .strip_prefix(project_root)
                     .unwrap_or(&file_info.path);
                 if !rel_path.starts_with(filter) {
+                    continue;
+                }
+            }
+
+            // Language filter: skip symbols from files whose language doesn't match.
+            if let Some(lang) = language_filter {
+                if file_info.language.as_str() != lang {
                     continue;
                 }
             }
@@ -264,7 +274,7 @@ mod tests {
     #[test]
     fn test_exact_name_match() {
         let (graph, root) = make_graph_with_symbols();
-        let results = find_symbol(&graph, "UserService", false, &[], None, &root).unwrap();
+        let results = find_symbol(&graph, "UserService", false, &[], None, &root, None).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].symbol_name, "UserService");
         assert_eq!(results[0].kind, SymbolKind::Class);
@@ -275,14 +285,14 @@ mod tests {
     fn test_regex_pattern_matches_multiple() {
         let (graph, root) = make_graph_with_symbols();
         // ".*Service" should match both UserService and AuthService
-        let results = find_symbol(&graph, ".*Service", false, &[], None, &root).unwrap();
+        let results = find_symbol(&graph, ".*Service", false, &[], None, &root, None).unwrap();
         assert_eq!(results.len(), 2, "should match UserService and AuthService");
     }
 
     #[test]
     fn test_case_insensitive_flag() {
         let (graph, root) = make_graph_with_symbols();
-        let results = find_symbol(&graph, "userservice", true, &[], None, &root).unwrap();
+        let results = find_symbol(&graph, "userservice", true, &[], None, &root, None).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].symbol_name, "UserService");
     }
@@ -291,7 +301,7 @@ mod tests {
     fn test_kind_filter() {
         let (graph, root) = make_graph_with_symbols();
         let kind_filter = vec!["function".to_string()];
-        let results = find_symbol(&graph, ".*", false, &kind_filter, None, &root).unwrap();
+        let results = find_symbol(&graph, ".*", false, &kind_filter, None, &root, None).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].symbol_name, "greetUser");
         assert_eq!(results[0].kind, SymbolKind::Function);
@@ -300,14 +310,14 @@ mod tests {
     #[test]
     fn test_no_match_returns_empty() {
         let (graph, root) = make_graph_with_symbols();
-        let results = find_symbol(&graph, "NonExistent", false, &[], None, &root).unwrap();
+        let results = find_symbol(&graph, "NonExistent", false, &[], None, &root, None).unwrap();
         assert!(results.is_empty());
     }
 
     #[test]
     fn test_invalid_regex_returns_error() {
         let (graph, root) = make_graph_with_symbols();
-        let err = find_symbol(&graph, "[unclosed", false, &[], None, &root);
+        let err = find_symbol(&graph, "[unclosed", false, &[], None, &root, None);
         assert!(err.is_err(), "invalid regex should return an error");
     }
 
@@ -336,7 +346,7 @@ mod tests {
         let f2 = graph.add_file(root.join("src/main.ts"), "typescript");
         graph.add_calls_edge(f2, greet_sym);
 
-        let results = find_symbol(&graph, "greet", false, &[], None, &root).unwrap();
+        let results = find_symbol(&graph, "greet", false, &[], None, &root, None).unwrap();
         assert_eq!(results.len(), 1, "should find exactly one definition");
         assert_eq!(
             results[0].file_path,

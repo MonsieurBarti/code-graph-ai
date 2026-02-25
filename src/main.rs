@@ -175,6 +175,39 @@ fn populate_rust_crate_names(graph: &mut CodeGraph, project_root: &Path) {
     }
 }
 
+/// Parse a --language flag string into a canonical language string for use in filters.
+///
+/// Returns the canonical language string ("rust", "typescript", "javascript") or None.
+/// Returns an error if the string is not a recognized language alias.
+fn parse_language_filter(lang_str: Option<&str>) -> Result<Option<&'static str>> {
+    match lang_str {
+        None => Ok(None),
+        Some(s) => match LanguageKind::from_str_loose(s) {
+            Some(LanguageKind::Rust) => Ok(Some("rust")),
+            Some(LanguageKind::TypeScript) => Ok(Some("typescript")),
+            Some(LanguageKind::JavaScript) => Ok(Some("javascript")),
+            None => anyhow::bail!(
+                "unknown language '{}'. Valid: rust/rs, typescript/ts, javascript/js",
+                s
+            ),
+        },
+    }
+}
+
+/// Returns true if the file at `path` belongs to the given language string.
+///
+/// Determines language from file extension. Used for post-filtering results
+/// in Refs, Impact, Circular, and Context commands.
+fn file_language_matches(path: &Path, lang: &str) -> bool {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    match lang {
+        "rust" => ext == "rs",
+        "typescript" => matches!(ext, "ts" | "tsx"),
+        "javascript" => matches!(ext, "js" | "jsx"),
+        _ => false,
+    }
+}
+
 /// Build the code graph for a project at `path` by walking, parsing, and resolving all files.
 ///
 /// This is the shared pipeline used by all query subcommands. The Index command has its own
@@ -511,12 +544,15 @@ async fn main() -> Result<()> {
             kind,
             file,
             format,
+            language,
         } => {
             // Validate regex FIRST before the expensive index pipeline (Research Pitfall 4).
             regex::RegexBuilder::new(&symbol)
                 .case_insensitive(case_insensitive)
                 .build()
                 .map_err(|e| anyhow::anyhow!("invalid symbol pattern '{}': {}", symbol, e))?;
+
+            let language_filter = parse_language_filter(language.as_deref())?;
 
             let graph = build_graph(&path, false)?;
             let results = query::find::find_symbol(
@@ -526,20 +562,29 @@ async fn main() -> Result<()> {
                 &kind,
                 file.as_deref(),
                 &path,
+                language_filter,
             )?;
 
             if results.is_empty() {
-                eprintln!("no symbols matching '{}' found", symbol);
+                if let Some(lang) = language_filter {
+                    eprintln!(
+                        "No {} symbols found. Run `code-graph stats` to see indexed languages.",
+                        lang
+                    );
+                } else {
+                    eprintln!("no symbols matching '{}' found", symbol);
+                }
                 std::process::exit(1);
             }
 
             query::output::format_find_results(&results, &format, &path);
         }
 
-        Commands::Stats { path, format } => {
+        Commands::Stats { path, format, language } => {
+            let language_filter = parse_language_filter(language.as_deref())?;
             let graph = build_graph(&path, false)?;
             let stats = query::stats::project_stats(&graph);
-            query::output::format_stats(&stats, &format);
+            query::output::format_stats(&stats, &format, language_filter);
         }
 
         Commands::Refs {
@@ -549,12 +594,15 @@ async fn main() -> Result<()> {
             kind: _,
             file: _,
             format,
+            language,
         } => {
             // Validate regex FIRST before the expensive index pipeline.
             regex::RegexBuilder::new(&symbol)
                 .case_insensitive(case_insensitive)
                 .build()
                 .map_err(|e| anyhow::anyhow!("invalid symbol pattern '{}': {}", symbol, e))?;
+
+            let language_filter = parse_language_filter(language.as_deref())?;
 
             let graph = build_graph(&path, false)?;
             let matches = query::find::match_symbols(&graph, &symbol, case_insensitive)?;
@@ -570,10 +618,22 @@ async fn main() -> Result<()> {
                 .flat_map(|(_, indices)| indices.iter().copied())
                 .collect();
 
-            let results = query::refs::find_refs(&graph, &symbol, &all_indices, &path);
+            let mut results = query::refs::find_refs(&graph, &symbol, &all_indices, &path);
+
+            // Apply language filter as post-filter on file path extension.
+            if let Some(lang) = language_filter {
+                results.retain(|r| file_language_matches(&r.file_path, lang));
+            }
 
             if results.is_empty() {
-                eprintln!("no references to '{}' found", symbol);
+                if let Some(lang) = language_filter {
+                    eprintln!(
+                        "No {} references found. Run `code-graph stats` to see indexed languages.",
+                        lang
+                    );
+                } else {
+                    eprintln!("no references to '{}' found", symbol);
+                }
             } else {
                 query::output::format_refs_results(&results, &format, &path);
             }
@@ -585,12 +645,15 @@ async fn main() -> Result<()> {
             case_insensitive,
             tree,
             format,
+            language,
         } => {
             // Validate regex FIRST.
             regex::RegexBuilder::new(&symbol)
                 .case_insensitive(case_insensitive)
                 .build()
                 .map_err(|e| anyhow::anyhow!("invalid symbol pattern '{}': {}", symbol, e))?;
+
+            let language_filter = parse_language_filter(language.as_deref())?;
 
             let graph = build_graph(&path, false)?;
             let matches = query::find::match_symbols(&graph, &symbol, case_insensitive)?;
@@ -605,13 +668,26 @@ async fn main() -> Result<()> {
                 .flat_map(|(_, indices)| indices.iter().copied())
                 .collect();
 
-            let results = query::impact::blast_radius(&graph, &all_indices, &path);
+            let mut results = query::impact::blast_radius(&graph, &all_indices, &path);
+
+            // Apply language filter as post-filter on file path extension.
+            if let Some(lang) = language_filter {
+                results.retain(|r| file_language_matches(&r.file_path, lang));
+            }
+
             query::output::format_impact_results(&results, &format, &path, tree);
         }
 
-        Commands::Circular { path, format } => {
+        Commands::Circular { path, format, language } => {
+            let language_filter = parse_language_filter(language.as_deref())?;
+
             let graph = build_graph(&path, false)?;
-            let cycles = query::circular::find_circular(&graph, &path);
+            let mut cycles = query::circular::find_circular(&graph, &path);
+
+            // Apply language filter: retain cycles where all files match the language.
+            if let Some(lang) = language_filter {
+                cycles.retain(|c| c.files.iter().all(|f| file_language_matches(f, lang)));
+            }
 
             if cycles.is_empty() {
                 println!("no circular dependencies found");
@@ -625,12 +701,15 @@ async fn main() -> Result<()> {
             symbol,
             case_insensitive,
             format,
+            language,
         } => {
             // Validate regex FIRST before the expensive index pipeline.
             regex::RegexBuilder::new(&symbol)
                 .case_insensitive(case_insensitive)
                 .build()
                 .map_err(|e| anyhow::anyhow!("invalid symbol pattern '{}': {}", symbol, e))?;
+
+            let language_filter = parse_language_filter(language.as_deref())?;
 
             let graph = build_graph(&path, false)?;
             let matches = query::find::match_symbols(&graph, &symbol, case_insensitive)?;
@@ -641,10 +720,31 @@ async fn main() -> Result<()> {
             }
 
             // Build one SymbolContext per matched symbol name.
-            let results: Vec<query::context::SymbolContext> = matches
+            let mut results: Vec<query::context::SymbolContext> = matches
                 .iter()
                 .map(|(name, indices)| query::context::symbol_context(&graph, name, indices, &path))
                 .collect();
+
+            // Apply language filter to context results: filter definition/reference file paths.
+            if let Some(lang) = language_filter {
+                for ctx in &mut results {
+                    ctx.definitions.retain(|d| file_language_matches(&d.file_path, lang));
+                    ctx.references.retain(|r| file_language_matches(&r.file_path, lang));
+                    ctx.callers.retain(|c| file_language_matches(&c.file_path, lang));
+                    ctx.callees.retain(|c| file_language_matches(&c.file_path, lang));
+                }
+                results.retain(|ctx| !ctx.definitions.is_empty());
+            }
+
+            if results.is_empty() {
+                if let Some(lang) = language_filter {
+                    eprintln!(
+                        "No {} symbols found. Run `code-graph stats` to see indexed languages.",
+                        lang
+                    );
+                    std::process::exit(1);
+                }
+            }
 
             query::output::format_context_results(&results, &format, &path, &symbol);
         }

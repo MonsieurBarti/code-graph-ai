@@ -79,6 +79,10 @@ pub enum Commands {
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
         format: OutputFormat,
+
+        /// Filter results by language (rust/rs, typescript/ts, javascript/js).
+        #[arg(long = "language", alias = "lang")]
+        language: Option<String>,
     },
 
     /// Find all references to a symbol across the codebase.
@@ -106,6 +110,10 @@ pub enum Commands {
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
         format: OutputFormat,
+
+        /// Filter results by language (rust/rs, typescript/ts, javascript/js).
+        #[arg(long = "language", alias = "lang")]
+        language: Option<String>,
     },
 
     /// Show the transitive blast radius (dependents) of changing a symbol.
@@ -129,6 +137,10 @@ pub enum Commands {
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
         format: OutputFormat,
+
+        /// Filter results by language (rust/rs, typescript/ts, javascript/js).
+        #[arg(long = "language", alias = "lang")]
+        language: Option<String>,
     },
 
     /// Detect circular dependencies in the import graph (file-level).
@@ -142,6 +154,10 @@ pub enum Commands {
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
         format: OutputFormat,
+
+        /// Filter results by language (rust/rs, typescript/ts, javascript/js).
+        #[arg(long = "language", alias = "lang")]
+        language: Option<String>,
     },
 
     /// Project statistics overview: file count, symbol breakdown, import summary.
@@ -152,6 +168,10 @@ pub enum Commands {
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
         format: OutputFormat,
+
+        /// Filter output to show only a specific language's stats section (rust/rs, typescript/ts, javascript/js).
+        #[arg(long = "language", alias = "lang")]
+        language: Option<String>,
     },
 
     /// 360-degree view of a symbol: definition, references, callers, and callees.
@@ -171,6 +191,10 @@ pub enum Commands {
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
         format: OutputFormat,
+
+        /// Filter results by language (rust/rs, typescript/ts, javascript/js).
+        #[arg(long = "language", alias = "lang")]
+        language: Option<String>,
     },
 
     /// Start an MCP stdio server exposing graph queries as tools for Claude Code.
