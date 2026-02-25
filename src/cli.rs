@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
+use crate::export;
+
 /// A high-performance code intelligence engine for TypeScript/JavaScript codebases.
 ///
 /// code-graph indexes your codebase into a queryable dependency graph, enabling
@@ -210,5 +212,39 @@ pub enum Commands {
     Watch {
         /// Path to the project root to watch.
         path: PathBuf,
+    },
+
+    /// Export the code graph to DOT or Mermaid format for architectural visualization.
+    Export {
+        /// Path to the project root to index and export.
+        path: PathBuf,
+
+        /// Output format: dot (default) or mermaid.
+        #[arg(long, value_enum, default_value_t = export::model::ExportFormat::Dot)]
+        format: export::model::ExportFormat,
+
+        /// Granularity: file (default), symbol, or package.
+        #[arg(long, value_enum, default_value_t = export::model::Granularity::File)]
+        granularity: export::model::Granularity,
+
+        /// Write output to stdout instead of .code-graph/graph.dot|.mmd.
+        #[arg(long)]
+        stdout: bool,
+
+        /// Export only files/symbols under this path.
+        #[arg(long)]
+        root: Option<PathBuf>,
+
+        /// Export a symbol and its N-hop neighborhood.
+        #[arg(long)]
+        symbol: Option<String>,
+
+        /// Hop depth for --symbol (default: 1).
+        #[arg(long, default_value_t = 1)]
+        depth: usize,
+
+        /// Exclude paths matching glob patterns (comma-separated).
+        #[arg(long, value_delimiter = ',')]
+        exclude: Vec<String>,
     },
 }

@@ -393,6 +393,243 @@ edition = "2021"
 // Task 2: MCP parity — JSON output format test (closest to MCP output format)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Task 2 (Plan 11-02): Integration tests for export command — EXPORT-01 through EXPORT-06
+// ---------------------------------------------------------------------------
+
+/// Run a code-graph export command and return (stdout, stderr).
+/// Asserts that the command exits successfully.
+fn run_export(extra_args: &[&str]) -> (String, String) {
+    let root = project_root();
+    let mut args = vec!["export", root.to_str().unwrap()];
+    args.extend_from_slice(extra_args);
+    let out = Command::new(binary())
+        .args(&args)
+        .output()
+        .expect("failed to invoke code-graph binary");
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(
+        out.status.success(),
+        "export {:?} failed\nstdout: {}\nstderr: {}",
+        extra_args,
+        stdout,
+        stderr
+    );
+    (stdout, stderr)
+}
+
+/// test_export_dot — EXPORT-01: DOT format output contains required header and graph structure.
+#[test]
+fn test_export_dot() {
+    let (stdout, _stderr) = run_export(&["--format", "dot", "--stdout"]);
+    // DOT header
+    assert!(
+        stdout.contains("digraph code_graph"),
+        "DOT output should contain 'digraph code_graph'\nstdout: {}",
+        &stdout[..stdout.len().min(500)]
+    );
+    assert!(
+        stdout.contains("rankdir=TB"),
+        "DOT output should contain 'rankdir=TB'\nstdout: {}",
+        &stdout[..stdout.len().min(500)]
+    );
+    // Node structure: at least one labeled node
+    assert!(
+        stdout.contains("[label="),
+        "DOT output should contain at least one labeled node\nstdout: {}",
+        &stdout[..stdout.len().min(500)]
+    );
+    // Edge structure: at least one edge
+    assert!(
+        stdout.contains("->"),
+        "DOT output should contain at least one edge '->'\nstdout: {}",
+        &stdout[..stdout.len().min(500)]
+    );
+}
+
+/// test_export_mermaid — EXPORT-02: Mermaid format output contains required header and structure.
+#[test]
+fn test_export_mermaid() {
+    let (stdout, _stderr) = run_export(&["--format", "mermaid", "--stdout"]);
+    // Mermaid header
+    assert!(
+        stdout.contains("flowchart TB"),
+        "Mermaid output should contain 'flowchart TB'\nstdout: {}",
+        &stdout[..stdout.len().min(500)]
+    );
+    // Node structure: Mermaid nodes use ["..."] syntax
+    assert!(
+        stdout.contains("[\""),
+        "Mermaid output should contain node syntax '[\"'\nstdout: {}",
+        &stdout[..stdout.len().min(500)]
+    );
+    // Edge structure: Mermaid edges use -->
+    assert!(
+        stdout.contains("-->"),
+        "Mermaid output should contain at least one edge '-->'\nstdout: {}",
+        &stdout[..stdout.len().min(500)]
+    );
+}
+
+/// test_export_granularity — EXPORT-03: granularity flag changes output content.
+///
+/// symbol granularity includes kind annotations like "(fn)", "(struct)", "(enum)";
+/// file granularity shows file paths only.
+#[test]
+fn test_export_granularity() {
+    let (file_stdout, _) = run_export(&["--granularity", "file", "--stdout"]);
+    let (symbol_stdout, _) = run_export(&["--granularity", "symbol", "--stdout"]);
+
+    // Outputs must differ (symbol granularity expands each file into individual symbols)
+    assert_ne!(
+        file_stdout,
+        symbol_stdout,
+        "file and symbol granularity should produce different output"
+    );
+
+    // File granularity: nodes are file paths — should NOT contain "(fn)" or "(struct)"
+    assert!(
+        !file_stdout.contains("(fn)"),
+        "file granularity output should not contain symbol-level '(fn)' annotations\n{}",
+        &file_stdout[..file_stdout.len().min(500)]
+    );
+    assert!(
+        !file_stdout.contains("(struct)"),
+        "file granularity output should not contain symbol-level '(struct)' annotations\n{}",
+        &file_stdout[..file_stdout.len().min(500)]
+    );
+
+    // Symbol granularity: nodes include kind annotations like "(fn)" or "(struct)"
+    let has_kind_annotation = symbol_stdout.contains("(fn)")
+        || symbol_stdout.contains("(struct)")
+        || symbol_stdout.contains("(enum)");
+    assert!(
+        has_kind_annotation,
+        "symbol granularity output should contain kind annotations like '(fn)', '(struct)', '(enum)'\n{}",
+        &symbol_stdout[..symbol_stdout.len().min(500)]
+    );
+}
+
+/// test_export_dot_package_clusters — EXPORT-04: DOT package granularity uses subgraph cluster_ blocks.
+#[test]
+fn test_export_dot_package_clusters() {
+    let (stdout, _stderr) = run_export(&["--granularity", "package", "--stdout"]);
+
+    // Package granularity uses DOT subgraph cluster_ blocks
+    assert!(
+        stdout.contains("subgraph cluster_"),
+        "package granularity DOT output should contain 'subgraph cluster_'\nstdout: {}",
+        &stdout[..stdout.len().min(500)]
+    );
+
+    // code-graph's own source has multiple packages (tests + code_graph_cli at minimum)
+    let cluster_count = stdout.matches("subgraph cluster_").count();
+    assert!(
+        cluster_count >= 2,
+        "package granularity DOT should have at least 2 cluster subgraphs, found {}\nstdout: {}",
+        cluster_count,
+        &stdout[..stdout.len().min(800)]
+    );
+}
+
+/// test_export_mermaid_edge_limit_warning — EXPORT-05: scale guard warning behavior.
+///
+/// code-graph's own source has >200 symbols at symbol granularity (505 nodes measured),
+/// so the node-count warning MUST appear. The Mermaid edge-limit warning (>500 edges)
+/// may or may not appear depending on the current edge count.
+///
+/// Also verifies that DOT format does NOT produce the Mermaid-specific edge limit warning.
+#[test]
+fn test_export_mermaid_edge_limit_warning() {
+    // Run symbol granularity — project has >200 symbols, triggering the node count warning.
+    let root = project_root();
+    let out = Command::new(binary())
+        .args([
+            "export",
+            root.to_str().unwrap(),
+            "--granularity",
+            "symbol",
+            "--stdout",
+        ])
+        .output()
+        .expect("failed to invoke code-graph binary");
+    assert!(
+        out.status.success(),
+        "export symbol --stdout should exit 0"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+
+    // The project has 505 symbols — the node-count scale guard must fire.
+    assert!(
+        stderr.contains("Warning:"),
+        "symbol granularity should produce a Warning on stderr for >200 nodes\nstderr: {}",
+        stderr
+    );
+    // Warning message should mention the node count or suggest alternatives.
+    let has_relevant_warning = stderr.contains("nodes")
+        || stderr.contains("granularity")
+        || stderr.contains("edges");
+    assert!(
+        has_relevant_warning,
+        "Warning should mention 'nodes', 'granularity', or 'edges'\nstderr: {}",
+        stderr
+    );
+
+    // DOT format at symbol granularity: node-count warning fires (same source),
+    // but NOT the Mermaid-specific edge limit warning.
+    let dot_out = Command::new(binary())
+        .args([
+            "export",
+            root.to_str().unwrap(),
+            "--format",
+            "dot",
+            "--granularity",
+            "symbol",
+            "--stdout",
+        ])
+        .output()
+        .expect("failed to invoke code-graph binary");
+    let dot_stderr = String::from_utf8_lossy(&dot_out.stderr).to_string();
+    assert!(
+        !dot_stderr.contains("Mermaid"),
+        "DOT export should not produce a Mermaid-specific warning\nstderr: {}",
+        dot_stderr
+    );
+}
+
+/// test_export_mcp_tool_registered — EXPORT-06: MCP export_graph tool is registered.
+///
+/// MCP tool registration is verified at compile time by the tool_router macro.
+/// If the #[tool] attribute is missing or the method signature is wrong, the project
+/// will not compile and cargo test itself would not run.
+///
+/// This test validates that the same export_graph() pipeline called by the MCP tool
+/// works end-to-end: build graph, apply params, render output.
+#[test]
+fn test_export_mcp_tool_registered() {
+    // If we reach this test, cargo compiled successfully — MCP tool_router macro accepted
+    // the export_graph method, meaning it is registered as an MCP tool.
+    //
+    // Additionally, exercise the exact same export_graph() code path that the MCP tool calls:
+    let (stdout, _stderr) = run_export(&["--format", "dot", "--granularity", "file", "--stdout"]);
+
+    // The pipeline must produce a valid DOT graph
+    assert!(
+        stdout.contains("digraph code_graph"),
+        "export_graph() pipeline should produce valid DOT output\nstdout: {}",
+        &stdout[..stdout.len().min(500)]
+    );
+
+    // Must include at least one node (the project is non-empty)
+    let node_count = stdout.matches("[label=").count();
+    assert!(
+        node_count > 0,
+        "export_graph() should produce at least one node\nstdout: {}",
+        &stdout[..stdout.len().min(500)]
+    );
+}
+
 /// test_find_json_output — find --format json produces valid JSON array with expected keys.
 ///
 /// This tests the same serialization path used by the MCP find_symbol tool

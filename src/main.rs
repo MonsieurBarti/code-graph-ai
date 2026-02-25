@@ -1,6 +1,7 @@
 mod cache;
 mod cli;
 mod config;
+mod export;
 mod graph;
 mod language;
 mod mcp;
@@ -754,6 +755,56 @@ async fn main() -> Result<()> {
                 std::env::current_dir().expect("cannot determine current directory")
             });
             mcp::run(project_root).await?;
+        }
+
+        Commands::Export {
+            path,
+            format,
+            granularity,
+            stdout,
+            root,
+            symbol,
+            depth,
+            exclude,
+        } => {
+            let graph = build_graph(&path, false)?;
+            let params = export::model::ExportParams {
+                format,
+                granularity,
+                root_filter: root,
+                symbol_filter: symbol,
+                depth,
+                exclude_patterns: exclude,
+                project_root: path.clone(),
+                stdout,
+            };
+            let result = export::export_graph(&graph, &params)?;
+
+            if stdout {
+                print!("{}", result.content);
+            } else {
+                // Write to .code-graph/graph.{dot|mmd}
+                let output_dir = path.join(".code-graph");
+                std::fs::create_dir_all(&output_dir)?;
+                let ext = match params.format {
+                    export::model::ExportFormat::Dot => "dot",
+                    export::model::ExportFormat::Mermaid => "mmd",
+                };
+                let output_path = output_dir.join(format!("graph.{}", ext));
+                std::fs::write(&output_path, &result.content)?;
+                // Summary to stderr (keeps stdout clean for --stdout piping).
+                eprintln!(
+                    "Exported {} nodes, {} edges to {}",
+                    result.node_count,
+                    result.edge_count,
+                    output_path.display()
+                );
+            }
+
+            // Print any advisory warnings from scale guards.
+            for warning in &result.warnings {
+                eprintln!("Warning: {}", warning);
+            }
         }
 
         Commands::Watch { path } => {

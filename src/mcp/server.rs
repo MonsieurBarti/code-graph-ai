@@ -11,8 +11,8 @@ use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use tokio::sync::RwLock;
 
 use super::params::{
-    DetectCircularParams, FindReferencesParams, FindSymbolParams, GetContextParams,
-    GetImpactParams, GetStatsParams,
+    DetectCircularParams, ExportGraphParams, FindReferencesParams, FindSymbolParams,
+    GetContextParams, GetImpactParams, GetStatsParams,
 };
 use crate::graph::CodeGraph;
 
@@ -584,6 +584,59 @@ impl CodeGraphServer {
 
         let stats = crate::query::stats::project_stats(&graph);
         Ok(crate::query::output::format_stats_to_string(&stats, None))
+    }
+
+    #[tool(description = "Export the code graph to DOT or Mermaid format for architectural visualization. Returns the rendered graph text.")]
+    async fn export_graph(
+        &self,
+        Parameters(p): Parameters<ExportGraphParams>,
+    ) -> Result<String, String> {
+        let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
+
+        // Parse format
+        let format = match p.format.as_deref() {
+            Some("mermaid") => crate::export::model::ExportFormat::Mermaid,
+            Some("dot") | None => crate::export::model::ExportFormat::Dot,
+            Some(other) => return Err(format!("Unknown format '{}'. Use 'dot' or 'mermaid'.", other)),
+        };
+
+        // Parse granularity
+        let granularity = match p.granularity.as_deref() {
+            Some("symbol") => crate::export::model::Granularity::Symbol,
+            Some("package") => crate::export::model::Granularity::Package,
+            Some("file") | None => crate::export::model::Granularity::File,
+            Some(other) => return Err(format!("Unknown granularity '{}'. Use 'symbol', 'file', or 'package'.", other)),
+        };
+
+        let exclude_patterns: Vec<String> = p.exclude
+            .map(|e| e.split(',').map(|s| s.trim().to_string()).collect())
+            .unwrap_or_default();
+
+        let params = crate::export::model::ExportParams {
+            format,
+            granularity,
+            root_filter: p.root.map(std::path::PathBuf::from),
+            symbol_filter: p.symbol,
+            depth: p.depth.unwrap_or(1),
+            exclude_patterns,
+            project_root: root.clone(),
+            stdout: true, // MCP always returns content as string, never writes files
+        };
+
+        let result = crate::export::export_graph(&graph, &params)
+            .map_err(|e| e.to_string())?;
+
+        // Build response: stats header + content
+        let mut response = format!(
+            "Exported {} nodes, {} edges (format: {:?}, granularity: {:?})\n",
+            result.node_count, result.edge_count, format, granularity
+        );
+        for warning in &result.warnings {
+            response.push_str(&format!("Warning: {}\n", warning));
+        }
+        response.push_str(&result.content);
+
+        Ok(response)
     }
 }
 

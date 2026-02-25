@@ -54,3 +54,21 @@ pub struct GetStatsParams {
     /// Project root path override
     pub project_path: Option<String>,
 }
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ExportGraphParams {
+    /// Output format: "dot" (default) or "mermaid"
+    pub format: Option<String>,
+    /// Granularity: "file" (default), "symbol", or "package"
+    pub granularity: Option<String>,
+    /// Filter to files/symbols under this path
+    pub root: Option<String>,
+    /// Export a specific symbol and its neighborhood
+    pub symbol: Option<String>,
+    /// Hop depth for symbol neighborhood (default: 1)
+    pub depth: Option<usize>,
+    /// Exclude paths matching glob patterns (comma-separated)
+    pub exclude: Option<String>,
+    /// Project root path override
+    pub project_path: Option<String>,
+}
