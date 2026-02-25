@@ -8,7 +8,10 @@ use crate::graph::CodeGraph;
 /// Bumped to 2 in Phase 8 when new SymbolKind variants (Struct, Trait, ImplMethod, Const,
 /// Static, Macro), SymbolVisibility field, trait_impl field, and EdgeKind variants
 /// (ReExport, RustImport) were added — bincode discriminant layout changed.
-pub const CACHE_VERSION: u32 = 2;
+/// Bumped to 3 in Phase 9 when `GraphNode::Builtin { name }` variant was added,
+/// `FileInfo.crate_name: Option<String>` field was added, and `builtin_index` field
+/// was added to `CodeGraph` — all change bincode serialization layout.
+pub const CACHE_VERSION: u32 = 3;
 
 /// Cache directory name (created in project root).
 pub const CACHE_DIR: &str = ".code-graph";

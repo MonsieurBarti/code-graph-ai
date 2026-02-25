@@ -77,8 +77,13 @@ pub struct SymbolInfo {
 pub struct FileInfo {
     /// Canonical path to the file.
     pub path: PathBuf,
-    /// The language grammar used: "typescript", "tsx", or "javascript".
+    /// The language grammar used: "typescript", "tsx", "javascript", or "rust".
     pub language: String,
+    /// The owning crate's normalized name (hyphens replaced by underscores).
+    ///
+    /// `None` for TypeScript/JavaScript files; set during Rust indexing when
+    /// the crate's Cargo.toml is parsed. Used for per-crate stats breakdowns.
+    pub crate_name: Option<String>,
 }
 
 /// Metadata about an external package (node_modules dependency).
@@ -92,7 +97,7 @@ pub struct ExternalPackageInfo {
 }
 
 /// A node in the code graph — a file, a symbol within a file, an external package,
-/// or an unresolved import.
+/// a Rust built-in crate, or an unresolved import.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum GraphNode {
     /// A source file node.
@@ -101,6 +106,11 @@ pub enum GraphNode {
     Symbol(SymbolInfo),
     /// An external package node (node_modules dependency — internals not indexed).
     ExternalPackage(ExternalPackageInfo),
+    /// A Rust built-in crate node: `std`, `core`, or `alloc`.
+    ///
+    /// Terminal node like `ExternalPackage` — traversal stops here.
+    /// Deduplicated by name via `builtin_index` in `CodeGraph`.
+    Builtin { name: String },
     /// An import specifier that could not be resolved to a file or known package.
     UnresolvedImport { specifier: String, reason: String },
 }

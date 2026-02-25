@@ -22,6 +22,9 @@ pub struct CodeGraph {
     pub symbol_index: HashMap<String, Vec<NodeIndex>>,
     /// Maps external package names to their node indices for deduplication.
     pub external_index: HashMap<String, NodeIndex>,
+    /// Maps Rust built-in crate names (`"std"`, `"core"`, `"alloc"`) to their node indices.
+    /// Used to deduplicate `GraphNode::Builtin` nodes — one per crate name.
+    pub builtin_index: HashMap<String, NodeIndex>,
 }
 
 impl CodeGraph {
@@ -32,11 +35,15 @@ impl CodeGraph {
             file_index: HashMap::new(),
             symbol_index: HashMap::new(),
             external_index: HashMap::new(),
+            builtin_index: HashMap::new(),
         }
     }
 
     /// Add a file node to the graph. Returns the new node's index.
     /// If the file has already been added, returns the existing index.
+    ///
+    /// `crate_name` is `None` for TypeScript/JavaScript files. Callers that process Rust
+    /// files may update the `FileInfo.crate_name` field after calling `add_file`.
     pub fn add_file(&mut self, path: PathBuf, language: &str) -> NodeIndex {
         if let Some(&existing) = self.file_index.get(&path) {
             return existing;
@@ -44,6 +51,7 @@ impl CodeGraph {
         let info = FileInfo {
             path: path.clone(),
             language: language.to_owned(),
+            crate_name: None,
         };
         let idx = self.graph.add_node(GraphNode::File(info));
         self.file_index.insert(path, idx);
@@ -144,6 +152,34 @@ impl CodeGraph {
             },
         );
         pkg_idx
+    }
+
+    /// Add (or reuse) a `Builtin` node for a Rust built-in crate (`std`, `core`, `alloc`) and
+    /// add a `ResolvedImport` edge from `from` to it.
+    ///
+    /// Builtin nodes are terminal — the resolver stops at them, just like `ExternalPackage`.
+    /// `name` should be the crate-level name (e.g. `"std"`), not the full path.
+    /// `specifier` is the original use path as written in source (e.g. `"std::collections::HashMap"`).
+    ///
+    /// Returns the `NodeIndex` of the Builtin node (deduped by name).
+    pub fn add_builtin_node(&mut self, from: NodeIndex, name: &str, specifier: &str) -> NodeIndex {
+        let node_idx = if let Some(&existing) = self.builtin_index.get(name) {
+            existing
+        } else {
+            let idx = self.graph.add_node(GraphNode::Builtin {
+                name: name.to_owned(),
+            });
+            self.builtin_index.insert(name.to_owned(), idx);
+            idx
+        };
+        self.graph.add_edge(
+            from,
+            node_idx,
+            EdgeKind::ResolvedImport {
+                specifier: specifier.to_owned(),
+            },
+        );
+        node_idx
     }
 
     /// Add an `UnresolvedImport` node (a sentinel capturing an unresolvable import) and a
@@ -425,5 +461,42 @@ mod tests {
             graph.graph.contains_edge(f1, f2),
             "ResolvedImport edge should exist from importing file to target file"
         );
+    }
+
+    #[test]
+    fn test_add_builtin_node_dedup() {
+        let mut graph = CodeGraph::new();
+        let f = graph.add_file(PathBuf::from("src/main.rs"), "rust");
+
+        let idx1 = graph.add_builtin_node(f, "std", "std::collections::HashMap");
+        let idx2 = graph.add_builtin_node(f, "std", "std::fmt::Debug");
+        assert_eq!(
+            idx1, idx2,
+            "add_builtin_node with the same crate name should return the same NodeIndex"
+        );
+
+        // Verify it's a Builtin node with name "std"
+        match &graph.graph[idx1] {
+            GraphNode::Builtin { name } => {
+                assert_eq!(name, "std");
+            }
+            other => panic!("expected Builtin node, got {:?}", other),
+        }
+
+        // Different builtin crate should get a different node
+        let idx3 = graph.add_builtin_node(f, "core", "core::mem::size_of");
+        assert_ne!(idx1, idx3, "different builtin names should have different nodes");
+    }
+
+    #[test]
+    fn test_file_info_has_crate_name_field() {
+        let mut graph = CodeGraph::new();
+        let idx = graph.add_file(PathBuf::from("src/main.rs"), "rust");
+        match &graph.graph[idx] {
+            GraphNode::File(fi) => {
+                assert!(fi.crate_name.is_none(), "crate_name should default to None");
+            }
+            other => panic!("expected File node, got {:?}", other),
+        }
     }
 }
