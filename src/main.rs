@@ -118,6 +118,63 @@ fn count_rust_symbols(graph: &CodeGraph) -> RustSymbolCounts {
     counts
 }
 
+/// Populate `FileInfo.crate_name` for all Rust files in the graph.
+///
+/// Calls `discover_rust_workspace_members` to get crate name → root file mappings, then builds
+/// a `RustModTree` per crate, and for each file in the graph whose path appears in a mod tree,
+/// sets the `crate_name` field on the corresponding `FileInfo` node.
+///
+/// This is called AFTER graph population (so all file nodes exist) and BEFORE `resolve_all`
+/// (so the resolver can use crate_name for classification).
+fn populate_rust_crate_names(graph: &mut CodeGraph, project_root: &Path) {
+    use graph::node::GraphNode;
+    use resolver::cargo_workspace::discover_rust_workspace_members;
+    use resolver::rust_mod_tree::build_mod_tree;
+
+    let workspace_members = discover_rust_workspace_members(project_root);
+    if workspace_members.is_empty() {
+        return;
+    }
+
+    // Build file → crate_name map from all mod trees.
+    let mut file_to_crate: std::collections::HashMap<PathBuf, String> =
+        std::collections::HashMap::new();
+    for (crate_name, crate_root) in &workspace_members {
+        let tree = build_mod_tree(crate_name, crate_root);
+        // mod_map: String (module path) → PathBuf (file); iterate values for file paths.
+        for (_mod_path, file_path) in &tree.mod_map {
+            file_to_crate.insert(file_path.clone(), crate_name.clone());
+        }
+        // reverse_map: PathBuf (file) → String (module path); iterate keys for file paths.
+        for (file_path, _mod_path) in &tree.reverse_map {
+            file_to_crate.entry(file_path.clone()).or_insert_with(|| crate_name.clone());
+        }
+    }
+
+    // Apply crate_name to matching FileInfo nodes in the graph.
+    // Collect (index, path) pairs first to avoid simultaneous mutable + immutable borrow.
+    let rust_file_nodes: Vec<(petgraph::stable_graph::NodeIndex, PathBuf)> = graph
+        .graph
+        .node_indices()
+        .filter_map(|idx| {
+            if let GraphNode::File(ref fi) = graph.graph[idx] {
+                if fi.language == "rust" {
+                    return Some((idx, fi.path.clone()));
+                }
+            }
+            None
+        })
+        .collect();
+
+    for (idx, file_path) in rust_file_nodes {
+        if let Some(crate_name) = file_to_crate.get(&file_path) {
+            if let GraphNode::File(ref mut fi) = graph.graph[idx] {
+                fi.crate_name = Some(crate_name.clone());
+            }
+        }
+    }
+}
+
 /// Build the code graph for a project at `path` by walking, parsing, and resolving all files.
 ///
 /// This is the shared pipeline used by all query subcommands. The Index command has its own
@@ -191,6 +248,9 @@ pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
 
         parse_results.insert(file_path, result);
     }
+
+    // Populate crate_name on FileInfo for all Rust files.
+    populate_rust_crate_names(&mut graph, path);
 
     resolver::resolve_all(&mut graph, path, &parse_results, verbose);
 
@@ -364,6 +424,9 @@ async fn main() -> Result<()> {
                 // Store parse result for the resolution pass.
                 parse_results.insert(file_path, result);
             }
+
+            // Populate crate_name on FileInfo for all Rust files.
+            populate_rust_crate_names(&mut graph, &path);
 
             // 7. Resolve imports, barrel chains, and symbol relationships.
             let resolve_stats = resolver::resolve_all(&mut graph, &path, &parse_results, verbose);

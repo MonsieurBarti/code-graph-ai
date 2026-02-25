@@ -2,6 +2,7 @@ pub mod barrel;
 pub mod cargo_workspace;
 pub mod file_resolver;
 pub mod rust_mod_tree;
+pub mod rust_resolver;
 pub mod workspace;
 
 pub use cargo_workspace::discover_rust_workspace_members;
@@ -36,6 +37,16 @@ pub struct ResolveStats {
     /// Number of direct ResolvedImport edges added by the named re-export chain pass.
     /// These edges bypass barrel files and point directly to the defining file.
     pub named_reexport_edges: usize,
+
+    // --- Rust-specific (Step 6) ---
+    /// Rust use paths resolved to a file node (intra-crate or cross-workspace).
+    pub rust_resolved: usize,
+    /// Rust use paths resolved to an `ExternalPackage` node.
+    pub rust_external: usize,
+    /// Rust use paths resolved to a `Builtin` node (std/core/alloc).
+    pub rust_builtin: usize,
+    /// Rust use paths that could not be resolved — `UnresolvedImport` nodes created.
+    pub rust_unresolved: usize,
 }
 
 /// Run the full import resolution pipeline on the code graph.
@@ -290,6 +301,32 @@ pub fn resolve_all(
                     // If multiple candidates: skip (ambiguous cross-file call — documented limitation)
                 }
             }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 6: Rust use/pub-use resolution.
+    // -----------------------------------------------------------------------
+    // Only run when there are Rust files in the graph (avoids workspace discovery
+    // overhead on pure TypeScript/JavaScript projects).
+    let has_rust_files = graph.graph.node_indices().any(|idx| {
+        if let crate::graph::node::GraphNode::File(ref f) = graph.graph[idx] {
+            f.language == "rust"
+        } else {
+            false
+        }
+    });
+    if has_rust_files {
+        let rust_stats = rust_resolver::resolve_rust_uses(graph, project_root, parse_results, verbose);
+        stats.rust_resolved = rust_stats.resolved;
+        stats.rust_external = rust_stats.external;
+        stats.rust_builtin = rust_stats.builtin;
+        stats.rust_unresolved = rust_stats.unresolved;
+        if verbose {
+            eprintln!(
+                "  Rust resolution: {} resolved, {} external, {} builtin, {} unresolved",
+                rust_stats.resolved, rust_stats.external, rust_stats.builtin, rust_stats.unresolved
+            );
         }
     }
 
