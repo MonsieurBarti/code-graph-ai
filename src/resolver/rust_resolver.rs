@@ -74,9 +74,8 @@ fn classify_use_path(
 ) -> UsePathKind {
     // 1 & 2: Builtin check first.
     let bare = matches!(path, "std" | "core" | "alloc");
-    let prefixed = path.starts_with("std::")
-        || path.starts_with("core::")
-        || path.starts_with("alloc::");
+    let prefixed =
+        path.starts_with("std::") || path.starts_with("core::") || path.starts_with("alloc::");
     if bare || prefixed {
         return UsePathKind::Builtin;
     }
@@ -87,11 +86,7 @@ fn classify_use_path(
     }
 
     // 4: Cross-workspace — check normalised first segment.
-    let first_segment = path
-        .split("::")
-        .next()
-        .unwrap_or("")
-        .replace('-', "_");
+    let first_segment = path.split("::").next().unwrap_or("").replace('-', "_");
     if workspace_crate_names.contains(&first_segment) {
         return UsePathKind::CrossWorkspace;
     }
@@ -110,7 +105,10 @@ fn classify_use_path(
 /// (which would be invalid Rust — results in an `UnresolvedImport` node).
 fn resolve_super_path(path: &str, current_file: &Path, mod_tree: &RustModTree) -> Option<String> {
     // Get the current file's module path (e.g. "crate::parser::imports").
-    let module_path = mod_tree.file_to_module_path(current_file)?.as_str().to_owned();
+    let module_path = mod_tree
+        .file_to_module_path(current_file)?
+        .as_str()
+        .to_owned();
 
     // Split module path into segments — skip the leading "crate" to get a Vec of inner segments.
     // "crate::parser::imports" → ["parser", "imports"]
@@ -152,7 +150,10 @@ fn resolve_super_path(path: &str, current_file: &Path, mod_tree: &RustModTree) -
 ///
 /// Returns `None` if the file's module path cannot be determined.
 fn resolve_self_path(path: &str, current_file: &Path, mod_tree: &RustModTree) -> Option<String> {
-    let module_path = mod_tree.file_to_module_path(current_file)?.as_str().to_owned();
+    let module_path = mod_tree
+        .file_to_module_path(current_file)?
+        .as_str()
+        .to_owned();
     let rest = path.strip_prefix("self::").unwrap_or(path);
     if rest.is_empty() {
         return Some(module_path);
@@ -225,7 +226,9 @@ pub fn resolve_rust_uses(
         }
         // From reverse_map: keys are PathBuf file paths.
         for (file_path, _mod_path) in &tree.reverse_map {
-            file_to_crate.entry(file_path.clone()).or_insert_with(|| crate_name.clone());
+            file_to_crate
+                .entry(file_path.clone())
+                .or_insert_with(|| crate_name.clone());
         }
     }
 
@@ -240,8 +243,12 @@ pub fn resolve_rust_uses(
     // Safety: we collect indices first (petgraph mutation pitfall — can't iterate and mutate).
     // -----------------------------------------------------------------------
     #[allow(clippy::type_complexity)]
-    let mut self_edges: Vec<(petgraph::stable_graph::EdgeIndex, petgraph::stable_graph::NodeIndex, String, bool)> =
-        Vec::new();
+    let mut self_edges: Vec<(
+        petgraph::stable_graph::EdgeIndex,
+        petgraph::stable_graph::NodeIndex,
+        String,
+        bool,
+    )> = Vec::new();
 
     for edge_idx in graph.graph.edge_indices() {
         let (src, tgt) = graph.graph.edge_endpoints(edge_idx).unwrap();
@@ -297,10 +304,7 @@ pub fn resolve_rust_uses(
         };
 
         // Determine which crate owns this file.
-        let current_crate = file_to_crate
-            .get(from_file)
-            .cloned()
-            .unwrap_or_default();
+        let current_crate = file_to_crate.get(from_file).cloned().unwrap_or_default();
 
         let kind = classify_use_path(&path, &current_crate, &workspace_crate_names);
 
@@ -311,10 +315,7 @@ pub fn resolve_rust_uses(
                 graph.add_builtin_node(from_idx, root, &path);
                 stats.builtin += 1;
                 if verbose {
-                    eprintln!(
-                        "  [rust-resolver] builtin: {} → {root}",
-                        path
-                    );
+                    eprintln!("  [rust-resolver] builtin: {} → {root}", path);
                 }
             }
 
@@ -322,12 +323,10 @@ pub fn resolve_rust_uses(
                 // Normalise to `crate::` absolute path.
                 let resolved_path = if path.starts_with("super::") {
                     let mod_tree = crate_mod_trees.get(&current_crate);
-                    mod_tree
-                        .and_then(|t| resolve_super_path(&path, from_file, t))
+                    mod_tree.and_then(|t| resolve_super_path(&path, from_file, t))
                 } else if path.starts_with("self::") {
                     let mod_tree = crate_mod_trees.get(&current_crate);
-                    mod_tree
-                        .and_then(|t| resolve_self_path(&path, from_file, t))
+                    mod_tree.and_then(|t| resolve_self_path(&path, from_file, t))
                 } else {
                     // Already `crate::...`
                     Some(path.clone())
@@ -336,7 +335,11 @@ pub fn resolve_rust_uses(
                 let resolved_path = match resolved_path {
                     Some(p) => p,
                     None => {
-                        graph.add_unresolved_import(from_idx, &path, "rust: super:: exceeds module depth");
+                        graph.add_unresolved_import(
+                            from_idx,
+                            &path,
+                            "rust: super:: exceeds module depth",
+                        );
                         stats.unresolved += 1;
                         continue;
                     }
@@ -383,13 +386,14 @@ pub fn resolve_rust_uses(
                         }
                     }
                     None => {
-                        graph.add_unresolved_import(from_idx, &path, "rust: could not resolve module path");
+                        graph.add_unresolved_import(
+                            from_idx,
+                            &path,
+                            "rust: could not resolve module path",
+                        );
                         stats.unresolved += 1;
                         if verbose {
-                            eprintln!(
-                                "  [rust-resolver] unresolved intra: {}",
-                                path
-                            );
+                            eprintln!("  [rust-resolver] unresolved intra: {}", path);
                         }
                     }
                 }
@@ -397,11 +401,7 @@ pub fn resolve_rust_uses(
 
             UsePathKind::CrossWorkspace => {
                 // Resolve to the crate root file of the target workspace crate.
-                let first_segment = path
-                    .split("::")
-                    .next()
-                    .unwrap_or("")
-                    .replace('-', "_");
+                let first_segment = path.split("::").next().unwrap_or("").replace('-', "_");
                 let crate_root = workspace_members.get(&first_segment);
 
                 match crate_root {
@@ -425,7 +425,11 @@ pub fn resolve_rust_uses(
                         }
                     }
                     None => {
-                        graph.add_unresolved_import(from_idx, &path, "rust: workspace crate root not found");
+                        graph.add_unresolved_import(
+                            from_idx,
+                            &path,
+                            "rust: workspace crate root not found",
+                        );
                         stats.unresolved += 1;
                     }
                 }
@@ -433,18 +437,11 @@ pub fn resolve_rust_uses(
 
             UsePathKind::External => {
                 // Extract package name: first `::` segment, normalised.
-                let pkg_name = path
-                    .split("::")
-                    .next()
-                    .unwrap_or(&path)
-                    .replace('-', "_");
+                let pkg_name = path.split("::").next().unwrap_or(&path).replace('-', "_");
                 graph.add_external_package(from_idx, &pkg_name, &path);
                 stats.external += 1;
                 if verbose {
-                    eprintln!(
-                        "  [rust-resolver] external: {} → {pkg_name}",
-                        path
-                    );
+                    eprintln!("  [rust-resolver] external: {} → {pkg_name}", path);
                 }
             }
         }
@@ -477,9 +474,18 @@ mod tests {
     #[test]
     fn test_classify_std_prefixed() {
         let ws = make_workspace_set(&[]);
-        assert_eq!(classify_use_path("std::collections::HashMap", "", &ws), UsePathKind::Builtin);
-        assert_eq!(classify_use_path("core::mem::size_of", "", &ws), UsePathKind::Builtin);
-        assert_eq!(classify_use_path("alloc::vec::Vec", "", &ws), UsePathKind::Builtin);
+        assert_eq!(
+            classify_use_path("std::collections::HashMap", "", &ws),
+            UsePathKind::Builtin
+        );
+        assert_eq!(
+            classify_use_path("core::mem::size_of", "", &ws),
+            UsePathKind::Builtin
+        );
+        assert_eq!(
+            classify_use_path("alloc::vec::Vec", "", &ws),
+            UsePathKind::Builtin
+        );
     }
 
     #[test]
@@ -493,29 +499,50 @@ mod tests {
     #[test]
     fn test_classify_intra_crate() {
         let ws = make_workspace_set(&[]);
-        assert_eq!(classify_use_path("crate::parser::imports", "", &ws), UsePathKind::IntraCrate);
-        assert_eq!(classify_use_path("self::utils", "", &ws), UsePathKind::IntraCrate);
-        assert_eq!(classify_use_path("super::sibling", "", &ws), UsePathKind::IntraCrate);
+        assert_eq!(
+            classify_use_path("crate::parser::imports", "", &ws),
+            UsePathKind::IntraCrate
+        );
+        assert_eq!(
+            classify_use_path("self::utils", "", &ws),
+            UsePathKind::IntraCrate
+        );
+        assert_eq!(
+            classify_use_path("super::sibling", "", &ws),
+            UsePathKind::IntraCrate
+        );
     }
 
     #[test]
     fn test_classify_cross_workspace() {
         let ws = make_workspace_set(&["my_lib"]);
-        assert_eq!(classify_use_path("my_lib::Foo", "", &ws), UsePathKind::CrossWorkspace);
+        assert_eq!(
+            classify_use_path("my_lib::Foo", "", &ws),
+            UsePathKind::CrossWorkspace
+        );
     }
 
     #[test]
     fn test_classify_external() {
         let ws = make_workspace_set(&[]);
-        assert_eq!(classify_use_path("serde::Serialize", "", &ws), UsePathKind::External);
-        assert_eq!(classify_use_path("tokio::runtime", "", &ws), UsePathKind::External);
+        assert_eq!(
+            classify_use_path("serde::Serialize", "", &ws),
+            UsePathKind::External
+        );
+        assert_eq!(
+            classify_use_path("tokio::runtime", "", &ws),
+            UsePathKind::External
+        );
     }
 
     #[test]
     fn test_classify_hyphen_workspace_crate() {
         // Hyphen-normalised crate names in workspace
         let ws = make_workspace_set(&["beta_utils"]);
-        assert_eq!(classify_use_path("beta_utils::something", "", &ws), UsePathKind::CrossWorkspace);
+        assert_eq!(
+            classify_use_path("beta_utils::something", "", &ws),
+            UsePathKind::CrossWorkspace
+        );
     }
 
     // --- resolve_super_path tests ---
@@ -531,9 +558,11 @@ mod tests {
         std::fs::write(
             p.join("Cargo.toml"),
             "[package]\nname = \"test-crate\"\nversion = \"0.1.0\"\n",
-        ).unwrap();
+        )
+        .unwrap();
 
-        let tree = crate::resolver::rust_mod_tree::build_mod_tree("test_crate", &p.join("src/lib.rs"));
+        let tree =
+            crate::resolver::rust_mod_tree::build_mod_tree("test_crate", &p.join("src/lib.rs"));
         let imports_file = p.join("src/parser/imports.rs");
         let result = resolve_super_path("super::Parser", &imports_file, &tree);
         assert_eq!(result, Some("crate::parser::Parser".to_string()));
@@ -548,9 +577,11 @@ mod tests {
         std::fs::write(
             p.join("Cargo.toml"),
             "[package]\nname = \"test-crate\"\nversion = \"0.1.0\"\n",
-        ).unwrap();
+        )
+        .unwrap();
 
-        let tree = crate::resolver::rust_mod_tree::build_mod_tree("test_crate", &p.join("src/lib.rs"));
+        let tree =
+            crate::resolver::rust_mod_tree::build_mod_tree("test_crate", &p.join("src/lib.rs"));
         let lib_file = p.join("src/lib.rs");
         // super:: from crate root (0 segments after "crate") → too deep
         let result = resolve_super_path("super::Foo", &lib_file, &tree);
@@ -567,9 +598,11 @@ mod tests {
         std::fs::write(
             p.join("Cargo.toml"),
             "[package]\nname = \"test-crate\"\nversion = \"0.1.0\"\n",
-        ).unwrap();
+        )
+        .unwrap();
 
-        let tree = crate::resolver::rust_mod_tree::build_mod_tree("test_crate", &p.join("src/lib.rs"));
+        let tree =
+            crate::resolver::rust_mod_tree::build_mod_tree("test_crate", &p.join("src/lib.rs"));
         let parser_file = p.join("src/parser.rs");
         let result = resolve_self_path("self::Foo", &parser_file, &tree);
         assert_eq!(result, Some("crate::parser::Foo".to_string()));

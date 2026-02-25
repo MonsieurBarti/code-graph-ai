@@ -49,11 +49,7 @@ pub fn discover_rust_workspace_members(project_root: &Path) -> HashMap<String, P
             };
 
             // Build the full glob pattern: <project_root>/<member_pattern>/Cargo.toml
-            let pattern = format!(
-                "{}/{}/Cargo.toml",
-                project_root.display(),
-                member_glob
-            );
+            let pattern = format!("{}/{}/Cargo.toml", project_root.display(), member_glob);
 
             let entries = match glob::glob(&pattern) {
                 Ok(e) => e,
@@ -160,6 +156,9 @@ mod tests {
     fn test_missing_cargo_toml_returns_empty() {
         let tmp = tempfile::tempdir().unwrap();
         let members = discover_rust_workspace_members(tmp.path());
-        assert!(members.is_empty(), "missing Cargo.toml should return empty map");
+        assert!(
+            members.is_empty(),
+            "missing Cargo.toml should return empty map"
+        );
     }
 }

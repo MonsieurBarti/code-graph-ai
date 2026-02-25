@@ -290,10 +290,10 @@ fn compute_crate_stats(graph: &CodeGraph) -> Vec<CrateStats> {
                                 _ => {}
                             }
                             // Also count child symbols (via ChildOf edges from children).
-                            for child_edge in graph.graph.edges_directed(
-                                edge.target(),
-                                Direction::Incoming,
-                            ) {
+                            for child_edge in graph
+                                .graph
+                                .edges_directed(edge.target(), Direction::Incoming)
+                            {
                                 if let EdgeKind::ChildOf = child_edge.weight() {
                                     sym_count += 1;
                                     if let GraphNode::Symbol(ref cs) =

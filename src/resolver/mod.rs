@@ -317,7 +317,8 @@ pub fn resolve_all(
         }
     });
     if has_rust_files {
-        let rust_stats = rust_resolver::resolve_rust_uses(graph, project_root, parse_results, verbose);
+        let rust_stats =
+            rust_resolver::resolve_rust_uses(graph, project_root, parse_results, verbose);
         stats.rust_resolved = rust_stats.resolved;
         stats.rust_external = rust_stats.external;
         stats.rust_builtin = rust_stats.builtin;

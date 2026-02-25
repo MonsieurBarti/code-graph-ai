@@ -485,7 +485,10 @@ mod tests {
 
         // Different builtin crate should get a different node
         let idx3 = graph.add_builtin_node(f, "core", "core::mem::size_of");
-        assert_ne!(idx1, idx3, "different builtin names should have different nodes");
+        assert_ne!(
+            idx1, idx3,
+            "different builtin names should have different nodes"
+        );
     }
 
     #[test]

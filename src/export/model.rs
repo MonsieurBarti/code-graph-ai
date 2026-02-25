@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 /// Output format for graph export.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum, serde::Serialize, serde::Deserialize,
+)]
 pub enum ExportFormat {
     /// Graphviz DOT format (default). Suitable for large graphs and tooling.
     Dot,
@@ -10,7 +12,9 @@ pub enum ExportFormat {
 }
 
 /// Granularity level for exported nodes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum, serde::Serialize, serde::Deserialize,
+)]
 pub enum Granularity {
     /// One node per symbol (function, struct, etc.). Most detailed; may exceed Mermaid limits.
     Symbol,

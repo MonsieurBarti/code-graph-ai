@@ -262,7 +262,13 @@ pub fn build_mod_tree(crate_name: &str, crate_root: &Path) -> RustModTree {
     let mut reverse_map = HashMap::new();
     let mut visited = HashSet::new();
 
-    walk_mod_tree("crate", crate_root, &mut mod_map, &mut reverse_map, &mut visited);
+    walk_mod_tree(
+        "crate",
+        crate_root,
+        &mut mod_map,
+        &mut reverse_map,
+        &mut visited,
+    );
 
     RustModTree {
         mod_map,
@@ -286,16 +292,8 @@ mod tests {
     ///   src/utils.rs     — no sub-modules
     fn make_simple_crate(root: &Path) {
         fs::create_dir_all(root.join("src")).unwrap();
-        fs::write(
-            root.join("src/lib.rs"),
-            "pub mod parser;\npub mod utils;\n",
-        )
-        .unwrap();
-        fs::write(
-            root.join("src/parser.rs"),
-            "pub mod imports;\n",
-        )
-        .unwrap();
+        fs::write(root.join("src/lib.rs"), "pub mod parser;\npub mod utils;\n").unwrap();
+        fs::write(root.join("src/parser.rs"), "pub mod imports;\n").unwrap();
         fs::create_dir_all(root.join("src/parser")).unwrap();
         fs::write(root.join("src/parser/imports.rs"), "// imports module\n").unwrap();
         fs::write(root.join("src/utils.rs"), "// utils module\n").unwrap();
@@ -339,7 +337,10 @@ mod tests {
         let crate_root = tmp.path().join("src/lib.rs");
         let tree = build_mod_tree("my_crate", &crate_root);
 
-        assert!(tree.mod_map.contains_key("crate"), "crate root must be in map");
+        assert!(
+            tree.mod_map.contains_key("crate"),
+            "crate root must be in map"
+        );
         assert!(
             tree.mod_map.contains_key("crate::parser"),
             "crate::parser must be in map"
@@ -363,7 +364,10 @@ mod tests {
 
         // "crate::parser::imports::SomeSymbol" should resolve to imports.rs
         let result = tree.resolve_module_path("crate::parser::imports::SomeSymbol");
-        assert!(result.is_some(), "should resolve by stripping symbol segment");
+        assert!(
+            result.is_some(),
+            "should resolve by stripping symbol segment"
+        );
         assert!(
             result.unwrap().ends_with("imports.rs"),
             "should resolve to imports.rs"

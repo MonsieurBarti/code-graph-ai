@@ -181,7 +181,10 @@ fn test_refs_rust_symbol() {
         stdout
     );
     // Should contain at least one "ref" line
-    let ref_count = stdout.lines().filter(|l| l.starts_with("ref") || l.contains("ref")).count();
+    let ref_count = stdout
+        .lines()
+        .filter(|l| l.starts_with("ref") || l.contains("ref"))
+        .count();
     assert!(
         ref_count > 0,
         "refs output should contain at least one 'ref' line\nstdout: {}",
@@ -202,7 +205,9 @@ fn test_impact_rust_symbol() {
         stdout
     );
     // Impact output contains "impact" prefix lines or summary
-    let has_impact_line = stdout.lines().any(|l| l.contains("impact") || l.contains("file"));
+    let has_impact_line = stdout
+        .lines()
+        .any(|l| l.contains("impact") || l.contains("file"));
     assert!(
         has_impact_line,
         "impact output should contain 'impact' or 'file' lines\nstdout: {}",
@@ -483,8 +488,7 @@ fn test_export_granularity() {
 
     // Outputs must differ (symbol granularity expands each file into individual symbols)
     assert_ne!(
-        file_stdout,
-        symbol_stdout,
+        file_stdout, symbol_stdout,
         "file and symbol granularity should produce different output"
     );
 
@@ -554,10 +558,7 @@ fn test_export_mermaid_edge_limit_warning() {
         ])
         .output()
         .expect("failed to invoke code-graph binary");
-    assert!(
-        out.status.success(),
-        "export symbol --stdout should exit 0"
-    );
+    assert!(out.status.success(), "export symbol --stdout should exit 0");
     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
 
     // The project has 505 symbols — the node-count scale guard must fire.
@@ -567,9 +568,8 @@ fn test_export_mermaid_edge_limit_warning() {
         stderr
     );
     // Warning message should mention the node count or suggest alternatives.
-    let has_relevant_warning = stderr.contains("nodes")
-        || stderr.contains("granularity")
-        || stderr.contains("edges");
+    let has_relevant_warning =
+        stderr.contains("nodes") || stderr.contains("granularity") || stderr.contains("edges");
     assert!(
         has_relevant_warning,
         "Warning should mention 'nodes', 'granularity', or 'edges'\nstderr: {}",
@@ -644,7 +644,10 @@ fn test_find_json_output() {
     let arr = parsed
         .as_array()
         .expect("find --format json should return a JSON array");
-    assert!(!arr.is_empty(), "JSON array should have at least one result");
+    assert!(
+        !arr.is_empty(),
+        "JSON array should have at least one result"
+    );
     // Verify expected keys in the first element
     let first = &arr[0];
     assert!(

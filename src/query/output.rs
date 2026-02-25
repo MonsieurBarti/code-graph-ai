@@ -27,7 +27,9 @@ fn is_mixed_language<F: Fn(&T) -> &Path, T>(items: &[T], get_path: F) -> bool {
         return false;
     }
     let first_lang = language_of_file(get_path(&items[0]));
-    items[1..].iter().any(|i| language_of_file(get_path(i)) != first_lang)
+    items[1..]
+        .iter()
+        .any(|i| language_of_file(get_path(i)) != first_lang)
 }
 
 /// Sort key for language grouping: Rust < TypeScript < JavaScript < Unknown (alphabetical).
@@ -142,14 +144,22 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
                 if use_color {
                     println!(
                         "\x1b[1m{:<name_w$}  {:<file_w$}  {:>4}  {:<10}  KIND\x1b[0m",
-                        "SYMBOL", "FILE", "LINE", "VIS",
-                        name_w = name_w, file_w = file_w,
+                        "SYMBOL",
+                        "FILE",
+                        "LINE",
+                        "VIS",
+                        name_w = name_w,
+                        file_w = file_w,
                     );
                 } else {
                     println!(
                         "{:<name_w$}  {:<file_w$}  {:>4}  {:<10}  KIND",
-                        "SYMBOL", "FILE", "LINE", "VIS",
-                        name_w = name_w, file_w = file_w,
+                        "SYMBOL",
+                        "FILE",
+                        "LINE",
+                        "VIS",
+                        name_w = name_w,
+                        file_w = file_w,
                     );
                 }
                 println!("{}", "-".repeat(name_w + file_w + 26));
@@ -181,14 +191,20 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
                 if use_color {
                     println!(
                         "\x1b[1m{:<name_w$}  {:<file_w$}  {:>4}  KIND\x1b[0m",
-                        "SYMBOL", "FILE", "LINE",
-                        name_w = name_w, file_w = file_w,
+                        "SYMBOL",
+                        "FILE",
+                        "LINE",
+                        name_w = name_w,
+                        file_w = file_w,
                     );
                 } else {
                     println!(
                         "{:<name_w$}  {:<file_w$}  {:>4}  KIND",
-                        "SYMBOL", "FILE", "LINE",
-                        name_w = name_w, file_w = file_w,
+                        "SYMBOL",
+                        "FILE",
+                        "LINE",
+                        name_w = name_w,
+                        file_w = file_w,
                     );
                 }
                 println!("{}", "-".repeat(name_w + file_w + 14));
@@ -249,18 +265,32 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
 
 /// Determine if the stats have Rust symbols present.
 fn stats_has_rust(stats: &ProjectStats) -> bool {
-    stats.rust_fns + stats.rust_structs + stats.rust_enums
-        + stats.rust_traits + stats.rust_impl_methods + stats.rust_type_aliases
-        + stats.rust_consts + stats.rust_statics + stats.rust_macros
-        + stats.rust_imports + stats.rust_reexports > 0
+    stats.rust_fns
+        + stats.rust_structs
+        + stats.rust_enums
+        + stats.rust_traits
+        + stats.rust_impl_methods
+        + stats.rust_type_aliases
+        + stats.rust_consts
+        + stats.rust_statics
+        + stats.rust_macros
+        + stats.rust_imports
+        + stats.rust_reexports
+        > 0
 }
 
 /// Determine if the stats have TypeScript/JavaScript symbols present.
 fn stats_has_ts_js(stats: &ProjectStats) -> bool {
     // Total symbols minus Rust-specific symbols indicates TS/JS presence.
-    let rust_total = stats.rust_fns + stats.rust_structs + stats.rust_enums
-        + stats.rust_traits + stats.rust_impl_methods + stats.rust_type_aliases
-        + stats.rust_consts + stats.rust_statics + stats.rust_macros;
+    let rust_total = stats.rust_fns
+        + stats.rust_structs
+        + stats.rust_enums
+        + stats.rust_traits
+        + stats.rust_impl_methods
+        + stats.rust_type_aliases
+        + stats.rust_consts
+        + stats.rust_statics
+        + stats.rust_macros;
     stats.symbol_count > rust_total
         || stats.functions > stats.rust_fns
         || stats.classes > 0
@@ -275,7 +305,9 @@ fn stats_has_ts_js(stats: &ProjectStats) -> bool {
 /// show only TypeScript section; if None, show all sections with totals.
 pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter: Option<&str>) {
     let show_rust = language_filter.is_none() || language_filter == Some("rust");
-    let show_ts = language_filter.is_none() || language_filter == Some("typescript") || language_filter == Some("javascript");
+    let show_ts = language_filter.is_none()
+        || language_filter == Some("typescript")
+        || language_filter == Some("javascript");
     let show_totals = language_filter.is_none();
 
     let has_rust = stats_has_rust(stats);
@@ -285,14 +317,27 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
         OutputFormat::Compact => {
             // Per-language sections with per-language counts and combined totals.
             if show_rust && has_rust {
-                let rust_symbol_total = stats.rust_fns + stats.rust_structs + stats.rust_enums
-                    + stats.rust_traits + stats.rust_impl_methods + stats.rust_type_aliases
-                    + stats.rust_consts + stats.rust_statics + stats.rust_macros;
-                println!("Rust: {} symbols (fn: {} struct: {} enum: {} trait: {} impl_method: {} type: {} const: {} static: {} macro: {})",
+                let rust_symbol_total = stats.rust_fns
+                    + stats.rust_structs
+                    + stats.rust_enums
+                    + stats.rust_traits
+                    + stats.rust_impl_methods
+                    + stats.rust_type_aliases
+                    + stats.rust_consts
+                    + stats.rust_statics
+                    + stats.rust_macros;
+                println!(
+                    "Rust: {} symbols (fn: {} struct: {} enum: {} trait: {} impl_method: {} type: {} const: {} static: {} macro: {})",
                     rust_symbol_total,
-                    stats.rust_fns, stats.rust_structs, stats.rust_enums,
-                    stats.rust_traits, stats.rust_impl_methods, stats.rust_type_aliases,
-                    stats.rust_consts, stats.rust_statics, stats.rust_macros,
+                    stats.rust_fns,
+                    stats.rust_structs,
+                    stats.rust_enums,
+                    stats.rust_traits,
+                    stats.rust_impl_methods,
+                    stats.rust_type_aliases,
+                    stats.rust_consts,
+                    stats.rust_statics,
+                    stats.rust_macros,
                 );
                 println!(
                     "rust_use {} rust_pub_use {}",
@@ -323,13 +368,28 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
                 let ts_fns = stats.functions.saturating_sub(stats.rust_fns);
                 let ts_enums = stats.enums.saturating_sub(stats.rust_enums);
                 let ts_type_aliases = stats.type_aliases.saturating_sub(stats.rust_type_aliases);
-                println!("TypeScript: {} symbols (function: {} class: {} interface: {} type: {} enum: {} variable: {} component: {} method: {} property: {})",
-                    stats.symbol_count.saturating_sub(stats.rust_fns + stats.rust_structs + stats.rust_enums
-                        + stats.rust_traits + stats.rust_impl_methods + stats.rust_type_aliases
-                        + stats.rust_consts + stats.rust_statics + stats.rust_macros),
-                    ts_fns, stats.classes, stats.interfaces,
-                    ts_type_aliases, ts_enums,
-                    stats.variables, stats.components, stats.methods, stats.properties,
+                println!(
+                    "TypeScript: {} symbols (function: {} class: {} interface: {} type: {} enum: {} variable: {} component: {} method: {} property: {})",
+                    stats.symbol_count.saturating_sub(
+                        stats.rust_fns
+                            + stats.rust_structs
+                            + stats.rust_enums
+                            + stats.rust_traits
+                            + stats.rust_impl_methods
+                            + stats.rust_type_aliases
+                            + stats.rust_consts
+                            + stats.rust_statics
+                            + stats.rust_macros
+                    ),
+                    ts_fns,
+                    stats.classes,
+                    stats.interfaces,
+                    ts_type_aliases,
+                    ts_enums,
+                    stats.variables,
+                    stats.components,
+                    stats.methods,
+                    stats.properties,
                 );
                 println!(
                     "imports {} external {} unresolved {}",
@@ -338,7 +398,10 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
             }
             if show_totals && has_rust && has_ts {
                 println!("---");
-                println!("Total: {} files, {} symbols", stats.file_count, stats.symbol_count);
+                println!(
+                    "Total: {} files, {} symbols",
+                    stats.file_count, stats.symbol_count
+                );
             } else if show_totals {
                 println!("files {}", stats.file_count);
                 println!("symbols {}", stats.symbol_count);
@@ -347,8 +410,10 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
             if !has_rust && !has_ts {
                 println!("files {}", stats.file_count);
                 println!("symbols {}", stats.symbol_count);
-                println!("imports {} external {} unresolved {}",
-                    stats.import_edges, stats.external_packages, stats.unresolved_imports);
+                println!(
+                    "imports {} external {} unresolved {}",
+                    stats.import_edges, stats.external_packages, stats.unresolved_imports
+                );
             }
         }
 
@@ -1301,7 +1366,9 @@ pub fn format_stats_to_string(stats: &ProjectStats, language_filter: Option<&str
     let mut buf = String::new();
 
     let show_rust = language_filter.is_none() || language_filter == Some("rust");
-    let show_ts = language_filter.is_none() || language_filter == Some("typescript") || language_filter == Some("javascript");
+    let show_ts = language_filter.is_none()
+        || language_filter == Some("typescript")
+        || language_filter == Some("javascript");
     let show_totals = language_filter.is_none();
 
     let has_rust = stats_has_rust(stats);
@@ -1315,9 +1382,15 @@ pub fn format_stats_to_string(stats: &ProjectStats, language_filter: Option<&str
     .unwrap();
 
     if show_rust && has_rust {
-        let rust_symbol_total = stats.rust_fns + stats.rust_structs + stats.rust_enums
-            + stats.rust_traits + stats.rust_impl_methods + stats.rust_type_aliases
-            + stats.rust_consts + stats.rust_statics + stats.rust_macros;
+        let rust_symbol_total = stats.rust_fns
+            + stats.rust_structs
+            + stats.rust_enums
+            + stats.rust_traits
+            + stats.rust_impl_methods
+            + stats.rust_type_aliases
+            + stats.rust_consts
+            + stats.rust_statics
+            + stats.rust_macros;
         writeln!(buf, "Rust: {} symbols (fn: {} struct: {} enum: {} trait: {} impl_method: {} type: {} const: {} static: {} macro: {})",
             rust_symbol_total,
             stats.rust_fns, stats.rust_structs, stats.rust_enums,
@@ -1377,7 +1450,12 @@ pub fn format_stats_to_string(stats: &ProjectStats, language_filter: Option<&str
 
     if show_totals && has_rust && has_ts {
         writeln!(buf, "---").unwrap();
-        writeln!(buf, "Total: {} files, {} symbols", stats.file_count, stats.symbol_count).unwrap();
+        writeln!(
+            buf,
+            "Total: {} files, {} symbols",
+            stats.file_count, stats.symbol_count
+        )
+        .unwrap();
     } else if show_totals && !has_rust {
         writeln!(buf, "files {}", stats.file_count).unwrap();
         writeln!(buf, "symbols {}", stats.symbol_count).unwrap();

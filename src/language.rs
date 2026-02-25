@@ -242,18 +242,45 @@ mod tests {
 
     #[test]
     fn test_from_str_loose() {
-        assert_eq!(LanguageKind::from_str_loose("typescript"), Some(LanguageKind::TypeScript));
-        assert_eq!(LanguageKind::from_str_loose("ts"), Some(LanguageKind::TypeScript));
-        assert_eq!(LanguageKind::from_str_loose("TypeScript"), Some(LanguageKind::TypeScript));
-        assert_eq!(LanguageKind::from_str_loose("TS"), Some(LanguageKind::TypeScript));
+        assert_eq!(
+            LanguageKind::from_str_loose("typescript"),
+            Some(LanguageKind::TypeScript)
+        );
+        assert_eq!(
+            LanguageKind::from_str_loose("ts"),
+            Some(LanguageKind::TypeScript)
+        );
+        assert_eq!(
+            LanguageKind::from_str_loose("TypeScript"),
+            Some(LanguageKind::TypeScript)
+        );
+        assert_eq!(
+            LanguageKind::from_str_loose("TS"),
+            Some(LanguageKind::TypeScript)
+        );
 
-        assert_eq!(LanguageKind::from_str_loose("javascript"), Some(LanguageKind::JavaScript));
-        assert_eq!(LanguageKind::from_str_loose("js"), Some(LanguageKind::JavaScript));
-        assert_eq!(LanguageKind::from_str_loose("JavaScript"), Some(LanguageKind::JavaScript));
+        assert_eq!(
+            LanguageKind::from_str_loose("javascript"),
+            Some(LanguageKind::JavaScript)
+        );
+        assert_eq!(
+            LanguageKind::from_str_loose("js"),
+            Some(LanguageKind::JavaScript)
+        );
+        assert_eq!(
+            LanguageKind::from_str_loose("JavaScript"),
+            Some(LanguageKind::JavaScript)
+        );
 
-        assert_eq!(LanguageKind::from_str_loose("rust"), Some(LanguageKind::Rust));
+        assert_eq!(
+            LanguageKind::from_str_loose("rust"),
+            Some(LanguageKind::Rust)
+        );
         assert_eq!(LanguageKind::from_str_loose("rs"), Some(LanguageKind::Rust));
-        assert_eq!(LanguageKind::from_str_loose("Rust"), Some(LanguageKind::Rust));
+        assert_eq!(
+            LanguageKind::from_str_loose("Rust"),
+            Some(LanguageKind::Rust)
+        );
         assert_eq!(LanguageKind::from_str_loose("RS"), Some(LanguageKind::Rust));
 
         assert_eq!(LanguageKind::from_str_loose("python"), None);

@@ -75,29 +75,29 @@ fn count_rust_symbols(graph: &CodeGraph) -> RustSymbolCounts {
                 });
             if !in_rust_file {
                 // Check ChildOf parent path (trait method children live under parent symbols)
-                let parent_in_rust = graph
-                    .graph
-                    .edges_directed(idx, Direction::Outgoing)
-                    .any(|e| {
-                        if let EdgeKind::ChildOf = e.weight() {
-                            let parent = e.target();
-                            graph
-                                .graph
-                                .edges_directed(parent, Direction::Incoming)
-                                .any(|pe| {
-                                    if let EdgeKind::Contains = pe.weight() {
-                                        if let GraphNode::File(ref f) =
-                                            graph.graph[pe.source()]
-                                        {
-                                            return f.language == "rust";
+                let parent_in_rust =
+                    graph
+                        .graph
+                        .edges_directed(idx, Direction::Outgoing)
+                        .any(|e| {
+                            if let EdgeKind::ChildOf = e.weight() {
+                                let parent = e.target();
+                                graph
+                                    .graph
+                                    .edges_directed(parent, Direction::Incoming)
+                                    .any(|pe| {
+                                        if let EdgeKind::Contains = pe.weight() {
+                                            if let GraphNode::File(ref f) = graph.graph[pe.source()]
+                                            {
+                                                return f.language == "rust";
+                                            }
                                         }
-                                    }
-                                    false
-                                })
-                        } else {
-                            false
-                        }
-                    });
+                                        false
+                                    })
+                            } else {
+                                false
+                            }
+                        });
                 if !parent_in_rust {
                     continue;
                 }
@@ -148,7 +148,9 @@ pub(crate) fn populate_rust_crate_names(graph: &mut CodeGraph, project_root: &Pa
         }
         // reverse_map: PathBuf (file) → String (module path); iterate keys for file paths.
         for (file_path, _mod_path) in &tree.reverse_map {
-            file_to_crate.entry(file_path.clone()).or_insert_with(|| crate_name.clone());
+            file_to_crate
+                .entry(file_path.clone())
+                .or_insert_with(|| crate_name.clone());
         }
     }
 
@@ -339,27 +341,15 @@ async fn main() -> Result<()> {
             // Rust files are counted but not parsed — they must not enter the parse pipeline.
             let ts_file_count = files
                 .iter()
-                .filter(|f| {
-                    matches!(
-                        f.extension().and_then(|e| e.to_str()),
-                        Some("ts" | "tsx")
-                    )
-                })
+                .filter(|f| matches!(f.extension().and_then(|e| e.to_str()), Some("ts" | "tsx")))
                 .count();
             let js_file_count = files
                 .iter()
-                .filter(|f| {
-                    matches!(
-                        f.extension().and_then(|e| e.to_str()),
-                        Some("js" | "jsx")
-                    )
-                })
+                .filter(|f| matches!(f.extension().and_then(|e| e.to_str()), Some("js" | "jsx")))
                 .count();
             let rust_file_count = files
                 .iter()
-                .filter(|f| {
-                    matches!(f.extension().and_then(|e| e.to_str()), Some("rs"))
-                })
+                .filter(|f| matches!(f.extension().and_then(|e| e.to_str()), Some("rs")))
                 .count();
 
             // 6. Create graph.
@@ -581,7 +571,11 @@ async fn main() -> Result<()> {
             query::output::format_find_results(&results, &format, &path);
         }
 
-        Commands::Stats { path, format, language } => {
+        Commands::Stats {
+            path,
+            format,
+            language,
+        } => {
             let language_filter = parse_language_filter(language.as_deref())?;
             let graph = build_graph(&path, false)?;
             let stats = query::stats::project_stats(&graph);
@@ -679,7 +673,11 @@ async fn main() -> Result<()> {
             query::output::format_impact_results(&results, &format, &path, tree);
         }
 
-        Commands::Circular { path, format, language } => {
+        Commands::Circular {
+            path,
+            format,
+            language,
+        } => {
             let language_filter = parse_language_filter(language.as_deref())?;
 
             let graph = build_graph(&path, false)?;
@@ -729,10 +727,14 @@ async fn main() -> Result<()> {
             // Apply language filter to context results: filter definition/reference file paths.
             if let Some(lang) = language_filter {
                 for ctx in &mut results {
-                    ctx.definitions.retain(|d| file_language_matches(&d.file_path, lang));
-                    ctx.references.retain(|r| file_language_matches(&r.file_path, lang));
-                    ctx.callers.retain(|c| file_language_matches(&c.file_path, lang));
-                    ctx.callees.retain(|c| file_language_matches(&c.file_path, lang));
+                    ctx.definitions
+                        .retain(|d| file_language_matches(&d.file_path, lang));
+                    ctx.references
+                        .retain(|r| file_language_matches(&r.file_path, lang));
+                    ctx.callers
+                        .retain(|c| file_language_matches(&c.file_path, lang));
+                    ctx.callees
+                        .retain(|c| file_language_matches(&c.file_path, lang));
                 }
                 results.retain(|ctx| !ctx.definitions.is_empty());
             }

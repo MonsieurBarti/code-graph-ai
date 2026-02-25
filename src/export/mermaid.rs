@@ -6,11 +6,11 @@ use std::path::PathBuf;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::{EdgeRef, IntoEdgeReferences};
 
+use crate::export::dot::build_package_map;
+use crate::export::model::{ExportParams, Granularity};
 use crate::graph::CodeGraph;
 use crate::graph::edge::EdgeKind;
 use crate::graph::node::{GraphNode, SymbolKind};
-use crate::export::dot::build_package_map;
-use crate::export::model::{ExportParams, Granularity};
 
 /// Check whether an EdgeKind is a dependency-semantic edge suitable for export.
 fn is_dependency_edge(kind: &EdgeKind) -> bool {
@@ -68,7 +68,9 @@ pub fn render_mermaid(
     writeln!(out, "flowchart TB").unwrap();
 
     match params.granularity {
-        Granularity::Symbol => render_mermaid_symbol(graph, module_path_map, visible_nodes, &mut out),
+        Granularity::Symbol => {
+            render_mermaid_symbol(graph, module_path_map, visible_nodes, &mut out)
+        }
         Granularity::File => render_mermaid_file(graph, params, visible_nodes, &mut out),
         Granularity::Package => render_mermaid_package(graph, params, visible_nodes, &mut out),
     }
@@ -91,7 +93,10 @@ fn render_mermaid_symbol(
             // Try to find the parent file's module path for Rust files.
             let module_annotation = {
                 let mut annotation = String::new();
-                for edge in graph.graph.edges_directed(idx, petgraph::Direction::Incoming) {
+                for edge in graph
+                    .graph
+                    .edges_directed(idx, petgraph::Direction::Incoming)
+                {
                     if let EdgeKind::Contains = edge.weight() {
                         if let GraphNode::File(ref fi) = graph.graph[edge.source()] {
                             if let Some(mod_path) = module_path_map.get(&fi.path) {
@@ -243,7 +248,10 @@ fn render_mermaid_package(
     // Group file nodes by package.
     let mut packages: HashMap<String, Vec<NodeIndex>> = HashMap::new();
     for (node_idx, pkg_name) in &package_map {
-        packages.entry(pkg_name.clone()).or_default().push(*node_idx);
+        packages
+            .entry(pkg_name.clone())
+            .or_default()
+            .push(*node_idx);
     }
 
     // Emit subgraph blocks.
@@ -251,7 +259,13 @@ fn render_mermaid_package(
         // Mermaid subgraph IDs cannot contain spaces or special chars.
         let subgraph_id = pkg_name
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect::<String>();
         writeln!(
             out,

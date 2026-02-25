@@ -664,11 +664,7 @@ fn extract_simple_type_name<'a>(type_node: Node<'a>, source: &'a [u8]) -> &'a st
 /// Handles both:
 /// - `function_signature_item`: required methods (no body)
 /// - `function_item`: default methods (has body)
-fn extract_trait_methods(
-    trait_node: Node,
-    trait_name: &str,
-    source: &[u8],
-) -> Vec<SymbolInfo> {
+fn extract_trait_methods(trait_node: Node, trait_name: &str, source: &[u8]) -> Vec<SymbolInfo> {
     let mut methods = Vec::new();
 
     // Find the declaration_list child

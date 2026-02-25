@@ -59,9 +59,7 @@ pub fn export_graph(graph: &CodeGraph, params: &ExportParams) -> anyhow::Result<
 
     // Step 5: Dispatch to renderer.
     let content = match params.format {
-        ExportFormat::Dot => {
-            dot::render_dot(graph, params, &module_path_map, &visible_nodes)
-        }
+        ExportFormat::Dot => dot::render_dot(graph, params, &module_path_map, &visible_nodes),
         ExportFormat::Mermaid => {
             mermaid::render_mermaid(graph, params, &module_path_map, &visible_nodes)
         }
@@ -98,7 +96,8 @@ fn build_module_path_map(graph: &CodeGraph, project_root: &PathBuf) -> HashMap<P
         }
         // Also fill from mod_map in case reverse_map missed any entries.
         for (_mod_path, file_path) in &tree.mod_map {
-            map.entry(file_path.clone()).or_insert_with(|| _mod_path.clone());
+            map.entry(file_path.clone())
+                .or_insert_with(|| _mod_path.clone());
         }
     }
 
@@ -163,7 +162,10 @@ fn build_visible_nodes(
 
     // Add symbol nodes contained in visible files (for symbol granularity).
     for file_idx in &visible_files {
-        for edge in graph.graph.edges_directed(*file_idx, petgraph::Direction::Outgoing) {
+        for edge in graph
+            .graph
+            .edges_directed(*file_idx, petgraph::Direction::Outgoing)
+        {
             if let crate::graph::edge::EdgeKind::Contains = edge.weight() {
                 visible.insert(edge.target());
             }
@@ -240,7 +242,10 @@ fn apply_symbol_bfs_filter(
             visited_symbols.insert(*sym_idx);
 
             // Add the file that contains this symbol.
-            for edge in graph.graph.edges_directed(*sym_idx, petgraph::Direction::Incoming) {
+            for edge in graph
+                .graph
+                .edges_directed(*sym_idx, petgraph::Direction::Incoming)
+            {
                 if let crate::graph::edge::EdgeKind::Contains = edge.weight() {
                     if candidate_files.contains(&edge.source()) {
                         neighborhood_files.insert(edge.source());

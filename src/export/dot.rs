@@ -5,10 +5,10 @@ use std::path::PathBuf;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::{EdgeRef, IntoEdgeReferences};
 
+use crate::export::model::{ExportParams, Granularity};
 use crate::graph::CodeGraph;
 use crate::graph::edge::EdgeKind;
 use crate::graph::node::{GraphNode, SymbolKind};
-use crate::export::model::{ExportParams, Granularity};
 
 /// Sanitize a string for use as a DOT node ID or subgraph name.
 ///
@@ -17,7 +17,13 @@ use crate::export::model::{ExportParams, Granularity};
 pub fn sanitize_dot_id(s: &str) -> String {
     let mut result: String = s
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if result.starts_with(|c: char| c.is_ascii_digit()) {
         result.insert(0, 'n');
@@ -133,7 +139,10 @@ fn render_dot_symbol(
             // Try to find the parent file's module path for Rust files.
             let module_annotation = {
                 let mut annotation = String::new();
-                for edge in graph.graph.edges_directed(idx, petgraph::Direction::Incoming) {
+                for edge in graph
+                    .graph
+                    .edges_directed(idx, petgraph::Direction::Incoming)
+                {
                     if let EdgeKind::Contains = edge.weight() {
                         if let GraphNode::File(ref fi) = graph.graph[edge.source()] {
                             if let Some(mod_path) = module_path_map.get(&fi.path) {
@@ -178,14 +187,7 @@ fn render_dot_symbol(
             continue;
         }
         let style = edge_style(edge.weight());
-        writeln!(
-            out,
-            "    n{} -> n{} [{}];",
-            src.index(),
-            tgt.index(),
-            style
-        )
-        .unwrap();
+        writeln!(out, "    n{} -> n{} [{}];", src.index(), tgt.index(), style).unwrap();
     }
 }
 
@@ -270,7 +272,10 @@ fn render_dot_package(
     // Group file nodes by package.
     let mut packages: HashMap<String, Vec<NodeIndex>> = HashMap::new();
     for (node_idx, pkg_name) in &package_map {
-        packages.entry(pkg_name.clone()).or_default().push(*node_idx);
+        packages
+            .entry(pkg_name.clone())
+            .or_default()
+            .push(*node_idx);
     }
 
     // Emit subgraph cluster blocks.
@@ -393,8 +398,12 @@ pub fn build_package_map(
 
                 // Try to get the first path component under src/.
                 let mut components = rel.components();
-                let first = components.next().map(|c| c.as_os_str().to_string_lossy().into_owned());
-                let second = components.next().map(|c| c.as_os_str().to_string_lossy().into_owned());
+                let first = components
+                    .next()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned());
+                let second = components
+                    .next()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned());
 
                 match (first.as_deref(), second.as_deref()) {
                     (Some("src"), Some(dir)) => dir.trim_end_matches(".rs").to_string(),

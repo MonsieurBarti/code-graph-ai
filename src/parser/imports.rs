@@ -524,7 +524,9 @@ pub fn extract_rust_use(tree: &Tree, source: &[u8]) -> Vec<crate::parser::RustUs
         // Check for pub visibility modifier
         let is_pub_use = {
             let mut c = child.walk();
-            child.children(&mut c).any(|n| n.kind() == "visibility_modifier")
+            child
+                .children(&mut c)
+                .any(|n| n.kind() == "visibility_modifier")
         };
 
         // Extract the use path from the "argument" field

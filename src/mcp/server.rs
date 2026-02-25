@@ -586,7 +586,9 @@ impl CodeGraphServer {
         Ok(crate::query::output::format_stats_to_string(&stats, None))
     }
 
-    #[tool(description = "Export the code graph to DOT or Mermaid format for architectural visualization. Returns the rendered graph text.")]
+    #[tool(
+        description = "Export the code graph to DOT or Mermaid format for architectural visualization. Returns the rendered graph text."
+    )]
     async fn export_graph(
         &self,
         Parameters(p): Parameters<ExportGraphParams>,
@@ -597,7 +599,12 @@ impl CodeGraphServer {
         let format = match p.format.as_deref() {
             Some("mermaid") => crate::export::model::ExportFormat::Mermaid,
             Some("dot") | None => crate::export::model::ExportFormat::Dot,
-            Some(other) => return Err(format!("Unknown format '{}'. Use 'dot' or 'mermaid'.", other)),
+            Some(other) => {
+                return Err(format!(
+                    "Unknown format '{}'. Use 'dot' or 'mermaid'.",
+                    other
+                ));
+            }
         };
 
         // Parse granularity
@@ -605,10 +612,16 @@ impl CodeGraphServer {
             Some("symbol") => crate::export::model::Granularity::Symbol,
             Some("package") => crate::export::model::Granularity::Package,
             Some("file") | None => crate::export::model::Granularity::File,
-            Some(other) => return Err(format!("Unknown granularity '{}'. Use 'symbol', 'file', or 'package'.", other)),
+            Some(other) => {
+                return Err(format!(
+                    "Unknown granularity '{}'. Use 'symbol', 'file', or 'package'.",
+                    other
+                ));
+            }
         };
 
-        let exclude_patterns: Vec<String> = p.exclude
+        let exclude_patterns: Vec<String> = p
+            .exclude
             .map(|e| e.split(',').map(|s| s.trim().to_string()).collect())
             .unwrap_or_default();
 
@@ -623,8 +636,7 @@ impl CodeGraphServer {
             stdout: true, // MCP always returns content as string, never writes files
         };
 
-        let result = crate::export::export_graph(&graph, &params)
-            .map_err(|e| e.to_string())?;
+        let result = crate::export::export_graph(&graph, &params).map_err(|e| e.to_string())?;
 
         // Build response: stats header + content
         let mut response = format!(
