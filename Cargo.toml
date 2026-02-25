@@ -9,7 +9,7 @@ homepage = "https://github.com/MonsieurBarti/code-graph-ai"
 readme = "README.md"
 keywords = ["typescript", "rust", "code-graph", "mcp", "dependency-analysis"]
 categories = ["development-tools", "command-line-utilities"]
-exclude = [".planning/", ".github/", ".claude/", ".devcontainer/", ".entire/", "target/"]
+exclude = [".planning/", ".github/", ".claude/", ".devcontainer/", "target/"]
 
 [[bin]]
 name = "code-graph"
