@@ -278,7 +278,9 @@ fn apply_staleness_diff(
         graph.remove_file_from_graph(path);
     }
 
-    // Re-parse changed/new files in parallel
+    // Re-parse changed/new files in parallel.
+    // "rs" => "rust" is included so Rust files are not silently dropped on cold-start cache diff.
+    // Without this, Rust symbols would be missing from the MCP graph after a cache hit.
     let reparsed: Vec<(PathBuf, &'static str, crate::parser::ParseResult)> = files_to_reparse
         .par_iter()
         .filter_map(|path| {
@@ -288,6 +290,7 @@ fn apply_staleness_diff(
                     "ts" => "typescript",
                     "tsx" => "tsx",
                     "js" | "jsx" => "javascript",
+                    "rs" => "rust",
                     _ => return None,
                 };
             let result = crate::parser::parse_file_parallel(path, &source).ok()?;
@@ -303,12 +306,37 @@ fn apply_staleness_diff(
                 graph.add_child_symbol(sym_idx, child.clone());
             }
         }
+        // Emit Rust use/pub-use edge placeholders (same as build_graph does).
+        // Phase 9 resolve_all will replace these self-edges with resolved targets.
+        for rust_use in &result.rust_uses {
+            if rust_use.is_pub_use {
+                graph.graph.add_edge(
+                    file_idx,
+                    file_idx,
+                    crate::graph::edge::EdgeKind::ReExport {
+                        path: rust_use.path.clone(),
+                    },
+                );
+            } else {
+                graph.graph.add_edge(
+                    file_idx,
+                    file_idx,
+                    crate::graph::edge::EdgeKind::RustImport {
+                        path: rust_use.path.clone(),
+                    },
+                );
+            }
+        }
     }
 
     // If any files were re-parsed, do a scoped resolve pass:
     // collect parse results for ALL current files, then resolve all.
     // This is acceptable on cold start (runs once).
     if !files_to_reparse.is_empty() || !deleted_files.is_empty() {
+        // Populate crate_name on FileInfo before resolve_all (same as build_graph does).
+        // Without this, the resolver cannot classify Rust symbols by crate.
+        crate::populate_rust_crate_names(&mut graph, project_root);
+
         // Build parse results for all files in the updated graph (parallel re-parse for resolve)
         let all_file_paths: Vec<PathBuf> = graph.file_index.keys().cloned().collect();
         let parsed: Vec<(PathBuf, crate::parser::ParseResult)> = all_file_paths
@@ -568,7 +596,7 @@ impl ServerHandler for CodeGraphServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(
-                "code-graph: query TypeScript/JavaScript dependency graphs. Index with 'code-graph index <path>' first.".into(),
+                "code-graph: query TypeScript/JavaScript/Rust dependency graphs. Index with 'code-graph index <path>' first.".into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             ..Default::default()

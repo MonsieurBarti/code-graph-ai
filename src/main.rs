@@ -126,7 +126,7 @@ fn count_rust_symbols(graph: &CodeGraph) -> RustSymbolCounts {
 ///
 /// This is called AFTER graph population (so all file nodes exist) and BEFORE `resolve_all`
 /// (so the resolver can use crate_name for classification).
-fn populate_rust_crate_names(graph: &mut CodeGraph, project_root: &Path) {
+pub(crate) fn populate_rust_crate_names(graph: &mut CodeGraph, project_root: &Path) {
     use graph::node::GraphNode;
     use resolver::cargo_workspace::discover_rust_workspace_members;
     use resolver::rust_mod_tree::build_mod_tree;
