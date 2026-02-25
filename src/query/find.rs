@@ -160,10 +160,10 @@ pub fn find_symbol(
             }
 
             // Language filter: skip symbols from files whose language doesn't match.
-            if let Some(lang) = language_filter {
-                if file_info.language.as_str() != lang {
-                    continue;
-                }
+            if let Some(lang) = language_filter
+                && file_info.language.as_str() != lang
+            {
+                continue;
             }
 
             results.push(FindResult {

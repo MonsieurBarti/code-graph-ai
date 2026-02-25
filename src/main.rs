@@ -66,10 +66,10 @@ fn count_rust_symbols(graph: &CodeGraph) -> RustSymbolCounts {
                 .graph
                 .edges_directed(idx, Direction::Incoming)
                 .any(|e| {
-                    if let EdgeKind::Contains = e.weight() {
-                        if let GraphNode::File(ref f) = graph.graph[e.source()] {
-                            return f.language == "rust";
-                        }
+                    if let EdgeKind::Contains = e.weight()
+                        && let GraphNode::File(ref f) = graph.graph[e.source()]
+                    {
+                        return f.language == "rust";
                     }
                     false
                 });
@@ -86,11 +86,10 @@ fn count_rust_symbols(graph: &CodeGraph) -> RustSymbolCounts {
                                     .graph
                                     .edges_directed(parent, Direction::Incoming)
                                     .any(|pe| {
-                                        if let EdgeKind::Contains = pe.weight() {
-                                            if let GraphNode::File(ref f) = graph.graph[pe.source()]
-                                            {
-                                                return f.language == "rust";
-                                            }
+                                        if let EdgeKind::Contains = pe.weight()
+                                            && let GraphNode::File(ref f) = graph.graph[pe.source()]
+                                        {
+                                            return f.language == "rust";
                                         }
                                         false
                                     })
@@ -143,11 +142,11 @@ pub(crate) fn populate_rust_crate_names(graph: &mut CodeGraph, project_root: &Pa
     for (crate_name, crate_root) in &workspace_members {
         let tree = build_mod_tree(crate_name, crate_root);
         // mod_map: String (module path) → PathBuf (file); iterate values for file paths.
-        for (_mod_path, file_path) in &tree.mod_map {
+        for file_path in tree.mod_map.values() {
             file_to_crate.insert(file_path.clone(), crate_name.clone());
         }
         // reverse_map: PathBuf (file) → String (module path); iterate keys for file paths.
-        for (file_path, _mod_path) in &tree.reverse_map {
+        for file_path in tree.reverse_map.keys() {
             file_to_crate
                 .entry(file_path.clone())
                 .or_insert_with(|| crate_name.clone());
@@ -160,20 +159,20 @@ pub(crate) fn populate_rust_crate_names(graph: &mut CodeGraph, project_root: &Pa
         .graph
         .node_indices()
         .filter_map(|idx| {
-            if let GraphNode::File(ref fi) = graph.graph[idx] {
-                if fi.language == "rust" {
-                    return Some((idx, fi.path.clone()));
-                }
+            if let GraphNode::File(ref fi) = graph.graph[idx]
+                && fi.language == "rust"
+            {
+                return Some((idx, fi.path.clone()));
             }
             None
         })
         .collect();
 
     for (idx, file_path) in rust_file_nodes {
-        if let Some(crate_name) = file_to_crate.get(&file_path) {
-            if let GraphNode::File(ref mut fi) = graph.graph[idx] {
-                fi.crate_name = Some(crate_name.clone());
-            }
+        if let Some(crate_name) = file_to_crate.get(&file_path)
+            && let GraphNode::File(ref mut fi) = graph.graph[idx]
+        {
+            fi.crate_name = Some(crate_name.clone());
         }
     }
 }
@@ -739,14 +738,14 @@ async fn main() -> Result<()> {
                 results.retain(|ctx| !ctx.definitions.is_empty());
             }
 
-            if results.is_empty() {
-                if let Some(lang) = language_filter {
-                    eprintln!(
-                        "No {} symbols found. Run `code-graph stats` to see indexed languages.",
-                        lang
-                    );
-                    std::process::exit(1);
-                }
+            if results.is_empty()
+                && let Some(lang) = language_filter
+            {
+                eprintln!(
+                    "No {} symbols found. Run `code-graph stats` to see indexed languages.",
+                    lang
+                );
+                std::process::exit(1);
             }
 
             query::output::format_context_results(&results, &format, &path, &symbol);

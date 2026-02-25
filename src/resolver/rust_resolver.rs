@@ -221,11 +221,11 @@ pub fn resolve_rust_uses(
 
     for (crate_name, tree) in &crate_mod_trees {
         // From mod_map: values are PathBuf file paths.
-        for (_mod_path, file_path) in &tree.mod_map {
+        for file_path in tree.mod_map.values() {
             file_to_crate.insert(file_path.clone(), crate_name.clone());
         }
         // From reverse_map: keys are PathBuf file paths.
-        for (file_path, _mod_path) in &tree.reverse_map {
+        for file_path in tree.reverse_map.keys() {
             file_to_crate
                 .entry(file_path.clone())
                 .or_insert_with(|| crate_name.clone());

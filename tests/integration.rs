@@ -224,11 +224,8 @@ fn test_circular_on_rust_codebase() {
     // Just verify it exits 0 and produces some output (not a crash)
     let stdout = run_success(&["circular", path]);
     // Either "no circular dependencies found" or actual cycle data — both acceptable
-    assert!(
-        !stdout.is_empty() || true, // always passes: we only care it doesn't crash
-        "circular should exit 0\nstdout: {}",
-        stdout
-    );
+    // We only care it doesn't crash — exit 0 is checked by run_success
+    let _ = stdout;
 }
 
 /// test_stats_rust_codebase — stats command produces output mentioning "Rust".

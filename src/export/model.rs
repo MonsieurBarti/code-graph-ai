@@ -13,21 +13,24 @@ pub enum ExportFormat {
 
 /// Granularity level for exported nodes.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum, serde::Serialize, serde::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    clap::ValueEnum,
+    serde::Serialize,
+    serde::Deserialize,
+    Default,
 )]
 pub enum Granularity {
     /// One node per symbol (function, struct, etc.). Most detailed; may exceed Mermaid limits.
     Symbol,
     /// One node per file (default). Good balance of detail and readability.
+    #[default]
     File,
     /// One node per package/crate. Best for high-level architecture overview.
     Package,
-}
-
-impl Default for Granularity {
-    fn default() -> Self {
-        Granularity::File
-    }
 }
 
 /// Parameters controlling a graph export operation.
@@ -46,7 +49,8 @@ pub struct ExportParams {
     pub exclude_patterns: Vec<String>,
     /// Absolute path to the project root (used for relative path labels and workspace discovery).
     pub project_root: PathBuf,
-    /// Write output to stdout instead of a file.
+    /// Write output to stdout instead of a file (read by caller, not export_graph).
+    #[allow(dead_code)]
     pub stdout: bool,
 }
 

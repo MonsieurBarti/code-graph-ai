@@ -3,7 +3,7 @@ pub mod mermaid;
 pub mod model;
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::{EdgeRef, IntoEdgeReferences};
@@ -80,7 +80,7 @@ pub fn export_graph(graph: &CodeGraph, params: &ExportParams) -> anyhow::Result<
 /// Build a map from file path → Rust module path string by walking workspace crate roots.
 ///
 /// Used to annotate Rust file/symbol nodes with their canonical module path (e.g. `crate::parser`).
-fn build_module_path_map(graph: &CodeGraph, project_root: &PathBuf) -> HashMap<PathBuf, String> {
+fn build_module_path_map(graph: &CodeGraph, project_root: &Path) -> HashMap<PathBuf, String> {
     let mut map: HashMap<PathBuf, String> = HashMap::new();
 
     let workspace_members = discover_rust_workspace_members(project_root);
@@ -246,10 +246,10 @@ fn apply_symbol_bfs_filter(
                 .graph
                 .edges_directed(*sym_idx, petgraph::Direction::Incoming)
             {
-                if let crate::graph::edge::EdgeKind::Contains = edge.weight() {
-                    if candidate_files.contains(&edge.source()) {
-                        neighborhood_files.insert(edge.source());
-                    }
+                if let crate::graph::edge::EdgeKind::Contains = edge.weight()
+                    && candidate_files.contains(&edge.source())
+                {
+                    neighborhood_files.insert(edge.source());
                 }
             }
 

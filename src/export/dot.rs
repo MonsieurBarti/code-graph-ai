@@ -143,12 +143,11 @@ fn render_dot_symbol(
                     .graph
                     .edges_directed(idx, petgraph::Direction::Incoming)
                 {
-                    if let EdgeKind::Contains = edge.weight() {
-                        if let GraphNode::File(ref fi) = graph.graph[edge.source()] {
-                            if let Some(mod_path) = module_path_map.get(&fi.path) {
-                                annotation = format!("\\n{}", mod_path);
-                            }
-                        }
+                    if let EdgeKind::Contains = edge.weight()
+                        && let GraphNode::File(ref fi) = graph.graph[edge.source()]
+                        && let Some(mod_path) = module_path_map.get(&fi.path)
+                    {
+                        annotation = format!("\\n{}", mod_path);
                     }
                 }
                 annotation

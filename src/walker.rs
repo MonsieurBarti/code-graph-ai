@@ -152,10 +152,10 @@ fn collect_files(
         }
 
         // Apply language filter if specified.
-        if let Some(langs) = allowed_languages {
-            if !langs.iter().any(|lk| lk.matches_extension(ext)) {
-                continue;
-            }
+        if let Some(langs) = allowed_languages
+            && !langs.iter().any(|lk| lk.matches_extension(ext))
+        {
+            continue;
         }
 
         if verbose {

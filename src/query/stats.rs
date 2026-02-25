@@ -134,10 +134,10 @@ pub fn project_stats(graph: &CodeGraph) -> ProjectStats {
                 .graph
                 .edges_directed(idx, Direction::Incoming)
                 .any(|e| {
-                    if let EdgeKind::Contains = e.weight() {
-                        if let GraphNode::File(ref f) = graph.graph[e.source()] {
-                            return f.language == "rust";
-                        }
+                    if let EdgeKind::Contains = e.weight()
+                        && let GraphNode::File(ref f) = graph.graph[e.source()]
+                    {
+                        return f.language == "rust";
                     }
                     false
                 });
@@ -152,10 +152,10 @@ pub fn project_stats(graph: &CodeGraph) -> ProjectStats {
                                 .graph
                                 .edges_directed(parent, Direction::Incoming)
                                 .any(|pe| {
-                                    if let EdgeKind::Contains = pe.weight() {
-                                        if let GraphNode::File(ref f) = graph.graph[pe.source()] {
-                                            return f.language == "rust";
-                                        }
+                                    if let EdgeKind::Contains = pe.weight()
+                                        && let GraphNode::File(ref f) = graph.graph[pe.source()]
+                                    {
+                                        return f.language == "rust";
                                     }
                                     false
                                 })
@@ -242,12 +242,11 @@ fn compute_crate_stats(graph: &CodeGraph) -> Vec<CrateStats> {
     let mut crate_files: HashMap<String, Vec<petgraph::stable_graph::NodeIndex>> = HashMap::new();
 
     for idx in graph.graph.node_indices() {
-        if let GraphNode::File(ref fi) = graph.graph[idx] {
-            if fi.language == "rust" {
-                if let Some(ref cn) = fi.crate_name {
-                    crate_files.entry(cn.clone()).or_default().push(idx);
-                }
-            }
+        if let GraphNode::File(ref fi) = graph.graph[idx]
+            && fi.language == "rust"
+            && let Some(ref cn) = fi.crate_name
+        {
+            crate_files.entry(cn.clone()).or_default().push(idx);
         }
     }
 
@@ -274,36 +273,35 @@ fn compute_crate_stats(graph: &CodeGraph) -> Vec<CrateStats> {
             // For each file in this crate, find all symbols via Contains edges.
             for file_idx in &file_indices {
                 for edge in graph.graph.edges(*file_idx) {
-                    if let EdgeKind::Contains = edge.weight() {
-                        if let GraphNode::Symbol(ref s) = graph.graph[edge.target()] {
-                            sym_count += 1;
-                            match s.kind {
-                                SymbolKind::Function => fn_count += 1,
-                                SymbolKind::Struct => struct_count += 1,
-                                SymbolKind::Enum => enum_count += 1,
-                                SymbolKind::Trait => trait_count += 1,
-                                SymbolKind::ImplMethod => impl_method_count += 1,
-                                SymbolKind::TypeAlias => type_alias_count += 1,
-                                SymbolKind::Const => const_count += 1,
-                                SymbolKind::Static => static_count += 1,
-                                SymbolKind::Macro => macro_count += 1,
-                                _ => {}
-                            }
-                            // Also count child symbols (via ChildOf edges from children).
-                            for child_edge in graph
-                                .graph
-                                .edges_directed(edge.target(), Direction::Incoming)
-                            {
-                                if let EdgeKind::ChildOf = child_edge.weight() {
-                                    sym_count += 1;
-                                    if let GraphNode::Symbol(ref cs) =
-                                        graph.graph[child_edge.source()]
-                                    {
-                                        match cs.kind {
-                                            SymbolKind::ImplMethod => impl_method_count += 1,
-                                            SymbolKind::Property => {} // don't double count
-                                            _ => {}
-                                        }
+                    if let EdgeKind::Contains = edge.weight()
+                        && let GraphNode::Symbol(ref s) = graph.graph[edge.target()]
+                    {
+                        sym_count += 1;
+                        match s.kind {
+                            SymbolKind::Function => fn_count += 1,
+                            SymbolKind::Struct => struct_count += 1,
+                            SymbolKind::Enum => enum_count += 1,
+                            SymbolKind::Trait => trait_count += 1,
+                            SymbolKind::ImplMethod => impl_method_count += 1,
+                            SymbolKind::TypeAlias => type_alias_count += 1,
+                            SymbolKind::Const => const_count += 1,
+                            SymbolKind::Static => static_count += 1,
+                            SymbolKind::Macro => macro_count += 1,
+                            _ => {}
+                        }
+                        // Also count child symbols (via ChildOf edges from children).
+                        for child_edge in graph
+                            .graph
+                            .edges_directed(edge.target(), Direction::Incoming)
+                        {
+                            if let EdgeKind::ChildOf = child_edge.weight() {
+                                sym_count += 1;
+                                if let GraphNode::Symbol(ref cs) = graph.graph[child_edge.source()]
+                                {
+                                    match cs.kind {
+                                        SymbolKind::ImplMethod => impl_method_count += 1,
+                                        SymbolKind::Property => {} // don't double count
+                                        _ => {}
                                     }
                                 }
                             }

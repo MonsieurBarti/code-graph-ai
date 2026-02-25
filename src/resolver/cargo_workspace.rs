@@ -64,10 +64,10 @@ pub fn discover_rust_workspace_members(project_root: &Path) -> HashMap<String, P
         }
 
         // Handle combined workspace+package Cargo.toml (virtual workspace with root package).
-        if manifest.get("package").is_some() {
-            if let Some((name, root)) = find_crate_root(&workspace_toml) {
-                result.entry(name).or_insert(root);
-            }
+        if manifest.get("package").is_some()
+            && let Some((name, root)) = find_crate_root(&workspace_toml)
+        {
+            result.entry(name).or_insert(root);
         }
 
         result
