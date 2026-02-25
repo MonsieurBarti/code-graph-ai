@@ -1,10 +1,14 @@
 pub mod barrel;
+pub mod cargo_workspace;
 pub mod file_resolver;
+pub mod rust_mod_tree;
 pub mod workspace;
 
+pub use cargo_workspace::discover_rust_workspace_members;
 pub use file_resolver::{
     ResolutionOutcome, build_resolver, resolve_import, workspace_map_to_aliases,
 };
+pub use rust_mod_tree::{RustModTree, build_mod_tree, find_crate_root};
 pub use workspace::discover_workspace_packages;
 
 use std::collections::HashMap;

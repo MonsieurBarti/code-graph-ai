@@ -34,7 +34,7 @@ thread_local! {
         p.set_language(&tree_sitter_javascript::LANGUAGE.into()).unwrap();
         p
     });
-    static PARSER_RS: RefCell<Parser> = RefCell::new({
+    pub static PARSER_RS: RefCell<Parser> = RefCell::new({
         let mut p = Parser::new();
         p.set_language(&tree_sitter_rust::LANGUAGE.into()).unwrap();
         p
