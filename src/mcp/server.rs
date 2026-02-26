@@ -12,7 +12,7 @@ use tokio::sync::RwLock;
 
 use super::params::{
     DetectCircularParams, ExportGraphParams, FindReferencesParams, FindSymbolParams,
-    GetContextParams, GetImpactParams, GetStatsParams,
+    GetContextParams, GetImpactParams, GetStatsParams, GetStructureParams,
 };
 use crate::graph::CodeGraph;
 
@@ -703,6 +703,21 @@ impl CodeGraphServer {
         response.push_str(&result.content);
 
         Ok(response)
+    }
+
+    #[tool(description = "Directory/module tree with files and their top-level symbols.")]
+    async fn get_structure(
+        &self,
+        Parameters(p): Parameters<GetStructureParams>,
+    ) -> Result<String, String> {
+        let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
+        let path = p.path.as_deref().map(std::path::Path::new);
+        let depth = p.depth.unwrap_or(3);
+        let tree = crate::query::structure::file_structure(&graph, &root, path, depth);
+        let output = crate::query::output::format_structure_to_string(&tree, &root);
+        let hint = crate::mcp::hints::structure_hint(p.path.as_deref());
+        let output = format!("{}{}", output, hint);
+        Ok(output)
     }
 }
 

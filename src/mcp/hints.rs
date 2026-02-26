@@ -92,6 +92,18 @@ pub fn stats_hint() -> String {
     "\nhint: find_symbol \".*\" kind=function".to_string()
 }
 
+/// Generate hint for get_structure results.
+///
+/// Points to get_file_summary as the next step in the navigation funnel.
+/// If a specific path was queried, suggest it; otherwise use a generic placeholder.
+pub fn structure_hint(path: Option<&str>) -> String {
+    if let Some(p) = path {
+        format!("\nhint: get_file_summary \"{}\"", p)
+    } else {
+        "\nhint: get_file_summary \"<path>\" | alt: find_symbol \".*\"".to_string()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -218,5 +230,41 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_structure_hint_with_path() {
+        let hint = structure_hint(Some("src/main.rs"));
+        assert!(
+            hint.contains("hint: get_file_summary \"src/main.rs\""),
+            "structure hint with path should include get_file_summary with path: got '{}'",
+            hint
+        );
+    }
+
+    #[test]
+    fn test_structure_hint_without_path() {
+        let hint = structure_hint(None);
+        assert!(
+            hint.contains("hint: get_file_summary"),
+            "structure hint without path should still contain get_file_summary: got '{}'",
+            hint
+        );
+    }
+
+    #[test]
+    fn test_structure_hint_starts_with_newline() {
+        let hint_with_path = structure_hint(Some("src/lib.rs"));
+        let hint_without_path = structure_hint(None);
+        assert!(
+            hint_with_path.starts_with('\n'),
+            "structure hint with path must start with newline: got '{}'",
+            hint_with_path
+        );
+        assert!(
+            hint_without_path.starts_with('\n'),
+            "structure hint without path must start with newline: got '{}'",
+            hint_without_path
+        );
     }
 }

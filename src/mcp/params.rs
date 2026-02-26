@@ -59,6 +59,18 @@ pub struct GetStatsParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct GetStructureParams {
+    /// Directory or file path to show structure for (relative to project root, or absolute).
+    /// Omit for entire project.
+    pub path: Option<String>,
+    /// Tree depth limit — number of directory levels below the starting path (default: 3).
+    /// No hard cap — truncation handles overflow.
+    pub depth: Option<usize>,
+    /// Project root path override
+    pub project_path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct ExportGraphParams {
     /// Output format: "dot" (default) or "mermaid"
     pub format: Option<String>,
