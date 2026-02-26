@@ -13,10 +13,10 @@ fmt:
 check:
 	cargo fmt --all -- --check && RUSTFLAGS="-Dwarnings" cargo clippy --all-targets --all-features
 
-# Build the devcontainer from scratch and sync Claude config
+# Build the devcontainer from scratch
 dev-build:
 	devcontainer up --workspace-folder . --build-no-cache --remove-existing-container
 
-# Start the devcontainer and drop into zsh
+# Start the devcontainer and launch Claude in dangerously-skip-permissions mode
 dev:
-	devcontainer up --workspace-folder . && devcontainer exec --workspace-folder . zsh
+	devcontainer up --workspace-folder . && devcontainer exec --workspace-folder . claude --dangerously-skip-permissions
