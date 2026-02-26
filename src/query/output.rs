@@ -2059,4 +2059,195 @@ mod tests {
             "truncated output should include formatted results"
         );
     }
+
+    // ---------------------------------------------------------------------------
+    // Section scoping tests (SCOPE-01, SCOPE-02)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_sections_none() {
+        // None input -> None output (all sections, no filtering)
+        let result = parse_sections(None);
+        assert!(result.is_none(), "parse_sections(None) should return None");
+    }
+
+    #[test]
+    fn test_parse_sections_single() {
+        // 'r' maps to "references" only
+        let result = parse_sections(Some("r")).expect("should return Some");
+        assert_eq!(result.len(), 1, "should have exactly 1 entry");
+        assert!(result.contains("references"), "should contain 'references'");
+    }
+
+    #[test]
+    fn test_parse_sections_multiple() {
+        // "r,c" and "rc" both produce {"references", "callers"}
+        let with_comma = parse_sections(Some("r,c")).expect("should return Some");
+        assert!(with_comma.contains("references"), "should contain 'references'");
+        assert!(with_comma.contains("callers"), "should contain 'callers'");
+        assert_eq!(with_comma.len(), 2, "should have exactly 2 entries");
+
+        let without_sep = parse_sections(Some("rc")).expect("should return Some");
+        assert!(without_sep.contains("references"), "should contain 'references'");
+        assert!(without_sep.contains("callers"), "should contain 'callers'");
+        assert_eq!(without_sep.len(), 2, "should have exactly 2 entries");
+    }
+
+    #[test]
+    fn test_parse_sections_unknown_ignored() {
+        // Unknown char 'z' is silently ignored; 'r' still maps
+        let result = parse_sections(Some("rz")).expect("should return Some");
+        assert!(result.contains("references"), "should contain 'references'");
+        assert_eq!(result.len(), 1, "unknown 'z' should be silently ignored");
+    }
+
+    fn make_call_info(name: &str, path: &str, line: usize) -> crate::query::context::CallInfo {
+        crate::query::context::CallInfo {
+            symbol_name: name.to_string(),
+            kind: crate::graph::node::SymbolKind::Function,
+            file_path: PathBuf::from(path),
+            line,
+        }
+    }
+
+    fn make_ref_result(path: &str, kind: RefKind) -> RefResult {
+        RefResult {
+            file_path: PathBuf::from(path),
+            ref_kind: kind,
+            symbol_name: None,
+            line: None,
+        }
+    }
+
+    #[test]
+    fn test_context_sections_filter_references_only() {
+        let root = PathBuf::from("/test/project");
+        let def = make_find_result("MyFunc", "/test/project/src/foo.rs", 10, SymbolKind::Function);
+        let r = make_ref_result("/test/project/src/bar.rs", RefKind::Import);
+        let caller = make_call_info("main", "/test/project/src/main.rs", 5);
+        let ctx = SymbolContext {
+            symbol_name: "MyFunc".to_string(),
+            definitions: vec![def],
+            references: vec![r],
+            callees: vec![],
+            callers: vec![caller],
+            extends: vec![],
+            implements: vec![],
+            extended_by: vec![],
+            implemented_by: vec![],
+        };
+        let output = format_context_to_string(&[ctx], &root, Some("r"));
+
+        // References must appear
+        assert!(
+            output.contains("src/bar.rs import"),
+            "references should appear when 'r' requested, got: {output}"
+        );
+        // Definitions always included
+        assert!(
+            output.contains("src/foo.rs:10 function"),
+            "definitions always included, got: {output}"
+        );
+        // Callers must NOT appear (filtered out)
+        assert!(
+            !output.contains("main src/main.rs"),
+            "callers should NOT appear when only 'r' requested, got: {output}"
+        );
+        // Omitted line must mention callers (non-empty, filtered)
+        assert!(
+            output.contains("omitted: callers"),
+            "omitted line should list 'callers', got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_context_sections_definitions_always_included() {
+        let root = PathBuf::from("/test/project");
+        let def = make_find_result("MyFunc", "/test/project/src/foo.rs", 10, SymbolKind::Function);
+        let ctx = SymbolContext {
+            symbol_name: "MyFunc".to_string(),
+            definitions: vec![def],
+            references: vec![],
+            callees: vec![],
+            callers: vec![],
+            extends: vec![],
+            implements: vec![],
+            extended_by: vec![],
+            implemented_by: vec![],
+        };
+        // Request only callers — but definitions should still be rendered
+        let output = format_context_to_string(&[ctx], &root, Some("c"));
+
+        assert!(
+            output.contains("src/foo.rs:10 function"),
+            "definitions always included even when not in sections filter, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_context_sections_omitted_skips_empty() {
+        let root = PathBuf::from("/test/project");
+        let def = make_find_result("MyFunc", "/test/project/src/foo.rs", 10, SymbolKind::Function);
+        let r = make_ref_result("/test/project/src/bar.rs", RefKind::Import);
+        // callers is EMPTY
+        let ctx = SymbolContext {
+            symbol_name: "MyFunc".to_string(),
+            definitions: vec![def],
+            references: vec![r],
+            callees: vec![],
+            callers: vec![], // empty — should NOT appear in omitted
+            extends: vec![],
+            implements: vec![],
+            extended_by: vec![],
+            implemented_by: vec![],
+        };
+        // Request only references — callers is empty so should NOT appear in omitted
+        let output = format_context_to_string(&[ctx], &root, Some("r"));
+
+        assert!(
+            !output.contains("callers"),
+            "empty 'callers' section should not appear in omitted line, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_context_no_sections_returns_all() {
+        let root = PathBuf::from("/test/project");
+        let def = make_find_result("MyFunc", "/test/project/src/foo.rs", 10, SymbolKind::Function);
+        let r = make_ref_result("/test/project/src/bar.rs", RefKind::Import);
+        let caller = make_call_info("main", "/test/project/src/main.rs", 5);
+        let callee = make_call_info("helper", "/test/project/src/lib.rs", 20);
+        let ctx = SymbolContext {
+            symbol_name: "MyFunc".to_string(),
+            definitions: vec![def],
+            references: vec![r],
+            callees: vec![callee],
+            callers: vec![caller],
+            extends: vec![],
+            implements: vec![],
+            extended_by: vec![],
+            implemented_by: vec![],
+        };
+        // sections=None means all sections
+        let output = format_context_to_string(&[ctx], &root, None);
+
+        // All non-empty sections must appear
+        assert!(
+            output.contains("src/bar.rs import"),
+            "references should appear with no filter, got: {output}"
+        );
+        assert!(
+            output.contains("main src/main.rs:5"),
+            "callers should appear with no filter, got: {output}"
+        );
+        assert!(
+            output.contains("helper src/lib.rs:20"),
+            "callees should appear with no filter, got: {output}"
+        );
+        // No omitted line when no filter applied
+        assert!(
+            !output.contains("omitted:"),
+            "omitted line should NOT appear when no filter, got: {output}"
+        );
+    }
 }
