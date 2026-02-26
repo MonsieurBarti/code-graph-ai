@@ -1,6 +1,8 @@
 use std::io::IsTerminal;
 use std::path::Path;
 
+use crate::query::structure::StructureNode;
+
 use crate::cli::OutputFormat;
 use crate::graph::node::SymbolVisibility;
 use crate::query::circular::CircularDep;
@@ -315,6 +317,24 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
 
     match format {
         OutputFormat::Compact => {
+            // File overview line
+            if stats.non_parsed_files > 0 {
+                println!(
+                    "{} files ({} source, {} non-parsed), {} symbols",
+                    stats.file_count,
+                    stats.source_files,
+                    stats.non_parsed_files,
+                    stats.symbol_count
+                );
+                println!(
+                    "non-parsed: doc {} config {} ci {} asset {} other {}",
+                    stats.doc_files,
+                    stats.config_files,
+                    stats.ci_files,
+                    stats.asset_files,
+                    stats.other_files,
+                );
+            }
             // Per-language sections with per-language counts and combined totals.
             if show_rust && has_rust {
                 let rust_symbol_total = stats.rust_fns
@@ -429,8 +449,21 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
 
             if show_totals || show_rust && !show_ts || show_ts && !show_rust {
                 println!("{}", header("=== Project Overview ==="));
-                println!("Files:    {}", stats.file_count);
+                println!(
+                    "Files:    {} ({} source, {} non-parsed)",
+                    stats.file_count, stats.source_files, stats.non_parsed_files
+                );
                 println!("Symbols:  {}", stats.symbol_count);
+                if stats.non_parsed_files > 0 {
+                    println!(
+                        "  doc: {} config: {} ci: {} asset: {} other: {}",
+                        stats.doc_files,
+                        stats.config_files,
+                        stats.ci_files,
+                        stats.asset_files,
+                        stats.other_files
+                    );
+                }
                 println!();
             }
 
@@ -552,6 +585,13 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
 
             let json = serde_json::json!({
                 "file_count": stats.file_count,
+                "source_files": stats.source_files,
+                "non_parsed_files": stats.non_parsed_files,
+                "doc_files": stats.doc_files,
+                "config_files": stats.config_files,
+                "ci_files": stats.ci_files,
+                "asset_files": stats.asset_files,
+                "other_files": stats.other_files,
                 "symbol_count": stats.symbol_count,
                 "functions": stats.functions,
                 "classes": stats.classes,
@@ -1294,11 +1334,11 @@ pub fn format_context_results(
 // MCP String-returning formatters (siblings of the println!-based CLI formatters)
 // ---------------------------------------------------------------------------
 
-/// Format find results to a String in compact format for MCP tool responses.
+/// Format find results to a String in compact prefix-free format for MCP tool responses.
 ///
-/// Summary header (total count) is written FIRST, before any result lines,
-/// so Claude can count-check results at a glance (CONTEXT.md locked decision).
-/// In mixed-language results, groups by language with `--- {Language} ---` headers.
+/// No summary line. No "def " prefix. Line format: `{rel_path}:{line} {symbol_name} {kind}`
+/// (with optional visibility suffix for Rust). In mixed-language results, groups by language
+/// with `--- {Language} ---` section headers.
 pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> String {
     use std::fmt::Write;
     let show_vis = any_non_private(results);
@@ -1317,7 +1357,6 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
     }
 
     let mut buf = String::new();
-    writeln!(buf, "{} definitions found", results.len()).unwrap();
     let mut last_lang: Option<&'static str> = None;
     for r in &sorted {
         if mixed {
@@ -1334,10 +1373,10 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
         if show_vis {
             writeln!(
                 buf,
-                "def {} {}:{} {} {}",
-                r.symbol_name,
+                "{}:{} {} {} {}",
                 rel.display(),
                 r.line,
+                r.symbol_name,
                 kind_to_str(&r.kind),
                 visibility_str(&r.visibility),
             )
@@ -1345,10 +1384,10 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
         } else {
             writeln!(
                 buf,
-                "def {} {}:{} {}",
-                r.symbol_name,
+                "{}:{} {} {}",
                 rel.display(),
                 r.line,
+                r.symbol_name,
                 kind_to_str(&r.kind)
             )
             .unwrap();
@@ -1376,10 +1415,22 @@ pub fn format_stats_to_string(stats: &ProjectStats, language_filter: Option<&str
 
     writeln!(
         buf,
-        "{} files, {} symbols",
-        stats.file_count, stats.symbol_count
+        "{} files ({} source, {} non-parsed), {} symbols",
+        stats.file_count, stats.source_files, stats.non_parsed_files, stats.symbol_count
     )
     .unwrap();
+    if stats.non_parsed_files > 0 {
+        writeln!(
+            buf,
+            "non-parsed: doc {} config {} ci {} asset {} other {}",
+            stats.doc_files,
+            stats.config_files,
+            stats.ci_files,
+            stats.asset_files,
+            stats.other_files,
+        )
+        .unwrap();
+    }
 
     if show_rust && has_rust {
         let rust_symbol_total = stats.rust_fns
@@ -1483,13 +1534,14 @@ pub fn format_stats_to_string(stats: &ProjectStats, language_filter: Option<&str
     buf
 }
 
-/// Format reference results to a String in compact format for MCP tool responses.
+/// Format reference results to a String in compact prefix-free format for MCP tool responses.
 ///
-/// Summary header (total count) is written FIRST.
+/// No summary line. No "ref " prefix. Line formats:
+/// - Import: `{rel_path} import`
+/// - Call:   `{rel_path}:{line} call {caller_name}`
 pub fn format_refs_to_string(results: &[RefResult], project_root: &Path) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
-    writeln!(buf, "{} references found", results.len()).unwrap();
     for r in results {
         let rel = r
             .file_path
@@ -1497,43 +1549,41 @@ pub fn format_refs_to_string(results: &[RefResult], project_root: &Path) -> Stri
             .unwrap_or(&r.file_path);
         match r.ref_kind {
             RefKind::Import => {
-                writeln!(buf, "ref {} import", rel.display()).unwrap();
+                writeln!(buf, "{} import", rel.display()).unwrap();
             }
             RefKind::Call => {
                 let caller = r.symbol_name.as_deref().unwrap_or("?");
                 let line = r.line.map_or_else(|| "?".to_string(), |l| l.to_string());
-                writeln!(buf, "ref {}:{} call {}", rel.display(), line, caller).unwrap();
+                writeln!(buf, "{}:{} call {}", rel.display(), line, caller).unwrap();
             }
         }
     }
     buf
 }
 
-/// Format impact (blast radius) results to a String in compact flat format for MCP tool responses.
+/// Format impact (blast radius) results to a String in compact prefix-free flat format for MCP tool responses.
 ///
-/// Summary header (total count) is written FIRST. Uses flat (non-tree) format — MCP responses
-/// do not benefit from indentation and tree mode adds ambiguity when parsed by Claude.
+/// No summary line. No "impact " prefix. Line format: `{rel_path}`.
+/// Uses flat (non-tree) format — MCP responses do not benefit from indentation.
 pub fn format_impact_to_string(results: &[ImpactResult], project_root: &Path) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
-    writeln!(buf, "{} affected files", results.len()).unwrap();
     for r in results {
         let rel = r
             .file_path
             .strip_prefix(project_root)
             .unwrap_or(&r.file_path);
-        writeln!(buf, "impact {}", rel.display()).unwrap();
+        writeln!(buf, "{}", rel.display()).unwrap();
     }
     buf
 }
 
-/// Format circular dependency results to a String in compact format for MCP tool responses.
+/// Format circular dependency results to a String in compact prefix-free format for MCP tool responses.
 ///
-/// Summary header (total count) is written FIRST.
+/// No summary line. No "cycle " prefix. Line format: `{file1} -> {file2} -> {file3}`.
 pub fn format_circular_to_string(cycles: &[CircularDep], project_root: &Path) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
-    writeln!(buf, "{} circular dependencies found", cycles.len()).unwrap();
     for cycle in cycles {
         let parts: Vec<String> = cycle
             .files
@@ -1545,44 +1595,88 @@ pub fn format_circular_to_string(cycles: &[CircularDep], project_root: &Path) ->
                     .to_string()
             })
             .collect();
-        writeln!(buf, "cycle {}", parts.join(" -> ")).unwrap();
+        writeln!(buf, "{}", parts.join(" -> ")).unwrap();
     }
     buf
 }
 
-/// Format symbol context results to a String with labeled sections for MCP tool responses.
+/// Parse a sections filter string into an active set of section names.
 ///
-/// Summary header (`{N} symbols`) is written FIRST (CONTEXT.md locked decision).
-/// Each non-empty relationship group is preceded by a labeled section delimiter
-/// (`--- callers ---`, `--- callees ---`, etc.) so Claude can parse sections easily
-/// (CONTEXT.md locked decision on context/360-degree labeled sections).
-pub fn format_context_to_string(contexts: &[SymbolContext], project_root: &Path) -> String {
-    use std::fmt::Write;
-    let mut buf = String::new();
-    writeln!(buf, "{} symbols", contexts.len()).unwrap();
-    for ctx in contexts {
-        writeln!(buf, "symbol {}", ctx.symbol_name).unwrap();
+/// - `None` input → `None` output (no filtering, all sections shown)
+/// - Characters map to section names: r=references, c=callers, e=callees,
+///   x=extends, i=implements, X=extended-by, I=implemented-by
+/// - Commas and whitespace are separators (silently ignored)
+/// - Unknown characters are silently ignored
+/// - Returns `Some(HashSet)` with the matched section names
+pub fn parse_sections(sections: Option<&str>) -> Option<std::collections::HashSet<&'static str>> {
+    let s = sections?;
+    let mut set = std::collections::HashSet::new();
+    for ch in s.chars() {
+        match ch {
+            'r' => { set.insert("references"); }
+            'c' => { set.insert("callers"); }
+            'e' => { set.insert("callees"); }
+            'x' => { set.insert("extends"); }
+            'i' => { set.insert("implements"); }
+            'X' => { set.insert("extended-by"); }
+            'I' => { set.insert("implemented-by"); }
+            _ => {} // separators (comma, space) and unknown chars silently ignored
+        }
+    }
+    Some(set)
+}
 
-        if !ctx.definitions.is_empty() {
-            writeln!(buf, "--- definitions ---").unwrap();
-            for def in &ctx.definitions {
-                let rel = def
-                    .file_path
-                    .strip_prefix(project_root)
-                    .unwrap_or(&def.file_path);
-                writeln!(
-                    buf,
-                    "def {}:{} {}",
-                    rel.display(),
-                    def.line,
-                    kind_to_str(&def.kind)
-                )
-                .unwrap();
-            }
+/// Format symbol context results to a String in compact prefix-free format for MCP tool responses.
+///
+/// No "N symbols" summary. No "symbol " prefix (bare symbol name on its own line).
+/// No "--- section ---" delimiter lines. No "def ", "ref ", "called-by ", "calls ",
+/// "extends ", "implements ", "extended-by ", "implemented-by " prefixes.
+///
+/// Per-section formats:
+/// - Symbol header:          `{symbol_name}`
+/// - Definitions:            `{rel_path}:{line} {kind}`
+/// - References (import):    `{rel_path} import`
+/// - References (call):      `{rel_path}:{line} call {caller}`
+/// - Callers:                `{caller_name} {rel_path}:{line}`
+/// - Callees:                `{callee_name} {rel_path}:{line}`
+/// - Extends/implements/extended-by/implemented-by: `{name} {rel_path}:{line}`
+///
+/// Empty sections are silently omitted.
+///
+/// `sections`: optional filter string (e.g. `"r,c"`). Definitions are always included.
+/// Non-empty sections that were filtered out are listed on an `omitted: ...` line.
+pub fn format_context_to_string(
+    contexts: &[SymbolContext],
+    project_root: &Path,
+    sections: Option<&str>,
+) -> String {
+    use std::fmt::Write;
+    let active = parse_sections(sections);
+    let mut buf = String::new();
+    for ctx in contexts {
+        writeln!(buf, "{}", ctx.symbol_name).unwrap();
+
+        // Definitions are ALWAYS rendered regardless of filter.
+        for def in &ctx.definitions {
+            let rel = def
+                .file_path
+                .strip_prefix(project_root)
+                .unwrap_or(&def.file_path);
+            writeln!(
+                buf,
+                "{}:{} {}",
+                rel.display(),
+                def.line,
+                kind_to_str(&def.kind)
+            )
+            .unwrap();
         }
 
-        if !ctx.references.is_empty() {
-            writeln!(buf, "--- references ---").unwrap();
+        // Track non-empty sections that were filtered out.
+        let mut omitted: Vec<&'static str> = Vec::new();
+
+        // References
+        if active.as_ref().map_or(true, |s| s.contains("references")) {
             for r in &ctx.references {
                 let rel = r
                     .file_path
@@ -1590,123 +1684,101 @@ pub fn format_context_to_string(contexts: &[SymbolContext], project_root: &Path)
                     .unwrap_or(&r.file_path);
                 match r.ref_kind {
                     RefKind::Import => {
-                        writeln!(buf, "ref {} import", rel.display()).unwrap();
+                        writeln!(buf, "{} import", rel.display()).unwrap();
                     }
                     RefKind::Call => {
                         let caller = r.symbol_name.as_deref().unwrap_or("?");
                         let line = r.line.map_or_else(|| "?".to_string(), |l| l.to_string());
-                        writeln!(buf, "ref {}:{} call {}", rel.display(), line, caller).unwrap();
+                        writeln!(buf, "{}:{} call {}", rel.display(), line, caller).unwrap();
                     }
                 }
             }
+        } else if !ctx.references.is_empty() {
+            omitted.push("references");
         }
 
-        if !ctx.callers.is_empty() {
-            writeln!(buf, "--- callers ---").unwrap();
+        // Callers
+        if active.as_ref().map_or(true, |s| s.contains("callers")) {
             for caller in &ctx.callers {
                 let rel = caller
                     .file_path
                     .strip_prefix(project_root)
                     .unwrap_or(&caller.file_path);
-                writeln!(
-                    buf,
-                    "called-by {} {}:{}",
-                    caller.symbol_name,
-                    rel.display(),
-                    caller.line
-                )
-                .unwrap();
+                writeln!(buf, "{} {}:{}", caller.symbol_name, rel.display(), caller.line).unwrap();
             }
+        } else if !ctx.callers.is_empty() {
+            omitted.push("callers");
         }
 
-        if !ctx.callees.is_empty() {
-            writeln!(buf, "--- callees ---").unwrap();
+        // Callees
+        if active.as_ref().map_or(true, |s| s.contains("callees")) {
             for callee in &ctx.callees {
                 let rel = callee
                     .file_path
                     .strip_prefix(project_root)
                     .unwrap_or(&callee.file_path);
-                writeln!(
-                    buf,
-                    "calls {} {}:{}",
-                    callee.symbol_name,
-                    rel.display(),
-                    callee.line
-                )
-                .unwrap();
+                writeln!(buf, "{} {}:{}", callee.symbol_name, rel.display(), callee.line).unwrap();
             }
+        } else if !ctx.callees.is_empty() {
+            omitted.push("callees");
         }
 
-        if !ctx.extends.is_empty() {
-            writeln!(buf, "--- extends ---").unwrap();
+        // Extends
+        if active.as_ref().map_or(true, |s| s.contains("extends")) {
             for ext in &ctx.extends {
                 let rel = ext
                     .file_path
                     .strip_prefix(project_root)
                     .unwrap_or(&ext.file_path);
-                writeln!(
-                    buf,
-                    "extends {} {}:{}",
-                    ext.symbol_name,
-                    rel.display(),
-                    ext.line
-                )
-                .unwrap();
+                writeln!(buf, "{} {}:{}", ext.symbol_name, rel.display(), ext.line).unwrap();
             }
+        } else if !ctx.extends.is_empty() {
+            omitted.push("extends");
         }
 
-        if !ctx.implements.is_empty() {
-            writeln!(buf, "--- implements ---").unwrap();
+        // Implements
+        if active.as_ref().map_or(true, |s| s.contains("implements")) {
             for imp in &ctx.implements {
                 let rel = imp
                     .file_path
                     .strip_prefix(project_root)
                     .unwrap_or(&imp.file_path);
-                writeln!(
-                    buf,
-                    "implements {} {}:{}",
-                    imp.symbol_name,
-                    rel.display(),
-                    imp.line
-                )
-                .unwrap();
+                writeln!(buf, "{} {}:{}", imp.symbol_name, rel.display(), imp.line).unwrap();
             }
+        } else if !ctx.implements.is_empty() {
+            omitted.push("implements");
         }
 
-        if !ctx.extended_by.is_empty() {
-            writeln!(buf, "--- extended-by ---").unwrap();
+        // Extended-by
+        if active.as_ref().map_or(true, |s| s.contains("extended-by")) {
             for ext_by in &ctx.extended_by {
                 let rel = ext_by
                     .file_path
                     .strip_prefix(project_root)
                     .unwrap_or(&ext_by.file_path);
-                writeln!(
-                    buf,
-                    "extended-by {} {}:{}",
-                    ext_by.symbol_name,
-                    rel.display(),
-                    ext_by.line
-                )
-                .unwrap();
+                writeln!(buf, "{} {}:{}", ext_by.symbol_name, rel.display(), ext_by.line).unwrap();
             }
+        } else if !ctx.extended_by.is_empty() {
+            omitted.push("extended-by");
         }
 
-        if !ctx.implemented_by.is_empty() {
-            writeln!(buf, "--- implemented-by ---").unwrap();
+        // Implemented-by
+        if active.as_ref().map_or(true, |s| s.contains("implemented-by")) {
             for impl_by in &ctx.implemented_by {
                 let rel = impl_by
                     .file_path
                     .strip_prefix(project_root)
                     .unwrap_or(&impl_by.file_path);
-                writeln!(
-                    buf,
-                    "implemented-by {} {}:{}",
-                    impl_by.symbol_name,
-                    rel.display(),
-                    impl_by.line
-                )
-                .unwrap();
+                writeln!(buf, "{} {}:{}", impl_by.symbol_name, rel.display(), impl_by.line)
+                    .unwrap();
             }
+        } else if !ctx.implemented_by.is_empty() {
+            omitted.push("implemented-by");
+        }
+
+        // Emit omitted line only when sections were filtered AND some were non-empty.
+        if !omitted.is_empty() {
+            writeln!(buf, "omitted: {}", omitted.join(", ")).unwrap();
         }
     }
     buf
@@ -1778,4 +1850,727 @@ pub fn format_circular_results(cycles: &[CircularDep], format: &OutputFormat, pr
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests for MCP formatters
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::graph::node::{SymbolKind, SymbolVisibility};
+    use crate::query::circular::CircularDep;
+    use crate::query::context::{CallInfo, SymbolContext};
+    use crate::query::find::FindResult;
+    use crate::query::impact::ImpactResult;
+    use crate::query::refs::{RefKind, RefResult};
+
+    fn make_find_result(name: &str, path: &str, line: usize, kind: SymbolKind) -> FindResult {
+        FindResult {
+            symbol_name: name.to_string(),
+            kind,
+            file_path: PathBuf::from(path),
+            line,
+            col: 0,
+            is_exported: false,
+            is_default: false,
+            visibility: SymbolVisibility::Private,
+        }
+    }
+
+    #[test]
+    fn test_mcp_find_format_no_prefix() {
+        let root = PathBuf::from("/project");
+        let results = vec![make_find_result(
+            "MyFunc",
+            "/project/src/foo.ts",
+            10,
+            SymbolKind::Function,
+        )];
+        let output = format_find_to_string(&results, &root);
+
+        // Must NOT contain old prefix
+        assert!(!output.contains("def "), "output should not contain 'def ' prefix");
+        // Must NOT contain old summary line
+        assert!(
+            !output.contains("definitions found"),
+            "output should not contain 'definitions found' summary"
+        );
+        // Must contain new compact format: path:line name kind
+        assert!(
+            output.contains("src/foo.ts:10 MyFunc function"),
+            "output should contain compact format 'src/foo.ts:10 MyFunc function', got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_mcp_refs_format_no_prefix() {
+        let root = PathBuf::from("/project");
+        let results = vec![
+            RefResult {
+                file_path: PathBuf::from("/project/src/bar.ts"),
+                ref_kind: RefKind::Import,
+                symbol_name: None,
+                line: None,
+            },
+            RefResult {
+                file_path: PathBuf::from("/project/src/baz.ts"),
+                ref_kind: RefKind::Call,
+                symbol_name: Some("callerFn".to_string()),
+                line: Some(42),
+            },
+        ];
+        let output = format_refs_to_string(&results, &root);
+
+        // Must NOT contain old prefix
+        assert!(!output.contains("ref "), "output should not contain 'ref ' prefix");
+        // Must NOT contain old summary line
+        assert!(
+            !output.contains("references found"),
+            "output should not contain 'references found' summary"
+        );
+        // Must contain new compact formats
+        assert!(
+            output.contains("src/bar.ts import"),
+            "output should contain import ref format, got: {output}"
+        );
+        assert!(
+            output.contains("src/baz.ts:42 call callerFn"),
+            "output should contain call ref format, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_mcp_impact_format_no_prefix() {
+        let root = PathBuf::from("/project");
+        let results = vec![ImpactResult {
+            file_path: PathBuf::from("/project/src/affected.ts"),
+            depth: 1,
+        }];
+        let output = format_impact_to_string(&results, &root);
+
+        // Must NOT contain old prefix
+        assert!(!output.contains("impact "), "output should not contain 'impact ' prefix");
+        // Must NOT contain old summary line
+        assert!(
+            !output.contains("affected files"),
+            "output should not contain 'affected files' summary"
+        );
+        // Must contain bare path
+        assert!(
+            output.contains("src/affected.ts"),
+            "output should contain relative path, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_mcp_circular_format_no_prefix() {
+        let root = PathBuf::from("/project");
+        let cycles = vec![CircularDep {
+            files: vec![
+                PathBuf::from("/project/src/a.ts"),
+                PathBuf::from("/project/src/b.ts"),
+                PathBuf::from("/project/src/a.ts"),
+            ],
+        }];
+        let output = format_circular_to_string(&cycles, &root);
+
+        // Must NOT contain old prefix
+        assert!(!output.contains("cycle "), "output should not contain 'cycle ' prefix");
+        // Must NOT contain old summary line
+        assert!(
+            !output.contains("circular dependencies found"),
+            "output should not contain 'circular dependencies found' summary"
+        );
+        // Must contain arrow chain format
+        assert!(
+            output.contains("src/a.ts -> src/b.ts -> src/a.ts"),
+            "output should contain arrow-chain format, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_mcp_context_format_no_delimiters() {
+        let root = PathBuf::from("/project");
+        let def = make_find_result("MyStruct", "/project/src/lib.rs", 5, SymbolKind::Struct);
+        let caller = CallInfo {
+            symbol_name: "main".to_string(),
+            kind: SymbolKind::Function,
+            file_path: PathBuf::from("/project/src/main.rs"),
+            line: 20,
+        };
+        let ctx = SymbolContext {
+            symbol_name: "MyStruct".to_string(),
+            definitions: vec![def],
+            references: vec![],
+            callees: vec![],
+            callers: vec![caller],
+            extends: vec![],
+            implements: vec![],
+            extended_by: vec![],
+            implemented_by: vec![],
+        };
+        let output = format_context_to_string(&[ctx], &root, None);
+
+        // Must NOT contain old section delimiters
+        assert!(!output.contains("--- "), "output should not contain '--- ' delimiter lines");
+        // Must NOT contain old symbol prefix
+        assert!(!output.contains("symbol "), "output should not contain 'symbol ' prefix");
+        // Must NOT contain old summary
+        assert!(!output.contains(" symbols"), "output should not contain 'N symbols' summary");
+        // Must NOT contain old "called-by " prefix
+        assert!(
+            !output.contains("called-by "),
+            "output should not contain 'called-by ' prefix"
+        );
+        // Symbol name as bare header
+        assert!(
+            output.contains("MyStruct"),
+            "output should contain symbol name, got: {output}"
+        );
+        // Definition in compact format: path:line kind
+        assert!(
+            output.contains("src/lib.rs:5 struct"),
+            "output should contain definition in compact format, got: {output}"
+        );
+        // Caller in compact format: caller_name path:line
+        assert!(
+            output.contains("main src/main.rs:20"),
+            "output should contain caller in compact format, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_truncation_format() {
+        // Verify the truncation prefix string format used in server handlers.
+        let limit = 20usize;
+        let total = 45usize;
+        let formatted_output = "src/foo.ts:10 MyFunc function\n";
+        let truncated_output =
+            format!("truncated: {}/{}\n{}", limit, total, formatted_output);
+
+        assert!(
+            truncated_output.starts_with("truncated: 20/45\n"),
+            "truncated output should start with 'truncated: N/total\\n', got: {truncated_output}"
+        );
+        assert!(
+            truncated_output.contains("src/foo.ts:10 MyFunc function"),
+            "truncated output should include formatted results"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Section scoping tests (SCOPE-01, SCOPE-02)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_sections_none() {
+        // None input -> None output (all sections, no filtering)
+        let result = parse_sections(None);
+        assert!(result.is_none(), "parse_sections(None) should return None");
+    }
+
+    #[test]
+    fn test_parse_sections_single() {
+        // 'r' maps to "references" only
+        let result = parse_sections(Some("r")).expect("should return Some");
+        assert_eq!(result.len(), 1, "should have exactly 1 entry");
+        assert!(result.contains("references"), "should contain 'references'");
+    }
+
+    #[test]
+    fn test_parse_sections_multiple() {
+        // "r,c" and "rc" both produce {"references", "callers"}
+        let with_comma = parse_sections(Some("r,c")).expect("should return Some");
+        assert!(with_comma.contains("references"), "should contain 'references'");
+        assert!(with_comma.contains("callers"), "should contain 'callers'");
+        assert_eq!(with_comma.len(), 2, "should have exactly 2 entries");
+
+        let without_sep = parse_sections(Some("rc")).expect("should return Some");
+        assert!(without_sep.contains("references"), "should contain 'references'");
+        assert!(without_sep.contains("callers"), "should contain 'callers'");
+        assert_eq!(without_sep.len(), 2, "should have exactly 2 entries");
+    }
+
+    #[test]
+    fn test_parse_sections_unknown_ignored() {
+        // Unknown char 'z' is silently ignored; 'r' still maps
+        let result = parse_sections(Some("rz")).expect("should return Some");
+        assert!(result.contains("references"), "should contain 'references'");
+        assert_eq!(result.len(), 1, "unknown 'z' should be silently ignored");
+    }
+
+    fn make_call_info(name: &str, path: &str, line: usize) -> crate::query::context::CallInfo {
+        crate::query::context::CallInfo {
+            symbol_name: name.to_string(),
+            kind: crate::graph::node::SymbolKind::Function,
+            file_path: PathBuf::from(path),
+            line,
+        }
+    }
+
+    fn make_ref_result(path: &str, kind: RefKind) -> RefResult {
+        RefResult {
+            file_path: PathBuf::from(path),
+            ref_kind: kind,
+            symbol_name: None,
+            line: None,
+        }
+    }
+
+    #[test]
+    fn test_context_sections_filter_references_only() {
+        let root = PathBuf::from("/test/project");
+        let def = make_find_result("MyFunc", "/test/project/src/foo.rs", 10, SymbolKind::Function);
+        let r = make_ref_result("/test/project/src/bar.rs", RefKind::Import);
+        let caller = make_call_info("main", "/test/project/src/main.rs", 5);
+        let ctx = SymbolContext {
+            symbol_name: "MyFunc".to_string(),
+            definitions: vec![def],
+            references: vec![r],
+            callees: vec![],
+            callers: vec![caller],
+            extends: vec![],
+            implements: vec![],
+            extended_by: vec![],
+            implemented_by: vec![],
+        };
+        let output = format_context_to_string(&[ctx], &root, Some("r"));
+
+        // References must appear
+        assert!(
+            output.contains("src/bar.rs import"),
+            "references should appear when 'r' requested, got: {output}"
+        );
+        // Definitions always included
+        assert!(
+            output.contains("src/foo.rs:10 function"),
+            "definitions always included, got: {output}"
+        );
+        // Callers must NOT appear (filtered out)
+        assert!(
+            !output.contains("main src/main.rs"),
+            "callers should NOT appear when only 'r' requested, got: {output}"
+        );
+        // Omitted line must mention callers (non-empty, filtered)
+        assert!(
+            output.contains("omitted: callers"),
+            "omitted line should list 'callers', got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_context_sections_definitions_always_included() {
+        let root = PathBuf::from("/test/project");
+        let def = make_find_result("MyFunc", "/test/project/src/foo.rs", 10, SymbolKind::Function);
+        let ctx = SymbolContext {
+            symbol_name: "MyFunc".to_string(),
+            definitions: vec![def],
+            references: vec![],
+            callees: vec![],
+            callers: vec![],
+            extends: vec![],
+            implements: vec![],
+            extended_by: vec![],
+            implemented_by: vec![],
+        };
+        // Request only callers — but definitions should still be rendered
+        let output = format_context_to_string(&[ctx], &root, Some("c"));
+
+        assert!(
+            output.contains("src/foo.rs:10 function"),
+            "definitions always included even when not in sections filter, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_context_sections_omitted_skips_empty() {
+        let root = PathBuf::from("/test/project");
+        let def = make_find_result("MyFunc", "/test/project/src/foo.rs", 10, SymbolKind::Function);
+        let r = make_ref_result("/test/project/src/bar.rs", RefKind::Import);
+        // callers is EMPTY
+        let ctx = SymbolContext {
+            symbol_name: "MyFunc".to_string(),
+            definitions: vec![def],
+            references: vec![r],
+            callees: vec![],
+            callers: vec![], // empty — should NOT appear in omitted
+            extends: vec![],
+            implements: vec![],
+            extended_by: vec![],
+            implemented_by: vec![],
+        };
+        // Request only references — callers is empty so should NOT appear in omitted
+        let output = format_context_to_string(&[ctx], &root, Some("r"));
+
+        assert!(
+            !output.contains("callers"),
+            "empty 'callers' section should not appear in omitted line, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_context_no_sections_returns_all() {
+        let root = PathBuf::from("/test/project");
+        let def = make_find_result("MyFunc", "/test/project/src/foo.rs", 10, SymbolKind::Function);
+        let r = make_ref_result("/test/project/src/bar.rs", RefKind::Import);
+        let caller = make_call_info("main", "/test/project/src/main.rs", 5);
+        let callee = make_call_info("helper", "/test/project/src/lib.rs", 20);
+        let ctx = SymbolContext {
+            symbol_name: "MyFunc".to_string(),
+            definitions: vec![def],
+            references: vec![r],
+            callees: vec![callee],
+            callers: vec![caller],
+            extends: vec![],
+            implements: vec![],
+            extended_by: vec![],
+            implemented_by: vec![],
+        };
+        // sections=None means all sections
+        let output = format_context_to_string(&[ctx], &root, None);
+
+        // All non-empty sections must appear
+        assert!(
+            output.contains("src/bar.rs import"),
+            "references should appear with no filter, got: {output}"
+        );
+        assert!(
+            output.contains("main src/main.rs:5"),
+            "callers should appear with no filter, got: {output}"
+        );
+        assert!(
+            output.contains("helper src/lib.rs:20"),
+            "callees should appear with no filter, got: {output}"
+        );
+        // No omitted line when no filter applied
+        assert!(
+            !output.contains("omitted:"),
+            "omitted line should NOT appear when no filter, got: {output}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Structure formatter
+// ---------------------------------------------------------------------------
+
+/// Render a structure tree to an indented compact string.
+///
+/// Format:
+/// ```text
+/// src/
+///   mcp/
+///     server.rs
+///       pub get_structure (fn)
+///   query/
+///     structure.rs
+///       pub file_structure (fn)
+/// README.md [doc]
+/// Cargo.toml [config]
+/// ```
+///
+/// Rules:
+/// - 2 spaces per depth level.
+/// - Directories end with `/`.
+/// - Source files show symbols indented one level deeper.
+/// - Non-parsed files show `[kind_tag]` after the filename.
+/// - Symbols: visibility prefix (if pub or pub(crate)), then `name (kind)`.
+/// - Truncation nodes render as `... (N more items)`.
+/// - No trailing newline.
+pub fn format_structure_to_string(tree: &[StructureNode], _root: &Path) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    format_nodes(tree, 0, &mut lines);
+    lines.join("\n")
+}
+
+fn format_nodes(nodes: &[StructureNode], depth: usize, lines: &mut Vec<String>) {
+    let indent = "  ".repeat(depth);
+    for node in nodes {
+        match node {
+            StructureNode::Dir { name, children } => {
+                lines.push(format!("{}{}/", indent, name));
+                format_nodes(children, depth + 1, lines);
+            }
+            StructureNode::SourceFile { name, symbols } => {
+                lines.push(format!("{}{}", indent, name));
+                let sym_indent = "  ".repeat(depth + 1);
+                for sym in symbols {
+                    let prefix = match sym.visibility.as_str() {
+                        "pub" => "pub ",
+                        "pub(crate)" => "pub(crate) ",
+                        _ => "",
+                    };
+                    lines.push(format!("{}{}{} ({})", sym_indent, prefix, sym.name, sym.kind));
+                }
+            }
+            StructureNode::NonParsedFile { name, kind_tag } => {
+                lines.push(format!("{}{} [{}]", indent, name, kind_tag));
+            }
+            StructureNode::Truncated { count } => {
+                lines.push(format!("{}... ({} more items)", indent, count));
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FileSummary formatter
+// ---------------------------------------------------------------------------
+
+/// Render a `FileSummary` to a compact string (MCP format, no trailing newline).
+///
+/// Format:
+/// ```text
+/// src/mcp/server.rs
+/// role: utility
+/// lines: 729
+/// symbols: 7 (3 fn, 1 struct, 3 function)
+/// exports: get_structure (fn), get_file_summary (fn)
+/// imports: 12
+/// importers: 0
+/// graph: leaf
+/// ```
+///
+/// - `symbols:` shows total then parenthesized kind breakdown (only kinds with > 0 count).
+/// - `exports:` lists ALL exported symbols — no truncation.
+/// - `graph:` line is omitted if graph_label is None.
+pub fn format_file_summary_to_string(summary: &crate::query::file_summary::FileSummary) -> String {
+    use crate::query::file_summary::{FileRole, GraphLabel};
+
+    let mut lines: Vec<String> = Vec::new();
+
+    // Line 1: relative path
+    lines.push(summary.relative_path.clone());
+
+    // role:
+    let role_str = match summary.role {
+        FileRole::EntryPoint => "entry_point",
+        FileRole::LibraryRoot => "library_root",
+        FileRole::Test => "test",
+        FileRole::Config => "config",
+        FileRole::Types => "types",
+        FileRole::Utility => "utility",
+    };
+    lines.push(format!("role: {}", role_str));
+
+    // lines:
+    lines.push(format!("lines: {}", summary.line_count));
+
+    // symbols: N (breakdown by kind)
+    if summary.symbol_count == 0 {
+        lines.push("symbols: 0".to_string());
+    } else if summary.symbol_kinds.is_empty() {
+        lines.push(format!("symbols: {}", summary.symbol_count));
+    } else {
+        // Build sorted kind breakdown string (sorted alphabetically for determinism)
+        let mut kinds: Vec<(&String, &usize)> = summary.symbol_kinds.iter().collect();
+        kinds.sort_by_key(|(k, _)| k.as_str());
+        let breakdown: String = kinds
+            .iter()
+            .map(|(k, count)| format!("{} {}", count, k))
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!("symbols: {} ({})", summary.symbol_count, breakdown));
+    }
+
+    // exports:
+    if summary.exports.is_empty() {
+        lines.push("exports: none".to_string());
+    } else {
+        let export_list: String = summary
+            .exports
+            .iter()
+            .map(|e| format!("{} ({})", e.name, e.kind))
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!("exports: {}", export_list));
+    }
+
+    // imports: / importers:
+    lines.push(format!("imports: {}", summary.import_count));
+    lines.push(format!("importers: {}", summary.importer_count));
+
+    // graph: (only if Some)
+    if let Some(ref label) = summary.graph_label {
+        let label_str = match label {
+            GraphLabel::Hub => "hub",
+            GraphLabel::Leaf => "leaf",
+            GraphLabel::Bridge => "bridge",
+        };
+        lines.push(format!("graph: {}", label_str));
+    }
+
+    lines.join("\n")
+}
+
+// ---------------------------------------------------------------------------
+// Imports formatter
+// ---------------------------------------------------------------------------
+
+/// Render a list of `ImportEntry` items to a compact string (MCP format, no trailing newline).
+///
+/// Format:
+/// ```text
+/// src/mcp/server.rs imports:
+/// ./params (internal)
+/// ../graph (internal)
+/// rmcp (external)
+/// tokio (external)
+/// std::sync (builtin)
+/// crate::query::structure [re-export] (internal)
+/// ```
+///
+/// - If no imports, shows `{file_path} imports: none`.
+/// - `[re-export]` label only appears when `is_reexport` is true.
+/// - Insertion order preserved (no sorting or grouping).
+pub fn format_imports_to_string(entries: &[crate::query::imports::ImportEntry], file_path: &str) -> String {
+    use crate::query::imports::ImportCategory;
+
+    if entries.is_empty() {
+        return format!("{} imports: none", file_path);
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format!("{} imports:", file_path));
+
+    for entry in entries {
+        let category_str = match entry.category {
+            ImportCategory::Internal => "internal",
+            ImportCategory::Workspace => "workspace",
+            ImportCategory::External => "external",
+            ImportCategory::Builtin => "builtin",
+        };
+        if entry.is_reexport {
+            lines.push(format!("{} [re-export] ({})", entry.specifier, category_str));
+        } else {
+            lines.push(format!("{} ({})", entry.specifier, category_str));
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// Format dead code analysis results to a compact MCP string.
+///
+/// Output format:
+/// ```text
+/// unreachable files (N):
+///   src/unused_module.rs
+///   src/old_helper.ts
+///
+/// unreferenced symbols (N in M files):
+/// src/utils/helpers.rs:
+///   fn unused_helper :10
+///   fn old_function :25
+/// src/lib/parser.ts:
+///   function deadFunc :42
+/// ```
+///
+/// Paths are relative to `root`.
+pub fn format_dead_code_to_string(
+    result: &crate::query::dead_code::DeadCodeResult,
+    root: &Path,
+) -> String {
+    let mut lines: Vec<String> = Vec::new();
+
+    // --- Unreachable files section ---
+    let file_count = result.unreachable_files.len();
+    lines.push(format!("unreachable files ({}):", file_count));
+    if file_count == 0 {
+        lines.push("  none".to_string());
+    } else {
+        for file_path in &result.unreachable_files {
+            let rel = file_path.strip_prefix(root).unwrap_or(file_path);
+            lines.push(format!("  {}", rel.display()));
+        }
+    }
+
+    lines.push(String::new()); // blank line between sections
+
+    // --- Unreferenced symbols section ---
+    let total_symbols: usize = result
+        .unreferenced_symbols
+        .iter()
+        .map(|(_, syms)| syms.len())
+        .sum();
+    let file_groups = result.unreferenced_symbols.len();
+
+    lines.push(format!(
+        "unreferenced symbols ({} in {} files):",
+        total_symbols, file_groups
+    ));
+
+    if total_symbols == 0 {
+        lines.push("  none".to_string());
+    } else {
+        for (file_path, syms) in &result.unreferenced_symbols {
+            let rel = file_path.strip_prefix(root).unwrap_or(file_path);
+            lines.push(format!("{}:", rel.display()));
+            for sym in syms {
+                lines.push(format!("  {} {} :{}", sym.kind, sym.name, sym.line));
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+
+// ---------------------------------------------------------------------------
+// Diff output
+// ---------------------------------------------------------------------------
+
+/// Format a GraphDiff as a compact string for MCP output.
+///
+/// Example:
+/// ```text
+/// files: +2 -1
+/// +  src/new_module.rs
+/// -  src/removed.rs
+///
+/// symbols: +3 -2 ~1
+/// +  src/new_module.rs :: new_function
+/// -  src/removed.rs :: old_function
+/// ~  src/utils.rs :: parse_input (line 10 → 15, callers 3 → 5)
+/// ```
+pub fn format_diff_to_string(diff: &crate::query::diff::GraphDiff) -> String {
+    let mut lines: Vec<String> = Vec::new();
+
+    // Files header
+    lines.push(format!(
+        "files: +{} -{}",
+        diff.added_files.len(),
+        diff.removed_files.len()
+    ));
+    for f in &diff.added_files {
+        lines.push(format!("+  {}", f));
+    }
+    for f in &diff.removed_files {
+        lines.push(format!("-  {}", f));
+    }
+
+    lines.push(String::new()); // blank separator
+
+    // Symbols header
+    lines.push(format!(
+        "symbols: +{} -{} ~{}",
+        diff.added_symbols.len(),
+        diff.removed_symbols.len(),
+        diff.modified_symbols.len()
+    ));
+    for (file, sym) in &diff.added_symbols {
+        lines.push(format!("+  {} :: {}", file, sym));
+    }
+    for (file, sym) in &diff.removed_symbols {
+        lines.push(format!("-  {} :: {}", file, sym));
+    }
+    for change in &diff.modified_symbols {
+        let change_str = change.changes.join(", ");
+        lines.push(format!("~  {} :: {} ({})", change.file, change.name, change_str));
+    }
+
+    lines.join("\n")
 }

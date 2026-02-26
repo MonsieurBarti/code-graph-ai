@@ -72,18 +72,80 @@ pub struct SymbolInfo {
     pub trait_impl: Option<String>,
 }
 
+/// Classification of a file's role in the project.
+///
+/// Source files have full symbol extraction and import resolution.
+/// All other kinds are indexed as File nodes only (no symbols, no imports).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum FileKind {
+    /// Source code file with symbol extraction (ts, tsx, js, jsx, rs).
+    #[default]
+    Source,
+    /// Documentation file (md, txt, rst, adoc).
+    Doc,
+    /// Configuration file (toml, yaml, yml, json, ini, env, cfg, xml, etc.).
+    Config,
+    /// CI/CD file (files in .github/, .gitlab/, .circleci/, or named Jenkinsfile).
+    Ci,
+    /// Asset file (images, fonts, media).
+    Asset,
+    /// Any other non-source file.
+    Other,
+}
+
+/// Classify a file path into a `FileKind` based on its extension and path components.
+///
+/// CI classification is path-based (files inside `.github/`, `.gitlab/`, `.circleci/`).
+/// All other classification is extension-based.
+pub fn classify_file_kind(path: &std::path::Path) -> FileKind {
+    // Check CI directories first (path-based, not extension-based)
+    if path.components().any(|c| {
+        let s = c.as_os_str().to_str().unwrap_or("");
+        s == ".github" || s == ".gitlab" || s == ".circleci"
+    }) {
+        return FileKind::Ci;
+    }
+
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    match ext {
+        // Source files
+        "ts" | "tsx" | "js" | "jsx" | "rs" => FileKind::Source,
+        // Documentation
+        "md" | "txt" | "rst" | "adoc" => FileKind::Doc,
+        // Configuration
+        "toml" | "yaml" | "yml" | "json" | "ini" | "env" | "cfg"
+        | "conf" | "properties" | "xml" => FileKind::Config,
+        // Assets
+        "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico" | "woff"
+        | "woff2" | "ttf" | "eot" | "mp3" | "mp4" | "webm" | "pdf" => FileKind::Asset,
+        // Special files by name
+        _ => {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            match name {
+                "Dockerfile" | "Makefile" | "Jenkinsfile" | "Procfile" => FileKind::Config,
+                ".gitlab-ci.yml" => FileKind::Ci,
+                // Dotfiles that are configuration (no extension)
+                ".env" | ".env.local" | ".env.production" | ".env.development" => FileKind::Config,
+                _ => FileKind::Other,
+            }
+        }
+    }
+}
+
 /// Metadata about a source file.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FileInfo {
     /// Canonical path to the file.
     pub path: PathBuf,
-    /// The language grammar used: "typescript", "tsx", "javascript", or "rust".
+    /// The language grammar used: "typescript", "tsx", "javascript", "rust", or empty for non-parsed.
     pub language: String,
     /// The owning crate's normalized name (hyphens replaced by underscores).
     ///
     /// `None` for TypeScript/JavaScript files; set during Rust indexing when
     /// the crate's Cargo.toml is parsed. Used for per-crate stats breakdowns.
     pub crate_name: Option<String>,
+    /// Classification of this file's role (source, doc, config, ci, asset, other).
+    pub kind: FileKind,
 }
 
 /// Metadata about an external package (node_modules dependency).
@@ -113,4 +175,150 @@ pub enum GraphNode {
     Builtin { name: String },
     /// An import specifier that could not be resolved to a file or known package.
     UnresolvedImport { specifier: String, reason: String },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_classify_source_files() {
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("src/main.rs")),
+            FileKind::Source
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("app.ts")),
+            FileKind::Source
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("app.tsx")),
+            FileKind::Source
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("index.js")),
+            FileKind::Source
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("App.jsx")),
+            FileKind::Source
+        );
+    }
+
+    #[test]
+    fn test_classify_doc_files() {
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("README.md")),
+            FileKind::Doc
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("CHANGELOG.txt")),
+            FileKind::Doc
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("docs/guide.rst")),
+            FileKind::Doc
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("manual.adoc")),
+            FileKind::Doc
+        );
+    }
+
+    #[test]
+    fn test_classify_config_files() {
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("Cargo.toml")),
+            FileKind::Config
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("config.yaml")),
+            FileKind::Config
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("settings.yml")),
+            FileKind::Config
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("package.json")),
+            FileKind::Config
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new(".env")),
+            FileKind::Config
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("app.xml")),
+            FileKind::Config
+        );
+    }
+
+    #[test]
+    fn test_classify_ci_files() {
+        assert_eq!(
+            classify_file_kind(std::path::Path::new(".github/workflows/ci.yml")),
+            FileKind::Ci
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new(".gitlab/ci/build.yml")),
+            FileKind::Ci
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new(".circleci/config.yml")),
+            FileKind::Ci
+        );
+    }
+
+    #[test]
+    fn test_classify_asset_files() {
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("logo.png")),
+            FileKind::Asset
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("photo.jpg")),
+            FileKind::Asset
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("icon.svg")),
+            FileKind::Asset
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("font.woff2")),
+            FileKind::Asset
+        );
+    }
+
+    #[test]
+    fn test_classify_special_names() {
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("Dockerfile")),
+            FileKind::Config
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("Makefile")),
+            FileKind::Config
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("Jenkinsfile")),
+            FileKind::Config
+        );
+    }
+
+    #[test]
+    fn test_classify_other_files() {
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("LICENSE")),
+            FileKind::Other
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("some.random")),
+            FileKind::Other
+        );
+    }
+
+    #[test]
+    fn test_file_kind_default_is_source() {
+        assert_eq!(FileKind::default(), FileKind::Source);
+    }
 }

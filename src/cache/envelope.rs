@@ -11,7 +11,8 @@ use crate::graph::CodeGraph;
 /// Bumped to 3 in Phase 9 when `GraphNode::Builtin { name }` variant was added,
 /// `FileInfo.crate_name: Option<String>` field was added, and `builtin_index` field
 /// was added to `CodeGraph` — all change bincode serialization layout.
-pub const CACHE_VERSION: u32 = 3;
+/// Bumped to 4 in Phase 12 when `FileKind` enum and `kind` field were added to `FileInfo`.
+pub const CACHE_VERSION: u32 = 4;
 
 /// Cache directory name (created in project root).
 pub const CACHE_DIR: &str = ".code-graph";

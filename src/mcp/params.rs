@@ -45,12 +45,43 @@ pub struct DetectCircularParams {
 pub struct GetContextParams {
     /// Symbol name or regex pattern
     pub symbol: String,
+    /// Sections to include: r=references, c=callers, e=callees, x=extends, i=implements, X=extended-by, I=implemented-by.
+    /// Definitions always included. Omit for all sections.
+    pub sections: Option<String>,
     /// Project root path override
     pub project_path: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct GetStatsParams {
+    /// Project root path override
+    pub project_path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GetStructureParams {
+    /// Directory or file path to show structure for (relative to project root, or absolute).
+    /// Omit for entire project.
+    pub path: Option<String>,
+    /// Tree depth limit — number of directory levels below the starting path (default: 3).
+    /// No hard cap — truncation handles overflow.
+    pub depth: Option<usize>,
+    /// Project root path override
+    pub project_path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GetFileSummaryParams {
+    /// Path to the file (relative to project root, or absolute)
+    pub path: String,
+    /// Project root path override
+    pub project_path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GetImportsParams {
+    /// Path to the file (relative to project root, or absolute)
+    pub path: String,
     /// Project root path override
     pub project_path: Option<String>,
 }
@@ -70,5 +101,53 @@ pub struct ExportGraphParams {
     /// Exclude paths matching glob patterns (comma-separated)
     pub exclude: Option<String>,
     /// Project root path override
+    pub project_path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct FindDeadCodeParams {
+    /// Directory scope — only analyze symbols/files under this path (relative to project root).
+    /// Omit for entire project.
+    pub scope: Option<String>,
+    /// Project root path override
+    pub project_path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RegisterProjectParams {
+    /// Absolute path to the project root to register
+    pub path: String,
+    /// Optional alias for the project (defaults to directory name)
+    pub name: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ListProjectsParams {}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GetDiffParams {
+    /// Name of the base snapshot to compare from
+    pub from: String,
+    /// Name of the target snapshot (omit to compare against current live graph)
+    pub to: Option<String>,
+    /// Project root path override
+    pub project_path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct BatchQueryEntry {
+    /// Tool name: find_symbol, find_references, get_impact, get_context,
+    /// detect_circular, get_stats, get_structure, get_file_summary, get_imports, export_graph, find_dead_code, get_diff
+    pub tool: String,
+    /// Tool parameters as a JSON object (same keys as the individual tool's params)
+    #[schemars(with = "serde_json::Value")]
+    pub params: serde_json::Value,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct BatchQueryParams {
+    /// Array of query objects (max 10)
+    pub queries: Vec<BatchQueryEntry>,
+    /// Project root path override (applies to all queries in the batch)
     pub project_path: Option<String>,
 }
