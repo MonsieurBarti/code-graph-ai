@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -379,21 +379,57 @@ fn apply_staleness_diff(
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn suggest_similar(graph: &CodeGraph, query: &str) -> Vec<String> {
-    let query_lower = query.to_lowercase();
-    let prefix = &query_lower[..query_lower.len().min(3)];
-    let mut matches: Vec<String> = graph
+/// Compute character-level trigrams from a string (lowercased).
+/// Returns an empty set for strings shorter than 3 characters.
+fn trigrams(s: &str) -> HashSet<[char; 3]> {
+    let chars: Vec<char> = s.to_lowercase().chars().collect();
+    if chars.len() < 3 {
+        return HashSet::new();
+    }
+    chars.windows(3).map(|w| [w[0], w[1], w[2]]).collect()
+}
+
+/// Jaccard similarity between two trigram sets: |A ∩ B| / |A ∪ B|.
+/// Returns 0.0 if both sets are empty (no useful comparison possible).
+fn jaccard_similarity(a: &HashSet<[char; 3]>, b: &HashSet<[char; 3]>) -> f32 {
+    let intersection = a.intersection(b).count();
+    let union = a.union(b).count();
+    if union == 0 {
+        return 0.0;
+    }
+    intersection as f32 / union as f32
+}
+
+/// Suggest similar symbol names using trigram Jaccard similarity.
+///
+/// Returns at most 3 candidates with Jaccard >= 0.3, sorted descending by score.
+/// Returns an empty vec for queries shorter than 3 characters (no trigrams to compare).
+fn suggest_similar_fuzzy(graph: &CodeGraph, query: &str) -> Vec<String> {
+    let query_trigrams = trigrams(query);
+    if query_trigrams.is_empty() {
+        return Vec::new();
+    }
+
+    const THRESHOLD: f32 = 0.3;
+
+    let mut scored: Vec<(String, f32)> = graph
         .symbol_index
         .keys()
-        .filter(|name| {
-            let n = name.to_lowercase();
-            n.contains(&query_lower) || n.starts_with(prefix)
+        .filter_map(|name| {
+            let name_trigrams = trigrams(name);
+            let score = jaccard_similarity(&query_trigrams, &name_trigrams);
+            if score >= THRESHOLD {
+                Some((name.clone(), score))
+            } else {
+                None
+            }
         })
-        .cloned()
         .collect();
-    matches.sort();
-    matches.truncate(3);
-    matches
+
+    // Sort descending by score (best match first)
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(3);
+    scored.into_iter().map(|(name, _)| name).collect()
 }
 
 fn not_found_msg(symbol: &str, suggestions: &[String]) -> String {
@@ -438,7 +474,7 @@ impl CodeGraphServer {
         .map_err(|e| e.to_string())?;
 
         if results.is_empty() {
-            let suggestions = suggest_similar(&graph, &p.symbol);
+            let suggestions = suggest_similar_fuzzy(&graph, &p.symbol);
             return Err(not_found_msg(&p.symbol, &suggestions));
         }
 
@@ -475,7 +511,7 @@ impl CodeGraphServer {
             .map_err(|e| e.to_string())?;
 
         if matches.is_empty() {
-            let suggestions = suggest_similar(&graph, &p.symbol);
+            let suggestions = suggest_similar_fuzzy(&graph, &p.symbol);
             return Err(not_found_msg(&p.symbol, &suggestions));
         }
 
@@ -519,7 +555,7 @@ impl CodeGraphServer {
             .map_err(|e| e.to_string())?;
 
         if matches.is_empty() {
-            let suggestions = suggest_similar(&graph, &p.symbol);
+            let suggestions = suggest_similar_fuzzy(&graph, &p.symbol);
             return Err(not_found_msg(&p.symbol, &suggestions));
         }
 
@@ -578,7 +614,7 @@ impl CodeGraphServer {
             .map_err(|e| e.to_string())?;
 
         if matches.is_empty() {
-            let suggestions = suggest_similar(&graph, &p.symbol);
+            let suggestions = suggest_similar_fuzzy(&graph, &p.symbol);
             return Err(not_found_msg(&p.symbol, &suggestions));
         }
 
@@ -695,7 +731,6 @@ impl ServerHandler for CodeGraphServer {
 mod tests {
     use super::*;
     use rmcp::ServerHandler;
-    use std::collections::HashMap;
     use std::path::PathBuf;
 
     #[test]
