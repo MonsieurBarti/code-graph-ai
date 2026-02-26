@@ -21,4 +21,13 @@ if ! RUSTFLAGS="-Dwarnings" cargo clippy --all-targets --all-features; then
     exit 1
 fi
 
+# Run tests (mirrors CI test job: cargo test --all-features)
+echo ""
+echo "Running tests..."
+if ! cargo test --all-features; then
+    echo ""
+    echo "Tests failed. Fix failing tests before pushing."
+    exit 1
+fi
+
 exit 0
