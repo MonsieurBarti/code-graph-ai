@@ -489,6 +489,12 @@ impl CodeGraphServer {
             output
         };
 
+        let first_name = limited.first().map(|r| r.symbol_name.as_str());
+        let output = format!(
+            "{}{}",
+            output,
+            crate::mcp::hints::find_hint(&p.symbol, limited.len(), truncated, first_name)
+        );
         Ok(output)
     }
 
@@ -527,6 +533,11 @@ impl CodeGraphServer {
             output
         };
 
+        let output = format!(
+            "{}{}",
+            output,
+            crate::mcp::hints::refs_hint(&p.symbol)
+        );
         Ok(output)
     }
 
@@ -565,6 +576,11 @@ impl CodeGraphServer {
             output
         };
 
+        let output = format!(
+            "{}{}",
+            output,
+            crate::mcp::hints::impact_hint(&p.symbol)
+        );
         Ok(output)
     }
 
@@ -578,9 +594,9 @@ impl CodeGraphServer {
         let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
 
         let cycles = crate::query::circular::find_circular(&graph, &root);
-        Ok(crate::query::output::format_circular_to_string(
-            &cycles, &root,
-        ))
+        let output = crate::query::output::format_circular_to_string(&cycles, &root);
+        let output = format!("{}{}", output, crate::mcp::hints::circular_hint(cycles.len()));
+        Ok(output)
     }
 
     #[tool(
@@ -607,9 +623,9 @@ impl CodeGraphServer {
             })
             .collect();
 
-        Ok(crate::query::output::format_context_to_string(
-            &contexts, &root,
-        ))
+        let output = crate::query::output::format_context_to_string(&contexts, &root);
+        let output = format!("{}{}", output, crate::mcp::hints::context_hint(&p.symbol));
+        Ok(output)
     }
 
     #[tool(
@@ -619,7 +635,9 @@ impl CodeGraphServer {
         let (graph, _root) = self.resolve_graph(p.project_path.as_deref()).await?;
 
         let stats = crate::query::stats::project_stats(&graph);
-        Ok(crate::query::output::format_stats_to_string(&stats, None))
+        let output = crate::query::output::format_stats_to_string(&stats, None);
+        let output = format!("{}{}", output, crate::mcp::hints::stats_hint());
+        Ok(output)
     }
 
     #[tool(
