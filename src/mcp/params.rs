@@ -103,3 +103,21 @@ pub struct ExportGraphParams {
     /// Project root path override
     pub project_path: Option<String>,
 }
+
+#[derive(Deserialize, JsonSchema)]
+pub struct BatchQueryEntry {
+    /// Tool name: find_symbol, find_references, get_impact, get_context,
+    /// detect_circular, get_stats, get_structure, get_file_summary, get_imports, export_graph
+    pub tool: String,
+    /// Tool parameters as a JSON object (same keys as the individual tool's params)
+    #[schemars(with = "serde_json::Value")]
+    pub params: serde_json::Value,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct BatchQueryParams {
+    /// Array of query objects (max 10)
+    pub queries: Vec<BatchQueryEntry>,
+    /// Project root path override (applies to all queries in the batch)
+    pub project_path: Option<String>,
+}

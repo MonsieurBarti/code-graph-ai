@@ -11,9 +11,9 @@ use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use tokio::sync::RwLock;
 
 use super::params::{
-    DetectCircularParams, ExportGraphParams, FindReferencesParams, FindSymbolParams,
-    GetContextParams, GetFileSummaryParams, GetImpactParams, GetImportsParams, GetStatsParams,
-    GetStructureParams,
+    BatchQueryParams, DetectCircularParams, ExportGraphParams, FindReferencesParams,
+    FindSymbolParams, GetContextParams, GetFileSummaryParams, GetImpactParams, GetImportsParams,
+    GetStatsParams, GetStructureParams,
 };
 use crate::graph::CodeGraph;
 
@@ -464,6 +464,247 @@ fn resolve_sections<'a>(
 }
 
 // ---------------------------------------------------------------------------
+// Batch query helpers
+// ---------------------------------------------------------------------------
+
+/// Format a section header for a batch query result.
+/// Output: `## tool_name(key=val, key=val)`
+/// Only includes non-null params, sorted by key for determinism.
+fn format_query_header(tool: &str, params: &serde_json::Value) -> String {
+    let param_str = if let Some(obj) = params.as_object() {
+        let mut pairs: Vec<String> = obj
+            .iter()
+            .filter(|(_, v)| !v.is_null())
+            .map(|(k, v)| {
+                let val_str = match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                format!("{}={}", k, val_str)
+            })
+            .collect();
+        pairs.sort();
+        pairs.join(", ")
+    } else {
+        String::new()
+    };
+    if param_str.is_empty() {
+        format!("## {}", tool)
+    } else {
+        format!("## {}({})", tool, param_str)
+    }
+}
+
+/// Dispatch a single query by tool name, calling query functions directly.
+///
+/// BATCH-02: This function does NOT call MCP handler methods — it calls query
+/// functions directly so that the graph is resolved exactly once for all N queries.
+/// Hints are NOT appended here; only one combined hint is added by `batch_query`.
+fn dispatch_query(
+    config: &crate::config::McpConfig,
+    graph: &CodeGraph,
+    root: &Path,
+    tool: &str,
+    params: &serde_json::Value,
+) -> Result<String, String> {
+    match tool {
+        "find_symbol" => {
+            let symbol = params["symbol"].as_str().ok_or("missing required param: symbol")?;
+            let limit_param = params["limit"].as_u64().map(|n| n as usize);
+            let kind = params["kind"].as_str();
+            let path = params["path"].as_str();
+
+            let kind_filter: Vec<String> = kind
+                .map(|k| k.split(',').map(|s| s.trim().to_string()).collect())
+                .unwrap_or_default();
+            let file_filter = path.map(Path::new);
+
+            let results = crate::query::find::find_symbol(
+                graph, symbol, false, &kind_filter, file_filter, root, None,
+            )
+            .map_err(|e| e.to_string())?;
+
+            if results.is_empty() {
+                let suggestions = suggest_similar_fuzzy(graph, symbol);
+                return Err(not_found_msg(symbol, &suggestions));
+            }
+
+            let limit = resolve_limit(limit_param, config);
+            let truncated = results.len() > limit;
+            let limited = &results[..results.len().min(limit)];
+            let output = crate::query::output::format_find_to_string(limited, root);
+
+            Ok(if truncated && !config.suppress_summary_line {
+                format!("truncated: {}/{}\n{}", limit, results.len(), output)
+            } else {
+                output
+            })
+        }
+        "find_references" => {
+            let symbol = params["symbol"].as_str().ok_or("missing required param: symbol")?;
+            let limit_param = params["limit"].as_u64().map(|n| n as usize);
+
+            let matches = crate::query::find::match_symbols(graph, symbol, false)
+                .map_err(|e| e.to_string())?;
+            if matches.is_empty() {
+                let suggestions = suggest_similar_fuzzy(graph, symbol);
+                return Err(not_found_msg(symbol, &suggestions));
+            }
+
+            let all_indices: Vec<petgraph::stable_graph::NodeIndex> = matches
+                .iter()
+                .flat_map(|(_, indices)| indices.iter().copied())
+                .collect();
+
+            let results = crate::query::refs::find_refs(graph, symbol, &all_indices, root);
+
+            let limit = resolve_limit(limit_param, config);
+            let truncated = results.len() > limit;
+            let limited = &results[..results.len().min(limit)];
+            let output = crate::query::output::format_refs_to_string(limited, root);
+
+            Ok(if truncated && !config.suppress_summary_line {
+                format!("truncated: {}/{}\n{}", limit, results.len(), output)
+            } else {
+                output
+            })
+        }
+        "get_impact" => {
+            let symbol = params["symbol"].as_str().ok_or("missing required param: symbol")?;
+            let limit_param = params["limit"].as_u64().map(|n| n as usize);
+
+            let matches = crate::query::find::match_symbols(graph, symbol, false)
+                .map_err(|e| e.to_string())?;
+            if matches.is_empty() {
+                let suggestions = suggest_similar_fuzzy(graph, symbol);
+                return Err(not_found_msg(symbol, &suggestions));
+            }
+
+            let all_indices: Vec<petgraph::stable_graph::NodeIndex> = matches
+                .iter()
+                .flat_map(|(_, indices)| indices.iter().copied())
+                .collect();
+
+            let results = crate::query::impact::blast_radius(graph, &all_indices, root);
+
+            let limit = resolve_limit(limit_param, config);
+            let truncated = results.len() > limit;
+            let limited = &results[..results.len().min(limit)];
+            let output = crate::query::output::format_impact_to_string(limited, root);
+
+            Ok(if truncated && !config.suppress_summary_line {
+                format!("truncated: {}/{}\n{}", limit, results.len(), output)
+            } else {
+                output
+            })
+        }
+        "get_context" => {
+            let symbol = params["symbol"].as_str().ok_or("missing required param: symbol")?;
+            let sections_param = params["sections"].as_str();
+
+            let matches = crate::query::find::match_symbols(graph, symbol, false)
+                .map_err(|e| e.to_string())?;
+            if matches.is_empty() {
+                let suggestions = suggest_similar_fuzzy(graph, symbol);
+                return Err(not_found_msg(symbol, &suggestions));
+            }
+
+            let contexts: Vec<crate::query::context::SymbolContext> = matches
+                .iter()
+                .map(|(name, indices)| {
+                    crate::query::context::symbol_context(graph, name, indices, root)
+                })
+                .collect();
+
+            let sections = resolve_sections(sections_param, config);
+            let output = crate::query::output::format_context_to_string(&contexts, root, sections);
+            Ok(output)
+        }
+        "detect_circular" => {
+            let cycles = crate::query::circular::find_circular(graph, root);
+            let output = crate::query::output::format_circular_to_string(&cycles, root);
+            Ok(output)
+        }
+        "get_stats" => {
+            let stats = crate::query::stats::project_stats(graph);
+            let output = crate::query::output::format_stats_to_string(&stats, None);
+            Ok(output)
+        }
+        "get_structure" => {
+            let path = params["path"].as_str().map(std::path::Path::new);
+            let depth = params["depth"].as_u64().map(|n| n as usize).unwrap_or(3);
+            let tree = crate::query::structure::file_structure(graph, root, path, depth);
+            let output = crate::query::output::format_structure_to_string(&tree, root);
+            Ok(output)
+        }
+        "get_file_summary" => {
+            let path_str = params["path"].as_str().ok_or("missing required param: path")?;
+            let file_path = std::path::Path::new(path_str);
+            let summary = crate::query::file_summary::file_summary(graph, root, file_path)?;
+            let output = crate::query::output::format_file_summary_to_string(&summary);
+            Ok(output)
+        }
+        "get_imports" => {
+            let path_str = params["path"].as_str().ok_or("missing required param: path")?;
+            let file_path = std::path::Path::new(path_str);
+            let entries = crate::query::imports::file_imports(graph, root, file_path)?;
+            let output = crate::query::output::format_imports_to_string(&entries, path_str);
+            Ok(output)
+        }
+        "export_graph" => {
+            // Parse format
+            let format = match params["format"].as_str() {
+                Some("mermaid") => crate::export::model::ExportFormat::Mermaid,
+                Some("dot") | None => crate::export::model::ExportFormat::Dot,
+                Some(other) => {
+                    return Err(format!(
+                        "Unknown format '{}'. Use 'dot' or 'mermaid'.",
+                        other
+                    ))
+                }
+            };
+            let granularity = match params["granularity"].as_str() {
+                Some("symbol") => crate::export::model::Granularity::Symbol,
+                Some("package") => crate::export::model::Granularity::Package,
+                Some("file") | None => crate::export::model::Granularity::File,
+                Some(other) => {
+                    return Err(format!(
+                        "Unknown granularity '{}'. Use 'symbol', 'file', or 'package'.",
+                        other
+                    ))
+                }
+            };
+            let exclude_patterns: Vec<String> = params["exclude"]
+                .as_str()
+                .map(|e| e.split(',').map(|s| s.trim().to_string()).collect())
+                .unwrap_or_default();
+            let export_params = crate::export::model::ExportParams {
+                format,
+                granularity,
+                root_filter: params["root"].as_str().map(std::path::PathBuf::from),
+                symbol_filter: params["symbol"].as_str().map(|s| s.to_string()),
+                depth: params["depth"].as_u64().map(|n| n as usize).unwrap_or(1),
+                exclude_patterns,
+                project_root: root.to_path_buf(),
+                stdout: true,
+            };
+            let result =
+                crate::export::export_graph(graph, &export_params).map_err(|e| e.to_string())?;
+            let mut response = format!(
+                "Exported {} nodes, {} edges (format: {:?}, granularity: {:?})\n",
+                result.node_count, result.edge_count, format, granularity
+            );
+            for warning in &result.warnings {
+                response.push_str(&format!("Warning: {}\n", warning));
+            }
+            response.push_str(&result.content);
+            Ok(response)
+        }
+        _ => Err(format!("unknown tool: {}", tool)),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tool implementations
 // ---------------------------------------------------------------------------
 
@@ -770,6 +1011,45 @@ impl CodeGraphServer {
         let hint = crate::mcp::hints::imports_hint(&p.path);
         let output = format!("{}{}", output, hint);
         Ok(output)
+    }
+
+    #[tool(description = "Execute multiple graph queries in a single call. Returns results separated by section headers. Max 10 queries per batch.")]
+    async fn batch_query(
+        &self,
+        Parameters(p): Parameters<BatchQueryParams>,
+    ) -> Result<String, String> {
+        if p.queries.len() > 10 {
+            return Err("batch_query: max 10 queries per batch".to_string());
+        }
+        if p.queries.is_empty() {
+            return Err("batch_query: queries array is empty".to_string());
+        }
+
+        // BATCH-02: Resolve graph ONCE for all queries
+        let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
+
+        let mut sections: Vec<String> = Vec::new();
+        let mut query_meta: Vec<(&str, bool)> = Vec::new();
+
+        for entry in &p.queries {
+            let header = format_query_header(&entry.tool, &entry.params);
+            let result =
+                dispatch_query(&self.mcp_config, &graph, &root, &entry.tool, &entry.params);
+            match result {
+                Ok(output) => {
+                    sections.push(format!("{}\n{}", header, output));
+                    query_meta.push((&entry.tool, true));
+                }
+                Err(e) => {
+                    sections.push(format!("{}\nerror: {}", header, e));
+                    query_meta.push((&entry.tool, false));
+                }
+            }
+        }
+
+        let combined = sections.join("\n\n");
+        let hint = crate::mcp::hints::batch_hint(&query_meta);
+        Ok(format!("{}{}", combined, hint))
     }
 }
 
@@ -1138,6 +1418,72 @@ suppress_summary_line = true
         assert!(
             suggestions.is_empty(),
             "symbol with low Jaccard score should not be suggested"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // format_query_header tests (BATCH-01)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_format_query_header_with_params() {
+        let params = serde_json::json!({"symbol": "Foo", "limit": 10});
+        let header = format_query_header("find_symbol", &params);
+        assert_eq!(
+            header, "## find_symbol(limit=10, symbol=Foo)",
+            "header should sort params alphabetically and format tool(k=v, ...)"
+        );
+    }
+
+    #[test]
+    fn test_format_query_header_no_params() {
+        let params = serde_json::json!({});
+        let header = format_query_header("get_stats", &params);
+        assert_eq!(
+            header, "## get_stats",
+            "header with empty params object should just show tool name"
+        );
+    }
+
+    #[test]
+    fn test_format_query_header_null_params_skipped() {
+        let params = serde_json::json!({"symbol": "Foo", "kind": null});
+        let header = format_query_header("find_symbol", &params);
+        assert_eq!(
+            header, "## find_symbol(symbol=Foo)",
+            "null-valued params should be omitted from header"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // dispatch_query tests (BATCH-02)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_dispatch_unknown_tool() {
+        let config = McpConfig::default();
+        let graph = CodeGraph::default();
+        let root = std::path::Path::new("/tmp");
+        let params = serde_json::json!({});
+        let result = dispatch_query(&config, &graph, root, "nonexistent", &params);
+        assert!(result.is_err(), "unknown tool should return Err");
+        assert!(
+            result.unwrap_err().contains("unknown tool: nonexistent"),
+            "error message should mention the unknown tool name"
+        );
+    }
+
+    #[test]
+    fn test_dispatch_missing_required_param() {
+        let config = McpConfig::default();
+        let graph = CodeGraph::default();
+        let root = std::path::Path::new("/tmp");
+        let params = serde_json::json!({});
+        let result = dispatch_query(&config, &graph, root, "find_symbol", &params);
+        assert!(result.is_err(), "find_symbol without symbol param should return Err");
+        assert!(
+            result.unwrap_err().contains("missing required param"),
+            "error should mention missing required param"
         );
     }
 }

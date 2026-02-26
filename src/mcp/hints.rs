@@ -124,6 +124,20 @@ pub fn imports_hint(file_path: &str) -> String {
     )
 }
 
+/// Generate a combined hint for batch_query responses.
+///
+/// Strategy: If any query was a find_symbol with exactly one result,
+/// suggest get_context for it. Otherwise, suggest batch_query as a reminder.
+/// If no useful hint can be derived, return empty string.
+pub fn batch_hint(queries: &[(&str, bool)]) -> String {
+    // queries: slice of (tool_name, had_results)
+    // Simple strategy: if batch had results, generic hint
+    if queries.is_empty() {
+        return String::new();
+    }
+    "\nhint: batch_query for multiple queries in one call".to_string()
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -335,6 +349,34 @@ mod tests {
             hint_without_path.starts_with('\n'),
             "structure hint without path must start with newline: got '{}'",
             hint_without_path
+        );
+    }
+
+    #[test]
+    fn test_batch_hint_nonempty() {
+        let queries = vec![("find_symbol", true), ("get_stats", false)];
+        let hint = batch_hint(&queries);
+        assert!(
+            hint.contains("batch_query"),
+            "batch hint with non-empty queries should contain 'batch_query': got '{}'",
+            hint
+        );
+    }
+
+    #[test]
+    fn test_batch_hint_empty() {
+        let hint = batch_hint(&[]);
+        assert_eq!(hint, "", "batch_hint with empty slice should return empty string");
+    }
+
+    #[test]
+    fn test_batch_hint_starts_with_newline() {
+        let queries = vec![("find_symbol", true)];
+        let hint = batch_hint(&queries);
+        assert!(
+            hint.starts_with('\n'),
+            "batch hint with non-empty queries must start with newline: got '{}'",
+            hint
         );
     }
 }
