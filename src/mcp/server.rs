@@ -25,15 +25,17 @@ pub struct CodeGraphServer {
     default_project_root: Arc<PathBuf>,
     graph_cache: Arc<RwLock<HashMap<PathBuf, Arc<CodeGraph>>>>,
     watcher_handle: Arc<tokio::sync::Mutex<Option<crate::watcher::WatcherHandle>>>,
+    watch_enabled: bool,
     tool_router: ToolRouter<Self>,
 }
 
 impl CodeGraphServer {
-    pub fn new(project_root: PathBuf) -> Self {
+    pub fn new(project_root: PathBuf, watch: bool) -> Self {
         Self {
             default_project_root: Arc::new(project_root),
             graph_cache: Arc::new(RwLock::new(HashMap::new())),
             watcher_handle: Arc::new(tokio::sync::Mutex::new(None)),
+            watch_enabled: watch,
             tool_router: Self::tool_router(),
         }
     }
@@ -92,7 +94,7 @@ impl CodeGraphServer {
 
         if graph.file_index.is_empty() {
             return Err(format!(
-                "No indexed files found at '{}'. Run 'code-graph index <path>' first.",
+                "No source files found at '{}'. Ensure the directory contains supported files (.ts, .tsx, .js, .jsx, .rs).",
                 path.display()
             ));
         }
@@ -103,7 +105,9 @@ impl CodeGraphServer {
         drop(cache);
 
         // Start watcher lazily (must happen after write lock is dropped)
-        self.ensure_watcher_running(&path).await;
+        if self.watch_enabled {
+            self.ensure_watcher_running(&path).await;
+        }
 
         Ok((graph, path))
     }
@@ -661,7 +665,11 @@ impl ServerHandler for CodeGraphServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(
-                "code-graph: query TypeScript/JavaScript/Rust dependency graphs. Index with 'code-graph index <path>' first.".into(),
+                "code-graph indexes and queries TypeScript/JavaScript/Rust dependency graphs. \
+                 The graph is built automatically on first tool call — no manual indexing needed. \
+                 When started with --watch, file changes are auto-reindexed. \
+                 All tools accept an optional project_path parameter to override the default project root."
+                    .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             ..Default::default()
