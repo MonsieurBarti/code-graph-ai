@@ -12,7 +12,8 @@ use tokio::sync::RwLock;
 
 use super::params::{
     DetectCircularParams, ExportGraphParams, FindReferencesParams, FindSymbolParams,
-    GetContextParams, GetImpactParams, GetStatsParams, GetStructureParams,
+    GetContextParams, GetFileSummaryParams, GetImpactParams, GetImportsParams, GetStatsParams,
+    GetStructureParams,
 };
 use crate::graph::CodeGraph;
 
@@ -719,6 +720,34 @@ impl CodeGraphServer {
         let output = format!("{}{}", output, hint);
         Ok(output)
     }
+
+    #[tool(description = "File overview: exports, imports, symbol count, dependency role, and graph position — without reading source.")]
+    async fn get_file_summary(
+        &self,
+        Parameters(p): Parameters<GetFileSummaryParams>,
+    ) -> Result<String, String> {
+        let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
+        let file_path = std::path::Path::new(&p.path);
+        let summary = crate::query::file_summary::file_summary(&graph, &root, file_path)?;
+        let output = crate::query::output::format_file_summary_to_string(&summary);
+        let hint = crate::mcp::hints::file_summary_hint(&p.path);
+        let output = format!("{}{}", output, hint);
+        Ok(output)
+    }
+
+    #[tool(description = "File import/dependency list classified by type (internal, workspace, external, builtin). Shows re-exports.")]
+    async fn get_imports(
+        &self,
+        Parameters(p): Parameters<GetImportsParams>,
+    ) -> Result<String, String> {
+        let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
+        let file_path = std::path::Path::new(&p.path);
+        let entries = crate::query::imports::file_imports(&graph, &root, file_path)?;
+        let output = crate::query::output::format_imports_to_string(&entries, &p.path);
+        let hint = crate::mcp::hints::imports_hint(&p.path);
+        let output = format!("{}{}", output, hint);
+        Ok(output)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -733,7 +762,9 @@ impl ServerHandler for CodeGraphServer {
                 "code-graph indexes and queries TypeScript/JavaScript/Rust dependency graphs. \
                  The graph is built automatically on first tool call — no manual indexing needed. \
                  When started with --watch, file changes are auto-reindexed. \
-                 All tools accept an optional project_path parameter to override the default project root."
+                 All tools accept an optional project_path parameter to override the default project root. \
+                 Navigation funnel: get_structure (project tree) → get_file_summary (file overview) → \
+                 get_imports (dependency list) → get_context (symbol detail)."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -777,6 +808,11 @@ mod tests {
         assert!(
             instructions.contains("TypeScript") && instructions.contains("Rust"),
             "should mention supported languages"
+        );
+        // NAV funnel: instructions describe the navigation funnel tools
+        assert!(
+            instructions.contains("get_structure") && instructions.contains("get_file_summary") && instructions.contains("get_imports"),
+            "should describe navigation funnel tools"
         );
     }
 

@@ -71,6 +71,22 @@ pub struct GetStructureParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct GetFileSummaryParams {
+    /// Path to the file (relative to project root, or absolute)
+    pub path: String,
+    /// Project root path override
+    pub project_path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GetImportsParams {
+    /// Path to the file (relative to project root, or absolute)
+    pub path: String,
+    /// Project root path override
+    pub project_path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct ExportGraphParams {
     /// Output format: "dot" (default) or "mermaid"
     pub format: Option<String>,

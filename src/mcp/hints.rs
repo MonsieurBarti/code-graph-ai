@@ -104,6 +104,26 @@ pub fn structure_hint(path: Option<&str>) -> String {
     }
 }
 
+/// Generate hint for get_file_summary results.
+///
+/// Points to get_imports as next step in the navigation funnel.
+pub fn file_summary_hint(file_path: &str) -> String {
+    format!(
+        "\nhint: get_imports \"{}\" | alt: get_context \"<symbol>\"",
+        file_path
+    )
+}
+
+/// Generate hint for get_imports results.
+///
+/// Points to get_context as next step for investigating a specific dependency.
+pub fn imports_hint(file_path: &str) -> String {
+    format!(
+        "\nhint: get_context \"<symbol>\" | alt: get_file_summary \"{}\"",
+        file_path
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -230,6 +250,56 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_file_summary_hint() {
+        let hint = file_summary_hint("src/main.rs");
+        assert!(
+            hint.contains("hint: get_imports \"src/main.rs\""),
+            "file_summary hint should include get_imports with path: got '{}'",
+            hint
+        );
+        assert!(
+            hint.contains("alt: get_context"),
+            "file_summary hint should include alt get_context: got '{}'",
+            hint
+        );
+    }
+
+    #[test]
+    fn test_imports_hint() {
+        let hint = imports_hint("src/main.rs");
+        assert!(
+            hint.contains("hint: get_context"),
+            "imports hint should include get_context: got '{}'",
+            hint
+        );
+        assert!(
+            hint.contains("alt: get_file_summary \"src/main.rs\""),
+            "imports hint should include alt get_file_summary with path: got '{}'",
+            hint
+        );
+    }
+
+    #[test]
+    fn test_file_summary_hint_starts_with_newline() {
+        let hint = file_summary_hint("src/lib.rs");
+        assert!(
+            hint.starts_with('\n'),
+            "file_summary hint must start with newline: got '{}'",
+            hint
+        );
+    }
+
+    #[test]
+    fn test_imports_hint_starts_with_newline() {
+        let hint = imports_hint("src/lib.rs");
+        assert!(
+            hint.starts_with('\n'),
+            "imports hint must start with newline: got '{}'",
+            hint
+        );
     }
 
     #[test]
