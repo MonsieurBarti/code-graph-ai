@@ -1,3 +1,4 @@
+pub mod hints;
 mod params;
 mod server;
 
