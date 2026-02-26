@@ -124,6 +124,24 @@ pub fn imports_hint(file_path: &str) -> String {
     )
 }
 
+/// Generate hint for find_dead_code results.
+pub fn dead_code_hint(unreachable_count: usize, unreferenced_count: usize) -> String {
+    if unreachable_count == 0 && unreferenced_count == 0 {
+        return "\nhint: no dead code found — try a broader scope".to_string();
+    }
+    "\nhint: get_file_summary \"<path>\" for details on flagged files".to_string()
+}
+
+/// Generate hint for list_projects results.
+pub fn list_projects_hint() -> String {
+    "\nhint: register_project to add another project | find_dead_code to analyze".to_string()
+}
+
+/// Generate hint for register_project results.
+pub fn register_project_hint(alias: &str) -> String {
+    format!("\nhint: find_symbol \".*\" project_path=\"{}\" to explore", alias)
+}
+
 /// Generate a combined hint for batch_query responses.
 ///
 /// Strategy: If any query was a find_symbol with exactly one result,
@@ -350,6 +368,60 @@ mod tests {
             "structure hint without path must start with newline: got '{}'",
             hint_without_path
         );
+    }
+
+    #[test]
+    fn test_dead_code_hint_no_dead_code() {
+        let hint = dead_code_hint(0, 0);
+        assert!(
+            hint.contains("no dead code found"),
+            "hint with zero dead code should say no dead code found: got '{}'",
+            hint
+        );
+        assert!(hint.starts_with('\n'), "non-empty hint must start with newline");
+    }
+
+    #[test]
+    fn test_dead_code_hint_with_dead_code() {
+        let hint = dead_code_hint(2, 5);
+        assert!(
+            hint.contains("get_file_summary"),
+            "hint with dead code should suggest get_file_summary: got '{}'",
+            hint
+        );
+        assert!(hint.starts_with('\n'), "non-empty hint must start with newline");
+    }
+
+    #[test]
+    fn test_list_projects_hint() {
+        let hint = list_projects_hint();
+        assert!(
+            hint.contains("register_project"),
+            "list_projects hint should mention register_project: got '{}'",
+            hint
+        );
+        assert!(
+            hint.contains("find_dead_code"),
+            "list_projects hint should mention find_dead_code: got '{}'",
+            hint
+        );
+        assert!(hint.starts_with('\n'), "non-empty hint must start with newline");
+    }
+
+    #[test]
+    fn test_register_project_hint() {
+        let hint = register_project_hint("/path/to/project");
+        assert!(
+            hint.contains("find_symbol"),
+            "register_project hint should mention find_symbol: got '{}'",
+            hint
+        );
+        assert!(
+            hint.contains("/path/to/project"),
+            "register_project hint should include the alias: got '{}'",
+            hint
+        );
+        assert!(hint.starts_with('\n'), "non-empty hint must start with newline");
     }
 
     #[test]

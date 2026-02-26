@@ -105,9 +105,29 @@ pub struct ExportGraphParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct FindDeadCodeParams {
+    /// Directory scope — only analyze symbols/files under this path (relative to project root).
+    /// Omit for entire project.
+    pub scope: Option<String>,
+    /// Project root path override
+    pub project_path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RegisterProjectParams {
+    /// Absolute path to the project root to register
+    pub path: String,
+    /// Optional alias for the project (defaults to directory name)
+    pub name: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ListProjectsParams {}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct BatchQueryEntry {
     /// Tool name: find_symbol, find_references, get_impact, get_context,
-    /// detect_circular, get_stats, get_structure, get_file_summary, get_imports, export_graph
+    /// detect_circular, get_stats, get_structure, get_file_summary, get_imports, export_graph, find_dead_code
     pub tool: String,
     /// Tool parameters as a JSON object (same keys as the individual tool's params)
     #[schemars(with = "serde_json::Value")]

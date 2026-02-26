@@ -11,9 +11,9 @@ use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use tokio::sync::RwLock;
 
 use super::params::{
-    BatchQueryParams, DetectCircularParams, ExportGraphParams, FindReferencesParams,
-    FindSymbolParams, GetContextParams, GetFileSummaryParams, GetImpactParams, GetImportsParams,
-    GetStatsParams, GetStructureParams,
+    BatchQueryParams, DetectCircularParams, ExportGraphParams, FindDeadCodeParams,
+    FindReferencesParams, FindSymbolParams, GetContextParams, GetFileSummaryParams, GetImpactParams,
+    GetImportsParams, GetStatsParams, GetStructureParams, ListProjectsParams, RegisterProjectParams,
 };
 use crate::graph::CodeGraph;
 
@@ -29,6 +29,9 @@ pub struct CodeGraphServer {
     watch_enabled: bool,
     mcp_config: crate::config::McpConfig,
     tool_router: ToolRouter<Self>,
+    /// Registry of additional project roots with optional aliases.
+    /// Maps absolute project path -> alias name (for display).
+    registered_projects: Arc<RwLock<HashMap<PathBuf, String>>>,
 }
 
 impl CodeGraphServer {
@@ -41,6 +44,7 @@ impl CodeGraphServer {
             watch_enabled: watch,
             mcp_config: config.mcp,
             tool_router: Self::tool_router(),
+            registered_projects: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -500,12 +504,15 @@ fn format_query_header(tool: &str, params: &serde_json::Value) -> String {
 /// BATCH-02: This function does NOT call MCP handler methods — it calls query
 /// functions directly so that the graph is resolved exactly once for all N queries.
 /// Hints are NOT appended here; only one combined hint is added by `batch_query`.
+///
+/// `registered_projects`: optional registry of additional project roots (for list_projects).
 fn dispatch_query(
     config: &crate::config::McpConfig,
     graph: &CodeGraph,
     root: &Path,
     tool: &str,
     params: &serde_json::Value,
+    registered_projects: Option<&HashMap<PathBuf, String>>,
 ) -> Result<String, String> {
     match tool {
         "find_symbol" => {
@@ -699,6 +706,33 @@ fn dispatch_query(
             }
             response.push_str(&result.content);
             Ok(response)
+        }
+        "find_dead_code" => {
+            let scope = params["scope"].as_str().map(std::path::Path::new);
+            let result = crate::query::dead_code::find_dead_code(graph, root, scope);
+            let output = crate::query::output::format_dead_code_to_string(&result, root);
+            Ok(output)
+        }
+        "list_projects" => {
+            // In batch context, we have access to registered_projects (if provided by caller)
+            let default_path = root;
+            let cache_has_default = graph.file_count() > 0; // graph is already resolved for this root
+            let mut lines = vec![format!(
+                "* {} (default, {})",
+                default_path.display(),
+                if cache_has_default { "indexed" } else { "not indexed" }
+            )];
+            if let Some(registry) = registered_projects {
+                for (path, alias) in registry.iter() {
+                    if path == default_path {
+                        continue;
+                    }
+                    // We don't have access to graph_cache here, so we can't check indexed status
+                    // Report as "registered" without index status
+                    lines.push(format!("* {} [{}]", path.display(), alias));
+                }
+            }
+            Ok(lines.join("\n"))
         }
         _ => Err(format!("unknown tool: {}", tool)),
     }
@@ -1013,6 +1047,87 @@ impl CodeGraphServer {
         Ok(output)
     }
 
+    #[tool(description = "Detect unreferenced symbols and unreachable files within a path scope. Returns dead code candidates grouped by file. Entry points (main, pub, exports, trait impls, tests) are excluded.")]
+    async fn find_dead_code(
+        &self,
+        Parameters(p): Parameters<FindDeadCodeParams>,
+    ) -> Result<String, String> {
+        let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
+        let scope = p.scope.as_deref().map(std::path::Path::new);
+        let result = crate::query::dead_code::find_dead_code(&graph, &root, scope);
+        let unreferenced_count: usize = result
+            .unreferenced_symbols
+            .iter()
+            .map(|(_, syms)| syms.len())
+            .sum();
+        let output = crate::query::output::format_dead_code_to_string(&result, &root);
+        let hint =
+            crate::mcp::hints::dead_code_hint(result.unreachable_files.len(), unreferenced_count);
+        Ok(format!("{}{}", output, hint))
+    }
+
+    #[tool(description = "Register a new project root for multi-project querying. Indexes immediately. Use project_path on other tools to query this project.")]
+    async fn register_project(
+        &self,
+        Parameters(p): Parameters<RegisterProjectParams>,
+    ) -> Result<String, String> {
+        let path = PathBuf::from(&p.path);
+        if !path.exists() {
+            return Err(format!("path '{}' does not exist", p.path));
+        }
+        let alias = p.name.unwrap_or_else(|| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string()
+        });
+        // Force immediate indexing
+        let _ = self.resolve_graph(Some(&p.path)).await?;
+        // Record alias
+        let mut registry = self.registered_projects.write().await;
+        registry.insert(path, alias.clone());
+        let output = format!("registered '{}' at {} — ready to query", alias, p.path);
+        let hint = crate::mcp::hints::register_project_hint(&p.path);
+        Ok(format!("{}{}", output, hint))
+    }
+
+    #[tool(description = "List all registered project roots in this server session.")]
+    async fn list_projects(
+        &self,
+        Parameters(_p): Parameters<ListProjectsParams>,
+    ) -> Result<String, String> {
+        let registry = self.registered_projects.read().await;
+        let cache = self.graph_cache.read().await;
+        let default_path = &*self.default_project_root;
+        let mut lines = vec![format!(
+            "* {} (default, {})",
+            default_path.display(),
+            if cache.contains_key(default_path) {
+                "indexed"
+            } else {
+                "not indexed"
+            }
+        )];
+        for (path, alias) in registry.iter() {
+            if path == default_path {
+                continue;
+            }
+            lines.push(format!(
+                "* {} [{}] ({})",
+                path.display(),
+                alias,
+                if cache.contains_key(path) {
+                    "indexed"
+                } else {
+                    "not indexed"
+                }
+            ));
+        }
+        let output = lines.join("\n");
+        let hint = crate::mcp::hints::list_projects_hint();
+        Ok(format!("{}{}", output, hint))
+    }
+
     #[tool(description = "Execute multiple graph queries in a single call. Returns results separated by section headers. Max 10 queries per batch.")]
     async fn batch_query(
         &self,
@@ -1028,13 +1143,22 @@ impl CodeGraphServer {
         // BATCH-02: Resolve graph ONCE for all queries
         let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
 
+        // Read the registered projects registry for list_projects support in batch
+        let registry_guard = self.registered_projects.read().await;
+
         let mut sections: Vec<String> = Vec::new();
         let mut query_meta: Vec<(&str, bool)> = Vec::new();
 
         for entry in &p.queries {
             let header = format_query_header(&entry.tool, &entry.params);
-            let result =
-                dispatch_query(&self.mcp_config, &graph, &root, &entry.tool, &entry.params);
+            let result = dispatch_query(
+                &self.mcp_config,
+                &graph,
+                &root,
+                &entry.tool,
+                &entry.params,
+                Some(&*registry_guard),
+            );
             match result {
                 Ok(output) => {
                     sections.push(format!("{}\n{}", header, output));
@@ -1067,7 +1191,9 @@ impl ServerHandler for CodeGraphServer {
                  When started with --watch, file changes are auto-reindexed. \
                  All tools accept an optional project_path parameter to override the default project root. \
                  Navigation funnel: get_structure (project tree) → get_file_summary (file overview) → \
-                 get_imports (dependency list) → get_context (symbol detail)."
+                 get_imports (dependency list) → get_context (symbol detail). \
+                 Dead code analysis: find_dead_code detects unreferenced symbols and unreachable files. \
+                 Multi-project support: register_project adds a new project root; list_projects shows all registered projects."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -1465,7 +1591,7 @@ suppress_summary_line = true
         let graph = CodeGraph::default();
         let root = std::path::Path::new("/tmp");
         let params = serde_json::json!({});
-        let result = dispatch_query(&config, &graph, root, "nonexistent", &params);
+        let result = dispatch_query(&config, &graph, root, "nonexistent", &params, None);
         assert!(result.is_err(), "unknown tool should return Err");
         assert!(
             result.unwrap_err().contains("unknown tool: nonexistent"),
@@ -1479,11 +1605,78 @@ suppress_summary_line = true
         let graph = CodeGraph::default();
         let root = std::path::Path::new("/tmp");
         let params = serde_json::json!({});
-        let result = dispatch_query(&config, &graph, root, "find_symbol", &params);
+        let result = dispatch_query(&config, &graph, root, "find_symbol", &params, None);
         assert!(result.is_err(), "find_symbol without symbol param should return Err");
         assert!(
             result.unwrap_err().contains("missing required param"),
             "error should mention missing required param"
+        );
+    }
+
+    #[test]
+    fn test_dispatch_unknown_tool_updated() {
+        let config = McpConfig::default();
+        let graph = CodeGraph::default();
+        let root = std::path::Path::new("/tmp");
+        let params = serde_json::json!({});
+        let result = dispatch_query(&config, &graph, root, "nonexistent_v2", &params, None);
+        assert!(result.is_err(), "unknown tool should return Err");
+    }
+
+    #[test]
+    fn test_dispatch_find_dead_code() {
+        let config = McpConfig::default();
+        let mut graph = CodeGraph::default();
+        let root = std::path::Path::new("/tmp/project");
+        // Add a file with no importers
+        let file_path = root.join("src/unused.rs");
+        graph.add_file(file_path.clone(), "rust");
+
+        let params = serde_json::json!({});
+        let result = dispatch_query(&config, &graph, root, "find_dead_code", &params, None);
+        assert!(result.is_ok(), "find_dead_code should succeed: {:?}", result);
+        let output = result.unwrap();
+        assert!(
+            output.contains("unreachable files"),
+            "output should contain unreachable files section"
+        );
+    }
+
+    #[test]
+    fn test_dispatch_register_project_not_in_batch() {
+        // register_project is not in dispatch_query — it should return unknown tool error
+        let config = McpConfig::default();
+        let graph = CodeGraph::default();
+        let root = std::path::Path::new("/tmp");
+        let params = serde_json::json!({"path": "/tmp"});
+        let result = dispatch_query(&config, &graph, root, "register_project", &params, None);
+        assert!(result.is_err(), "register_project should not be available in batch");
+        assert!(
+            result.unwrap_err().contains("unknown tool"),
+            "error should say unknown tool"
+        );
+    }
+
+    #[test]
+    fn test_dispatch_list_projects_in_batch() {
+        let config = McpConfig::default();
+        let graph = CodeGraph::default();
+        let root = std::path::Path::new("/tmp/project");
+        let params = serde_json::json!({});
+
+        let mut registry = HashMap::new();
+        registry.insert(
+            PathBuf::from("/tmp/other_project"),
+            "other".to_string(),
+        );
+
+        let result =
+            dispatch_query(&config, &graph, root, "list_projects", &params, Some(&registry));
+        assert!(result.is_ok(), "list_projects should work in batch: {:?}", result);
+        let output = result.unwrap();
+        assert!(
+            output.contains("/tmp/project"),
+            "output should contain default project path"
         );
     }
 }
