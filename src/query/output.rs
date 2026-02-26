@@ -2518,3 +2518,59 @@ pub fn format_dead_code_to_string(
 
     lines.join("\n")
 }
+
+// ---------------------------------------------------------------------------
+// Diff output
+// ---------------------------------------------------------------------------
+
+/// Format a GraphDiff as a compact string for MCP output.
+///
+/// Example:
+/// ```text
+/// files: +2 -1
+/// +  src/new_module.rs
+/// -  src/removed.rs
+///
+/// symbols: +3 -2 ~1
+/// +  src/new_module.rs :: new_function
+/// -  src/removed.rs :: old_function
+/// ~  src/utils.rs :: parse_input (line 10 → 15, callers 3 → 5)
+/// ```
+pub fn format_diff_to_string(diff: &crate::query::diff::GraphDiff) -> String {
+    let mut lines: Vec<String> = Vec::new();
+
+    // Files header
+    lines.push(format!(
+        "files: +{} -{}",
+        diff.added_files.len(),
+        diff.removed_files.len()
+    ));
+    for f in &diff.added_files {
+        lines.push(format!("+  {}", f));
+    }
+    for f in &diff.removed_files {
+        lines.push(format!("-  {}", f));
+    }
+
+    lines.push(String::new()); // blank separator
+
+    // Symbols header
+    lines.push(format!(
+        "symbols: +{} -{} ~{}",
+        diff.added_symbols.len(),
+        diff.removed_symbols.len(),
+        diff.modified_symbols.len()
+    ));
+    for (file, sym) in &diff.added_symbols {
+        lines.push(format!("+  {} :: {}", file, sym));
+    }
+    for (file, sym) in &diff.removed_symbols {
+        lines.push(format!("-  {} :: {}", file, sym));
+    }
+    for change in &diff.modified_symbols {
+        let change_str = change.changes.join(", ");
+        lines.push(format!("~  {} :: {} ({})", change.file, change.name, change_str));
+    }
+
+    lines.join("\n")
+}
