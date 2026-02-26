@@ -484,13 +484,7 @@ impl CodeGraphServer {
         let output = crate::query::output::format_find_to_string(limited, &root);
 
         let output = if truncated {
-            let after_first_line = output.find('\n').map(|i| &output[i + 1..]).unwrap_or("");
-            format!(
-                "showing {}/{} definitions (increase limit for more)\n{}",
-                limit,
-                results.len(),
-                after_first_line
-            )
+            format!("truncated: {}/{}\n{}", limit, results.len(), output)
         } else {
             output
         };
@@ -528,13 +522,7 @@ impl CodeGraphServer {
         let output = crate::query::output::format_refs_to_string(limited, &root);
 
         let output = if truncated {
-            let after_first_line = output.find('\n').map(|i| &output[i + 1..]).unwrap_or("");
-            format!(
-                "showing {}/{} references (increase limit for more)\n{}",
-                limit,
-                results.len(),
-                after_first_line
-            )
+            format!("truncated: {}/{}\n{}", limit, results.len(), output)
         } else {
             output
         };
@@ -572,13 +560,7 @@ impl CodeGraphServer {
         let output = crate::query::output::format_impact_to_string(limited, &root);
 
         let output = if truncated {
-            let after_first_line = output.find('\n').map(|i| &output[i + 1..]).unwrap_or("");
-            format!(
-                "showing {}/{} affected files (increase limit for more)\n{}",
-                limit,
-                results.len(),
-                after_first_line
-            )
+            format!("truncated: {}/{}\n{}", limit, results.len(), output)
         } else {
             output
         };

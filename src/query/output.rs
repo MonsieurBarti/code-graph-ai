@@ -1770,3 +1770,214 @@ pub fn format_circular_results(cycles: &[CircularDep], format: &OutputFormat, pr
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Unit tests for MCP formatters
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::graph::node::{SymbolKind, SymbolVisibility};
+    use crate::query::circular::CircularDep;
+    use crate::query::context::{CallInfo, SymbolContext};
+    use crate::query::find::FindResult;
+    use crate::query::impact::ImpactResult;
+    use crate::query::refs::{RefKind, RefResult};
+
+    fn make_find_result(name: &str, path: &str, line: usize, kind: SymbolKind) -> FindResult {
+        FindResult {
+            symbol_name: name.to_string(),
+            kind,
+            file_path: PathBuf::from(path),
+            line,
+            col: 0,
+            is_exported: false,
+            is_default: false,
+            visibility: SymbolVisibility::Private,
+        }
+    }
+
+    #[test]
+    fn test_mcp_find_format_no_prefix() {
+        let root = PathBuf::from("/project");
+        let results = vec![make_find_result(
+            "MyFunc",
+            "/project/src/foo.ts",
+            10,
+            SymbolKind::Function,
+        )];
+        let output = format_find_to_string(&results, &root);
+
+        // Must NOT contain old prefix
+        assert!(!output.contains("def "), "output should not contain 'def ' prefix");
+        // Must NOT contain old summary line
+        assert!(
+            !output.contains("definitions found"),
+            "output should not contain 'definitions found' summary"
+        );
+        // Must contain new compact format: path:line name kind
+        assert!(
+            output.contains("src/foo.ts:10 MyFunc function"),
+            "output should contain compact format 'src/foo.ts:10 MyFunc function', got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_mcp_refs_format_no_prefix() {
+        let root = PathBuf::from("/project");
+        let results = vec![
+            RefResult {
+                file_path: PathBuf::from("/project/src/bar.ts"),
+                ref_kind: RefKind::Import,
+                symbol_name: None,
+                line: None,
+            },
+            RefResult {
+                file_path: PathBuf::from("/project/src/baz.ts"),
+                ref_kind: RefKind::Call,
+                symbol_name: Some("callerFn".to_string()),
+                line: Some(42),
+            },
+        ];
+        let output = format_refs_to_string(&results, &root);
+
+        // Must NOT contain old prefix
+        assert!(!output.contains("ref "), "output should not contain 'ref ' prefix");
+        // Must NOT contain old summary line
+        assert!(
+            !output.contains("references found"),
+            "output should not contain 'references found' summary"
+        );
+        // Must contain new compact formats
+        assert!(
+            output.contains("src/bar.ts import"),
+            "output should contain import ref format, got: {output}"
+        );
+        assert!(
+            output.contains("src/baz.ts:42 call callerFn"),
+            "output should contain call ref format, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_mcp_impact_format_no_prefix() {
+        let root = PathBuf::from("/project");
+        let results = vec![ImpactResult {
+            file_path: PathBuf::from("/project/src/affected.ts"),
+            depth: 1,
+        }];
+        let output = format_impact_to_string(&results, &root);
+
+        // Must NOT contain old prefix
+        assert!(!output.contains("impact "), "output should not contain 'impact ' prefix");
+        // Must NOT contain old summary line
+        assert!(
+            !output.contains("affected files"),
+            "output should not contain 'affected files' summary"
+        );
+        // Must contain bare path
+        assert!(
+            output.contains("src/affected.ts"),
+            "output should contain relative path, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_mcp_circular_format_no_prefix() {
+        let root = PathBuf::from("/project");
+        let cycles = vec![CircularDep {
+            files: vec![
+                PathBuf::from("/project/src/a.ts"),
+                PathBuf::from("/project/src/b.ts"),
+                PathBuf::from("/project/src/a.ts"),
+            ],
+        }];
+        let output = format_circular_to_string(&cycles, &root);
+
+        // Must NOT contain old prefix
+        assert!(!output.contains("cycle "), "output should not contain 'cycle ' prefix");
+        // Must NOT contain old summary line
+        assert!(
+            !output.contains("circular dependencies found"),
+            "output should not contain 'circular dependencies found' summary"
+        );
+        // Must contain arrow chain format
+        assert!(
+            output.contains("src/a.ts -> src/b.ts -> src/a.ts"),
+            "output should contain arrow-chain format, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_mcp_context_format_no_delimiters() {
+        let root = PathBuf::from("/project");
+        let def = make_find_result("MyStruct", "/project/src/lib.rs", 5, SymbolKind::Struct);
+        let caller = CallInfo {
+            symbol_name: "main".to_string(),
+            kind: SymbolKind::Function,
+            file_path: PathBuf::from("/project/src/main.rs"),
+            line: 20,
+        };
+        let ctx = SymbolContext {
+            symbol_name: "MyStruct".to_string(),
+            definitions: vec![def],
+            references: vec![],
+            callees: vec![],
+            callers: vec![caller],
+            extends: vec![],
+            implements: vec![],
+            extended_by: vec![],
+            implemented_by: vec![],
+        };
+        let output = format_context_to_string(&[ctx], &root);
+
+        // Must NOT contain old section delimiters
+        assert!(!output.contains("--- "), "output should not contain '--- ' delimiter lines");
+        // Must NOT contain old symbol prefix
+        assert!(!output.contains("symbol "), "output should not contain 'symbol ' prefix");
+        // Must NOT contain old summary
+        assert!(!output.contains(" symbols"), "output should not contain 'N symbols' summary");
+        // Must NOT contain old "called-by " prefix
+        assert!(
+            !output.contains("called-by "),
+            "output should not contain 'called-by ' prefix"
+        );
+        // Symbol name as bare header
+        assert!(
+            output.contains("MyStruct"),
+            "output should contain symbol name, got: {output}"
+        );
+        // Definition in compact format: path:line kind
+        assert!(
+            output.contains("src/lib.rs:5 struct"),
+            "output should contain definition in compact format, got: {output}"
+        );
+        // Caller in compact format: caller_name path:line
+        assert!(
+            output.contains("main src/main.rs:20"),
+            "output should contain caller in compact format, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_truncation_format() {
+        // Verify the truncation prefix string format used in server handlers.
+        let limit = 20usize;
+        let total = 45usize;
+        let formatted_output = "src/foo.ts:10 MyFunc function\n";
+        let truncated_output =
+            format!("truncated: {}/{}\n{}", limit, total, formatted_output);
+
+        assert!(
+            truncated_output.starts_with("truncated: 20/45\n"),
+            "truncated output should start with 'truncated: N/total\\n', got: {truncated_output}"
+        );
+        assert!(
+            truncated_output.contains("src/foo.ts:10 MyFunc function"),
+            "truncated output should include formatted results"
+        );
+    }
+}
