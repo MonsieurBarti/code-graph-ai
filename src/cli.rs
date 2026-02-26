@@ -251,3 +251,45 @@ pub enum Commands {
         exclude: Vec<String>,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_mcp_accepts_watch_flag() {
+        let cli = Cli::parse_from(["code-graph", "mcp", "--watch"]);
+        match cli.command {
+            Commands::Mcp { path, watch } => {
+                assert!(watch, "--watch flag should be true");
+                assert!(path.is_none(), "path should be None when not specified");
+            }
+            _ => panic!("expected Mcp command"),
+        }
+    }
+
+    #[test]
+    fn test_mcp_without_watch_flag() {
+        let cli = Cli::parse_from(["code-graph", "mcp"]);
+        match cli.command {
+            Commands::Mcp { path, watch } => {
+                assert!(!watch, "--watch flag should default to false");
+                assert!(path.is_none(), "path should be None when not specified");
+            }
+            _ => panic!("expected Mcp command"),
+        }
+    }
+
+    #[test]
+    fn test_mcp_with_path_and_watch() {
+        let cli = Cli::parse_from(["code-graph", "mcp", "--watch", "/some/path"]);
+        match cli.command {
+            Commands::Mcp { path, watch } => {
+                assert!(watch, "--watch flag should be true");
+                assert_eq!(path, Some(PathBuf::from("/some/path")));
+            }
+            _ => panic!("expected Mcp command"),
+        }
+    }
+}
