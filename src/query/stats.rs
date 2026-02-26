@@ -66,6 +66,21 @@ pub struct ProjectStats {
     pub builtin_usage_count: usize,
     /// Number of edges pointing to ExternalPackage nodes (usage count).
     pub external_usage_count: usize,
+    // Phase 12: Non-parsed file counts
+    /// Total number of non-parsed (non-source) files in the graph.
+    pub non_parsed_files: usize,
+    /// Count of doc files (FileKind::Doc).
+    pub doc_files: usize,
+    /// Count of config files (FileKind::Config).
+    pub config_files: usize,
+    /// Count of CI files (FileKind::Ci).
+    pub ci_files: usize,
+    /// Count of asset files (FileKind::Asset).
+    pub asset_files: usize,
+    /// Count of other non-parsed files (FileKind::Other).
+    pub other_files: usize,
+    /// Count of source files (FileKind::Source) -- for clarity in output.
+    pub source_files: usize,
 }
 
 /// Compute project statistics from a built `CodeGraph`.
@@ -194,6 +209,27 @@ pub fn project_stats(graph: &CodeGraph) -> ProjectStats {
     // ---------------------------------------------------------------------------
     let rust_crate_stats = compute_crate_stats(graph);
 
+    // Phase 12: Count files by FileKind
+    let mut source_files = 0usize;
+    let mut doc_files = 0usize;
+    let mut config_files = 0usize;
+    let mut ci_files = 0usize;
+    let mut asset_files = 0usize;
+    let mut other_files = 0usize;
+    for idx in graph.graph.node_indices() {
+        if let GraphNode::File(ref fi) = graph.graph[idx] {
+            match fi.kind {
+                crate::graph::node::FileKind::Source => source_files += 1,
+                crate::graph::node::FileKind::Doc => doc_files += 1,
+                crate::graph::node::FileKind::Config => config_files += 1,
+                crate::graph::node::FileKind::Ci => ci_files += 1,
+                crate::graph::node::FileKind::Asset => asset_files += 1,
+                crate::graph::node::FileKind::Other => other_files += 1,
+            }
+        }
+    }
+    let non_parsed_files = doc_files + config_files + ci_files + asset_files + other_files;
+
     ProjectStats {
         file_count: graph.file_index.len(),
         symbol_count: graph.symbol_count(),
@@ -224,6 +260,14 @@ pub fn project_stats(graph: &CodeGraph) -> ProjectStats {
         builtin_count,
         builtin_usage_count,
         external_usage_count,
+        // Phase 12: Non-parsed file counts
+        non_parsed_files,
+        doc_files,
+        config_files,
+        ci_files,
+        asset_files,
+        other_files,
+        source_files,
     }
 }
 

@@ -315,6 +315,24 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
 
     match format {
         OutputFormat::Compact => {
+            // File overview line
+            if stats.non_parsed_files > 0 {
+                println!(
+                    "{} files ({} source, {} non-parsed), {} symbols",
+                    stats.file_count,
+                    stats.source_files,
+                    stats.non_parsed_files,
+                    stats.symbol_count
+                );
+                println!(
+                    "non-parsed: doc {} config {} ci {} asset {} other {}",
+                    stats.doc_files,
+                    stats.config_files,
+                    stats.ci_files,
+                    stats.asset_files,
+                    stats.other_files,
+                );
+            }
             // Per-language sections with per-language counts and combined totals.
             if show_rust && has_rust {
                 let rust_symbol_total = stats.rust_fns
@@ -429,8 +447,21 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
 
             if show_totals || show_rust && !show_ts || show_ts && !show_rust {
                 println!("{}", header("=== Project Overview ==="));
-                println!("Files:    {}", stats.file_count);
+                println!(
+                    "Files:    {} ({} source, {} non-parsed)",
+                    stats.file_count, stats.source_files, stats.non_parsed_files
+                );
                 println!("Symbols:  {}", stats.symbol_count);
+                if stats.non_parsed_files > 0 {
+                    println!(
+                        "  doc: {} config: {} ci: {} asset: {} other: {}",
+                        stats.doc_files,
+                        stats.config_files,
+                        stats.ci_files,
+                        stats.asset_files,
+                        stats.other_files
+                    );
+                }
                 println!();
             }
 
@@ -552,6 +583,13 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
 
             let json = serde_json::json!({
                 "file_count": stats.file_count,
+                "source_files": stats.source_files,
+                "non_parsed_files": stats.non_parsed_files,
+                "doc_files": stats.doc_files,
+                "config_files": stats.config_files,
+                "ci_files": stats.ci_files,
+                "asset_files": stats.asset_files,
+                "other_files": stats.other_files,
                 "symbol_count": stats.symbol_count,
                 "functions": stats.functions,
                 "classes": stats.classes,
@@ -1376,10 +1414,22 @@ pub fn format_stats_to_string(stats: &ProjectStats, language_filter: Option<&str
 
     writeln!(
         buf,
-        "{} files, {} symbols",
-        stats.file_count, stats.symbol_count
+        "{} files ({} source, {} non-parsed), {} symbols",
+        stats.file_count, stats.source_files, stats.non_parsed_files, stats.symbol_count
     )
     .unwrap();
+    if stats.non_parsed_files > 0 {
+        writeln!(
+            buf,
+            "non-parsed: doc {} config {} ci {} asset {} other {}",
+            stats.doc_files,
+            stats.config_files,
+            stats.ci_files,
+            stats.asset_files,
+            stats.other_files,
+        )
+        .unwrap();
+    }
 
     if show_rust && has_rust {
         let rust_symbol_total = stats.rust_fns
