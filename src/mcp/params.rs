@@ -125,9 +125,19 @@ pub struct RegisterProjectParams {
 pub struct ListProjectsParams {}
 
 #[derive(Deserialize, JsonSchema)]
+pub struct GetDiffParams {
+    /// Name of the base snapshot to compare from
+    pub from: String,
+    /// Name of the target snapshot (omit to compare against current live graph)
+    pub to: Option<String>,
+    /// Project root path override
+    pub project_path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct BatchQueryEntry {
     /// Tool name: find_symbol, find_references, get_impact, get_context,
-    /// detect_circular, get_stats, get_structure, get_file_summary, get_imports, export_graph, find_dead_code
+    /// detect_circular, get_stats, get_structure, get_file_summary, get_imports, export_graph, find_dead_code, get_diff
     pub tool: String,
     /// Tool parameters as a JSON object (same keys as the individual tool's params)
     #[schemars(with = "serde_json::Value")]

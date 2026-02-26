@@ -197,6 +197,43 @@ fn parse_language_filter(lang_str: Option<&str>) -> Result<Option<&'static str>>
     }
 }
 
+/// Format a Unix epoch timestamp (seconds) as a basic UTC date-time string.
+///
+/// Produces output like "2026-02-26 15:30:00 UTC" without external dependencies.
+/// Uses a simplified Gregorian calendar calculation accurate for dates 1970-2100.
+fn format_epoch_secs(secs: u64) -> String {
+    // Days since Unix epoch
+    let days = secs / 86400;
+    let time_of_day = secs % 86400;
+    let hour = time_of_day / 3600;
+    let minute = (time_of_day % 3600) / 60;
+    let second = time_of_day % 60;
+
+    // Gregorian calendar conversion
+    let mut y = 1970u64;
+    let mut remaining = days;
+    loop {
+        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
+        if remaining < days_in_year {
+            break;
+        }
+        remaining -= days_in_year;
+        y += 1;
+    }
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let month_days: [u64; 12] = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut m = 0usize;
+    for (i, &md) in month_days.iter().enumerate() {
+        if remaining < md {
+            m = i + 1;
+            break;
+        }
+        remaining -= md;
+    }
+    let d = remaining + 1;
+    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC", y, m, d, hour, minute, second)
+}
+
 /// Returns true if the file at `path` belongs to the given language string.
 ///
 /// Determines language from file extension. Used for post-filtering results
@@ -764,6 +801,34 @@ async fn main() -> Result<()> {
                 std::env::current_dir().expect("cannot determine current directory")
             });
             mcp::run(project_root, watch).await?;
+        }
+
+        Commands::Snapshot { action } => {
+            match action {
+                cli::SnapshotAction::Create { name, path } => {
+                    let graph = build_graph(&path, false)?;
+                    crate::query::diff::create_snapshot(&graph, &path, &name)?;
+                    println!("snapshot '{}' created", name);
+                }
+                cli::SnapshotAction::List { path } => {
+                    let snapshots = crate::query::diff::list_snapshots(&path)?;
+                    if snapshots.is_empty() {
+                        println!("no snapshots found");
+                    } else {
+                        for (name, created_at) in &snapshots {
+                            // Format timestamp as basic UTC without chrono dependency.
+                            // Using UNIX_EPOCH + duration and a simple epoch display.
+                            let secs = *created_at;
+                            let dt = format_epoch_secs(secs);
+                            println!("  {} ({})", name, dt);
+                        }
+                    }
+                }
+                cli::SnapshotAction::Delete { name, path } => {
+                    crate::query::diff::delete_snapshot(&path, &name)?;
+                    println!("snapshot '{}' deleted", name);
+                }
+            }
         }
 
         Commands::Export {

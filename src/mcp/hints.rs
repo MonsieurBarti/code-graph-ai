@@ -142,6 +142,17 @@ pub fn register_project_hint(alias: &str) -> String {
     format!("\nhint: find_symbol \".*\" project_path=\"{}\" to explore", alias)
 }
 
+/// Generate hint for get_diff results.
+///
+/// - `has_changes`: whether the diff detected any changes
+pub fn diff_hint(has_changes: bool) -> String {
+    if has_changes {
+        "\nhint: find_dead_code to check if changes introduced dead code".to_string()
+    } else {
+        "\nhint: no changes detected — verify snapshot names".to_string()
+    }
+}
+
 /// Generate a combined hint for batch_query responses.
 ///
 /// Strategy: If any query was a find_symbol with exactly one result,
@@ -450,5 +461,27 @@ mod tests {
             "batch hint with non-empty queries must start with newline: got '{}'",
             hint
         );
+    }
+
+    #[test]
+    fn test_diff_hint_with_changes() {
+        let hint = diff_hint(true);
+        assert!(
+            hint.contains("find_dead_code"),
+            "diff hint with changes should suggest find_dead_code: got '{}'",
+            hint
+        );
+        assert!(hint.starts_with('\n'), "non-empty hint must start with newline");
+    }
+
+    #[test]
+    fn test_diff_hint_no_changes() {
+        let hint = diff_hint(false);
+        assert!(
+            hint.contains("no changes detected"),
+            "diff hint with no changes should say no changes: got '{}'",
+            hint
+        );
+        assert!(hint.starts_with('\n'), "non-empty hint must start with newline");
     }
 }

@@ -4,6 +4,33 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::export;
 
+/// Action for the `snapshot` subcommand.
+#[derive(Subcommand, Debug)]
+pub enum SnapshotAction {
+    /// Create a named snapshot of the current graph state.
+    Create {
+        /// Snapshot name (alphanumeric, hyphens, underscores only).
+        name: String,
+        /// Path to the project root (defaults to current directory).
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
+    /// List all stored snapshots with creation timestamps.
+    List {
+        /// Path to the project root (defaults to current directory).
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
+    /// Delete a named snapshot.
+    Delete {
+        /// Snapshot name to delete.
+        name: String,
+        /// Path to the project root (defaults to current directory).
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
+}
+
 /// A high-performance code intelligence engine for TypeScript/JavaScript codebases.
 ///
 /// code-graph indexes your codebase into a queryable dependency graph, enabling
@@ -217,6 +244,12 @@ pub enum Commands {
         path: PathBuf,
     },
 
+    /// Create, list, or delete graph snapshots for diff comparisons.
+    Snapshot {
+        #[command(subcommand)]
+        action: SnapshotAction,
+    },
+
     /// Export the code graph to DOT or Mermaid format for architectural visualization.
     Export {
         /// Path to the project root to index and export.
@@ -290,6 +323,50 @@ mod tests {
                 assert_eq!(path, Some(PathBuf::from("/some/path")));
             }
             _ => panic!("expected Mcp command"),
+        }
+    }
+
+    #[test]
+    fn test_snapshot_create_parses() {
+        let cli = Cli::parse_from(["code-graph", "snapshot", "create", "my-snap"]);
+        match cli.command {
+            Commands::Snapshot { action } => match action {
+                SnapshotAction::Create { name, path } => {
+                    assert_eq!(name, "my-snap");
+                    assert_eq!(path, PathBuf::from("."));
+                }
+                _ => panic!("expected Create action"),
+            },
+            _ => panic!("expected Snapshot command"),
+        }
+    }
+
+    #[test]
+    fn test_snapshot_list_parses() {
+        let cli = Cli::parse_from(["code-graph", "snapshot", "list"]);
+        match cli.command {
+            Commands::Snapshot { action } => match action {
+                SnapshotAction::List { path } => {
+                    assert_eq!(path, PathBuf::from("."));
+                }
+                _ => panic!("expected List action"),
+            },
+            _ => panic!("expected Snapshot command"),
+        }
+    }
+
+    #[test]
+    fn test_snapshot_delete_parses() {
+        let cli = Cli::parse_from(["code-graph", "snapshot", "delete", "my-snap"]);
+        match cli.command {
+            Commands::Snapshot { action } => match action {
+                SnapshotAction::Delete { name, path } => {
+                    assert_eq!(name, "my-snap");
+                    assert_eq!(path, PathBuf::from("."));
+                }
+                _ => panic!("expected Delete action"),
+            },
+            _ => panic!("expected Snapshot command"),
         }
     }
 }

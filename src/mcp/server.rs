@@ -12,8 +12,9 @@ use tokio::sync::RwLock;
 
 use super::params::{
     BatchQueryParams, DetectCircularParams, ExportGraphParams, FindDeadCodeParams,
-    FindReferencesParams, FindSymbolParams, GetContextParams, GetFileSummaryParams, GetImpactParams,
-    GetImportsParams, GetStatsParams, GetStructureParams, ListProjectsParams, RegisterProjectParams,
+    FindReferencesParams, FindSymbolParams, GetContextParams, GetDiffParams, GetFileSummaryParams,
+    GetImpactParams, GetImportsParams, GetStatsParams, GetStructureParams, ListProjectsParams,
+    RegisterProjectParams,
 };
 use crate::graph::CodeGraph;
 
@@ -734,6 +735,13 @@ fn dispatch_query(
             }
             Ok(lines.join("\n"))
         }
+        "get_diff" => {
+            let from = params["from"].as_str().ok_or("missing required param: from")?;
+            let to = params["to"].as_str();
+            let diff = crate::query::diff::compute_diff(root, from, to, graph)?;
+            let output = crate::query::output::format_diff_to_string(&diff);
+            Ok(output)
+        }
         _ => Err(format!("unknown tool: {}", tool)),
     }
 }
@@ -1066,6 +1074,20 @@ impl CodeGraphServer {
         Ok(format!("{}{}", output, hint))
     }
 
+    #[tool(description = "Compare the current graph against a named snapshot, or compare two snapshots. Reports added/removed/modified files and symbols.")]
+    async fn get_diff(&self, Parameters(p): Parameters<GetDiffParams>) -> Result<String, String> {
+        let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
+        let diff = crate::query::diff::compute_diff(&root, &p.from, p.to.as_deref(), &graph)?;
+        let has_changes = !diff.added_files.is_empty()
+            || !diff.removed_files.is_empty()
+            || !diff.added_symbols.is_empty()
+            || !diff.removed_symbols.is_empty()
+            || !diff.modified_symbols.is_empty();
+        let output = crate::query::output::format_diff_to_string(&diff);
+        let hint = crate::mcp::hints::diff_hint(has_changes);
+        Ok(format!("{}{}", output, hint))
+    }
+
     #[tool(description = "Register a new project root for multi-project querying. Indexes immediately. Use project_path on other tools to query this project.")]
     async fn register_project(
         &self,
@@ -1193,7 +1215,8 @@ impl ServerHandler for CodeGraphServer {
                  Navigation funnel: get_structure (project tree) → get_file_summary (file overview) → \
                  get_imports (dependency list) → get_context (symbol detail). \
                  Dead code analysis: find_dead_code detects unreferenced symbols and unreachable files. \
-                 Multi-project support: register_project adds a new project root; list_projects shows all registered projects."
+                 Multi-project support: register_project adds a new project root; list_projects shows all registered projects. \
+                 Snapshot/diff workflow: Use code-graph snapshot create <name> to save a baseline, then get_diff to see what changed."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
