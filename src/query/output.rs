@@ -2316,3 +2316,140 @@ fn format_nodes(nodes: &[StructureNode], depth: usize, lines: &mut Vec<String>) 
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// FileSummary formatter
+// ---------------------------------------------------------------------------
+
+/// Render a `FileSummary` to a compact string (MCP format, no trailing newline).
+///
+/// Format:
+/// ```text
+/// src/mcp/server.rs
+/// role: utility
+/// lines: 729
+/// symbols: 7 (3 fn, 1 struct, 3 function)
+/// exports: get_structure (fn), get_file_summary (fn)
+/// imports: 12
+/// importers: 0
+/// graph: leaf
+/// ```
+///
+/// - `symbols:` shows total then parenthesized kind breakdown (only kinds with > 0 count).
+/// - `exports:` lists ALL exported symbols — no truncation.
+/// - `graph:` line is omitted if graph_label is None.
+pub fn format_file_summary_to_string(summary: &crate::query::file_summary::FileSummary) -> String {
+    use crate::query::file_summary::{FileRole, GraphLabel};
+
+    let mut lines: Vec<String> = Vec::new();
+
+    // Line 1: relative path
+    lines.push(summary.relative_path.clone());
+
+    // role:
+    let role_str = match summary.role {
+        FileRole::EntryPoint => "entry_point",
+        FileRole::LibraryRoot => "library_root",
+        FileRole::Test => "test",
+        FileRole::Config => "config",
+        FileRole::Types => "types",
+        FileRole::Utility => "utility",
+    };
+    lines.push(format!("role: {}", role_str));
+
+    // lines:
+    lines.push(format!("lines: {}", summary.line_count));
+
+    // symbols: N (breakdown by kind)
+    if summary.symbol_count == 0 {
+        lines.push("symbols: 0".to_string());
+    } else if summary.symbol_kinds.is_empty() {
+        lines.push(format!("symbols: {}", summary.symbol_count));
+    } else {
+        // Build sorted kind breakdown string (sorted alphabetically for determinism)
+        let mut kinds: Vec<(&String, &usize)> = summary.symbol_kinds.iter().collect();
+        kinds.sort_by_key(|(k, _)| k.as_str());
+        let breakdown: String = kinds
+            .iter()
+            .map(|(k, count)| format!("{} {}", count, k))
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!("symbols: {} ({})", summary.symbol_count, breakdown));
+    }
+
+    // exports:
+    if summary.exports.is_empty() {
+        lines.push("exports: none".to_string());
+    } else {
+        let export_list: String = summary
+            .exports
+            .iter()
+            .map(|e| format!("{} ({})", e.name, e.kind))
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!("exports: {}", export_list));
+    }
+
+    // imports: / importers:
+    lines.push(format!("imports: {}", summary.import_count));
+    lines.push(format!("importers: {}", summary.importer_count));
+
+    // graph: (only if Some)
+    if let Some(ref label) = summary.graph_label {
+        let label_str = match label {
+            GraphLabel::Hub => "hub",
+            GraphLabel::Leaf => "leaf",
+            GraphLabel::Bridge => "bridge",
+        };
+        lines.push(format!("graph: {}", label_str));
+    }
+
+    lines.join("\n")
+}
+
+// ---------------------------------------------------------------------------
+// Imports formatter
+// ---------------------------------------------------------------------------
+
+/// Render a list of `ImportEntry` items to a compact string (MCP format, no trailing newline).
+///
+/// Format:
+/// ```text
+/// src/mcp/server.rs imports:
+/// ./params (internal)
+/// ../graph (internal)
+/// rmcp (external)
+/// tokio (external)
+/// std::sync (builtin)
+/// crate::query::structure [re-export] (internal)
+/// ```
+///
+/// - If no imports, shows `{file_path} imports: none`.
+/// - `[re-export]` label only appears when `is_reexport` is true.
+/// - Insertion order preserved (no sorting or grouping).
+pub fn format_imports_to_string(entries: &[crate::query::imports::ImportEntry], file_path: &str) -> String {
+    use crate::query::imports::ImportCategory;
+
+    if entries.is_empty() {
+        return format!("{} imports: none", file_path);
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format!("{} imports:", file_path));
+
+    for entry in entries {
+        let category_str = match entry.category {
+            ImportCategory::Internal => "internal",
+            ImportCategory::Workspace => "workspace",
+            ImportCategory::External => "external",
+            ImportCategory::Builtin => "builtin",
+        };
+        if entry.is_reexport {
+            lines.push(format!("{} [re-export] ({})", entry.specifier, category_str));
+        } else {
+            lines.push(format!("{} ({})", entry.specifier, category_str));
+        }
+    }
+
+    lines.join("\n")
+}
