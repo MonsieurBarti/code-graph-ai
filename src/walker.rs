@@ -64,6 +64,60 @@ pub fn walk_project(
     Ok(files)
 }
 
+/// Walk a project directory and collect non-parsed files (everything that is not a source file).
+///
+/// Respects `.gitignore` rules, always excludes `node_modules`, applies any
+/// additional exclusions from `config.exclude`. Returns files that are NOT
+/// source code (not in SOURCE_EXTENSIONS).
+///
+/// These files will be added to the graph as File nodes with a kind tag but
+/// will NOT have symbol extraction or import resolution.
+pub fn walk_non_parsed_files(
+    root: &Path,
+    config: &CodeGraphConfig,
+) -> anyhow::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+
+    let walker = ignore::WalkBuilder::new(root)
+        .standard_filters(true)
+        .require_git(false)
+        .build();
+
+    for result in walker {
+        let entry = match result {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        let path = entry.path();
+
+        // Skip directories
+        if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+            continue;
+        }
+
+        // Exclude node_modules (hard exclusion)
+        if path_contains_node_modules(path) {
+            continue;
+        }
+
+        // Apply config exclusions (IDX-03: reuses same logic as source file walking)
+        if is_excluded_by_config(path, config) {
+            continue;
+        }
+
+        // INVERT the source extension filter: collect files that are NOT source files
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if SOURCE_EXTENSIONS.contains(&ext) {
+            continue; // skip source files -- they are handled by walk_project
+        }
+
+        files.push(path.to_path_buf());
+    }
+
+    Ok(files)
+}
+
 /// Resolve workspace glob patterns from package.json to concrete directory paths.
 fn detect_workspace_roots(root: &Path) -> Vec<PathBuf> {
     let mut roots = vec![root.to_path_buf()];
