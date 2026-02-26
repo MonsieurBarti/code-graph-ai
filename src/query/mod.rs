@@ -5,3 +5,4 @@ pub mod impact;
 pub mod output;
 pub mod refs;
 pub mod stats;
+pub mod structure;

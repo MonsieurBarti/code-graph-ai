@@ -1,6 +1,8 @@
 use std::io::IsTerminal;
 use std::path::Path;
 
+use crate::query::structure::StructureNode;
+
 use crate::cli::OutputFormat;
 use crate::graph::node::SymbolVisibility;
 use crate::query::circular::CircularDep;
@@ -2249,5 +2251,68 @@ mod tests {
             !output.contains("omitted:"),
             "omitted line should NOT appear when no filter, got: {output}"
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Structure formatter
+// ---------------------------------------------------------------------------
+
+/// Render a structure tree to an indented compact string.
+///
+/// Format:
+/// ```text
+/// src/
+///   mcp/
+///     server.rs
+///       pub get_structure (fn)
+///   query/
+///     structure.rs
+///       pub file_structure (fn)
+/// README.md [doc]
+/// Cargo.toml [config]
+/// ```
+///
+/// Rules:
+/// - 2 spaces per depth level.
+/// - Directories end with `/`.
+/// - Source files show symbols indented one level deeper.
+/// - Non-parsed files show `[kind_tag]` after the filename.
+/// - Symbols: visibility prefix (if pub or pub(crate)), then `name (kind)`.
+/// - Truncation nodes render as `... (N more items)`.
+/// - No trailing newline.
+pub fn format_structure_to_string(tree: &[StructureNode], _root: &Path) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    format_nodes(tree, 0, &mut lines);
+    lines.join("\n")
+}
+
+fn format_nodes(nodes: &[StructureNode], depth: usize, lines: &mut Vec<String>) {
+    let indent = "  ".repeat(depth);
+    for node in nodes {
+        match node {
+            StructureNode::Dir { name, children } => {
+                lines.push(format!("{}{}/", indent, name));
+                format_nodes(children, depth + 1, lines);
+            }
+            StructureNode::SourceFile { name, symbols } => {
+                lines.push(format!("{}{}", indent, name));
+                let sym_indent = "  ".repeat(depth + 1);
+                for sym in symbols {
+                    let prefix = match sym.visibility.as_str() {
+                        "pub" => "pub ",
+                        "pub(crate)" => "pub(crate) ",
+                        _ => "",
+                    };
+                    lines.push(format!("{}{}{} ({})", sym_indent, prefix, sym.name, sym.kind));
+                }
+            }
+            StructureNode::NonParsedFile { name, kind_tag } => {
+                lines.push(format!("{}{} [{}]", indent, name, kind_tag));
+            }
+            StructureNode::Truncated { count } => {
+                lines.push(format!("{}... ({} more items)", indent, count));
+            }
+        }
     }
 }
