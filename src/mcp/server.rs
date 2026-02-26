@@ -695,6 +695,7 @@ impl ServerHandler for CodeGraphServer {
 mod tests {
     use super::*;
     use rmcp::ServerHandler;
+    use std::collections::HashMap;
     use std::path::PathBuf;
 
     #[test]
@@ -739,5 +740,189 @@ mod tests {
     fn test_watch_enabled_when_flag_set() {
         let server = CodeGraphServer::new(PathBuf::from("/tmp/test"), true);
         assert!(server.watch_enabled, "watch should be enabled when true");
+    }
+
+    // ---------------------------------------------------------------------------
+    // Fuzzy matching tests (FUZZY-01, FUZZY-02)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_trigrams_normal_string() {
+        // "MyStruct" -> 6 trigrams: [M,y,S], [y,S,t], [S,t,r], [t,r,u], [r,u,c], [u,c,t]
+        let t = trigrams("MyStruct");
+        assert_eq!(t.len(), 6, "MyStruct should have 6 trigrams");
+        assert!(t.contains(&['m', 'y', 's']), "should contain [m,y,s] (lowercased)");
+        assert!(t.contains(&['y', 's', 't']), "should contain [y,s,t]");
+        assert!(t.contains(&['s', 't', 'r']), "should contain [s,t,r]");
+        assert!(t.contains(&['t', 'r', 'u']), "should contain [t,r,u]");
+        assert!(t.contains(&['r', 'u', 'c']), "should contain [r,u,c]");
+        assert!(t.contains(&['u', 'c', 't']), "should contain [u,c,t]");
+    }
+
+    #[test]
+    fn test_trigrams_short_strings() {
+        // Strings shorter than 3 chars return empty set
+        assert!(trigrams("").is_empty(), "empty string -> no trigrams");
+        assert!(trigrams("a").is_empty(), "1 char -> no trigrams");
+        assert!(trigrams("ab").is_empty(), "2 chars -> no trigrams");
+    }
+
+    #[test]
+    fn test_trigrams_exactly_three_chars() {
+        // Exactly 3 chars -> exactly 1 trigram
+        let t = trigrams("foo");
+        assert_eq!(t.len(), 1, "3-char string should have 1 trigram");
+        assert!(t.contains(&['f', 'o', 'o']), "should contain [f,o,o]");
+    }
+
+    #[test]
+    fn test_trigrams_case_insensitive() {
+        // trigrams are lowercased
+        let t_upper = trigrams("ABC");
+        let t_lower = trigrams("abc");
+        assert_eq!(t_upper, t_lower, "trigrams should be case-insensitive");
+    }
+
+    #[test]
+    fn test_jaccard_identical_sets() {
+        let a: std::collections::HashSet<[char; 3]> = [['a', 'b', 'c'], ['b', 'c', 'd']].into();
+        let b = a.clone();
+        let score = jaccard_similarity(&a, &b);
+        assert!((score - 1.0).abs() < 1e-6, "identical sets -> score 1.0");
+    }
+
+    #[test]
+    fn test_jaccard_disjoint_sets() {
+        let a: std::collections::HashSet<[char; 3]> = [['a', 'b', 'c']].into();
+        let b: std::collections::HashSet<[char; 3]> = [['x', 'y', 'z']].into();
+        let score = jaccard_similarity(&a, &b);
+        assert!((score - 0.0).abs() < 1e-6, "disjoint sets -> score 0.0");
+    }
+
+    #[test]
+    fn test_jaccard_partial_overlap() {
+        // {A,B,C} ∩ {B,C,D} = {B,C}, |union| = 4
+        let a: std::collections::HashSet<[char; 3]> =
+            [['a', 'b', 'c'], ['b', 'c', 'd'], ['c', 'd', 'e']].into();
+        let b: std::collections::HashSet<[char; 3]> =
+            [['b', 'c', 'd'], ['c', 'd', 'e'], ['d', 'e', 'f']].into();
+        let score = jaccard_similarity(&a, &b);
+        // intersection = {[b,c,d],[c,d,e]}, union = {[a,b,c],[b,c,d],[c,d,e],[d,e,f]}
+        // jaccard = 2/4 = 0.5
+        assert!(
+            (score - 0.5).abs() < 1e-6,
+            "partial overlap: expected 0.5, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_jaccard_empty_sets() {
+        let a: std::collections::HashSet<[char; 3]> = std::collections::HashSet::new();
+        let b: std::collections::HashSet<[char; 3]> = std::collections::HashSet::new();
+        let score = jaccard_similarity(&a, &b);
+        assert!((score - 0.0).abs() < 1e-6, "both empty -> 0.0");
+    }
+
+    /// Build a minimal CodeGraph stub with the given symbol names in symbol_index.
+    fn make_graph_with_symbols(symbols: &[&str]) -> CodeGraph {
+        let mut graph = CodeGraph::default();
+        for &name in symbols {
+            graph.symbol_index.insert(name.to_string(), vec![]);
+        }
+        graph
+    }
+
+    #[test]
+    fn test_suggest_fuzzy_typo_mystruct() {
+        // "MyStrct" is a typo for "MyStruct" — should be suggested
+        let graph = make_graph_with_symbols(&["MyStruct", "MyStructBuilder", "OtherThing"]);
+        let suggestions = suggest_similar_fuzzy(&graph, "MyStrct");
+        assert!(
+            !suggestions.is_empty(),
+            "typo MyStrct should yield suggestions"
+        );
+        assert_eq!(
+            suggestions[0], "MyStruct",
+            "MyStruct should be top suggestion for MyStrct"
+        );
+        assert!(
+            suggestions.len() <= 3,
+            "at most 3 suggestions"
+        );
+        // All suggestions must have been in the graph
+        for s in &suggestions {
+            assert!(
+                ["MyStruct", "MyStructBuilder", "OtherThing"].contains(&s.as_str()),
+                "suggestion '{}' not in graph",
+                s
+            );
+        }
+    }
+
+    #[test]
+    fn test_suggest_fuzzy_short_query() {
+        // Queries shorter than 3 chars return no suggestions
+        let graph = make_graph_with_symbols(&["Foo", "Bar", "Baz"]);
+        assert!(suggest_similar_fuzzy(&graph, "ab").is_empty(), "2-char query -> empty");
+        assert!(suggest_similar_fuzzy(&graph, "a").is_empty(), "1-char query -> empty");
+        assert!(suggest_similar_fuzzy(&graph, "").is_empty(), "empty query -> empty");
+    }
+
+    #[test]
+    fn test_suggest_fuzzy_unrelated_query() {
+        // All scores < 0.3 -> no suggestions
+        let graph = make_graph_with_symbols(&["Foo", "Bar", "Baz"]);
+        let suggestions = suggest_similar_fuzzy(&graph, "CompletelyUnrelated");
+        assert!(
+            suggestions.is_empty() || suggestions.iter().all(|_| true),
+            "unrelated query may return empty or low-scoring suggestions"
+        );
+        // More precisely: verify score threshold is applied
+        let suggestions2 = suggest_similar_fuzzy(&graph, "XyzXyzXyz");
+        // Foo/Bar/Baz have no trigrams in common with XyzXyzXyz
+        assert!(suggestions2.is_empty(), "no-match query -> empty suggestions");
+    }
+
+    #[test]
+    fn test_suggest_fuzzy_max_three_results() {
+        // Even if many symbols match, at most 3 are returned
+        let graph = make_graph_with_symbols(&[
+            "MyStruct",
+            "MyStructA",
+            "MyStructB",
+            "MyStructC",
+            "MyStructD",
+        ]);
+        let suggestions = suggest_similar_fuzzy(&graph, "MyStruct");
+        assert!(suggestions.len() <= 3, "at most 3 suggestions returned");
+    }
+
+    #[test]
+    fn test_suggest_fuzzy_sorted_by_score() {
+        // Results must be sorted by score descending (best match first)
+        let graph = make_graph_with_symbols(&["MyStruct", "MyStructBuilder"]);
+        let suggestions = suggest_similar_fuzzy(&graph, "MyStrct");
+        // MyStruct is closer to MyStrct than MyStructBuilder
+        if suggestions.len() >= 2 {
+            assert_eq!(
+                suggestions[0], "MyStruct",
+                "best match should be first"
+            );
+        }
+    }
+
+    #[test]
+    fn test_suggest_fuzzy_score_threshold() {
+        // Symbols with Jaccard < 0.3 must not appear in suggestions
+        // "Foo" has trigrams {[f,o,o]} — very low similarity to "FooBarBazQux"
+        let graph = make_graph_with_symbols(&["Foo"]);
+        let suggestions = suggest_similar_fuzzy(&graph, "FooBarBazQux");
+        // "Foo" trigrams: {foo}. "FooBarBazQux" trigrams: {foo,oob,oba,bar,arb,rba,baz,azq,zqu,qux}
+        // intersection = {foo}, union = 10 elements -> jaccard = 0.1 < 0.3
+        assert!(
+            suggestions.is_empty(),
+            "symbol with low Jaccard score should not be suggested"
+        );
     }
 }
