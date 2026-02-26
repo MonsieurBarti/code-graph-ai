@@ -72,18 +72,83 @@ pub struct SymbolInfo {
     pub trait_impl: Option<String>,
 }
 
+/// Classification of a file's role in the project.
+///
+/// Source files have full symbol extraction and import resolution.
+/// All other kinds are indexed as File nodes only (no symbols, no imports).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum FileKind {
+    /// Source code file with symbol extraction (ts, tsx, js, jsx, rs).
+    Source,
+    /// Documentation file (md, txt, rst, adoc).
+    Doc,
+    /// Configuration file (toml, yaml, yml, json, ini, env, cfg, xml, etc.).
+    Config,
+    /// CI/CD file (files in .github/, .gitlab/, .circleci/, or named Jenkinsfile).
+    Ci,
+    /// Asset file (images, fonts, media).
+    Asset,
+    /// Any other non-source file.
+    Other,
+}
+
+impl Default for FileKind {
+    fn default() -> Self {
+        FileKind::Source
+    }
+}
+
+/// Classify a file path into a `FileKind` based on its extension and path components.
+///
+/// CI classification is path-based (files inside `.github/`, `.gitlab/`, `.circleci/`).
+/// All other classification is extension-based.
+pub fn classify_file_kind(path: &std::path::Path) -> FileKind {
+    // Check CI directories first (path-based, not extension-based)
+    if path.components().any(|c| {
+        let s = c.as_os_str().to_str().unwrap_or("");
+        s == ".github" || s == ".gitlab" || s == ".circleci"
+    }) {
+        return FileKind::Ci;
+    }
+
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    match ext {
+        // Source files
+        "ts" | "tsx" | "js" | "jsx" | "rs" => FileKind::Source,
+        // Documentation
+        "md" | "txt" | "rst" | "adoc" => FileKind::Doc,
+        // Configuration
+        "toml" | "yaml" | "yml" | "json" | "ini" | "env" | "cfg"
+        | "conf" | "properties" | "xml" => FileKind::Config,
+        // Assets
+        "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico" | "woff"
+        | "woff2" | "ttf" | "eot" | "mp3" | "mp4" | "webm" | "pdf" => FileKind::Asset,
+        // Special files by name
+        _ => {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            match name {
+                "Dockerfile" | "Makefile" | "Jenkinsfile" | "Procfile" => FileKind::Config,
+                ".gitlab-ci.yml" => FileKind::Ci,
+                _ => FileKind::Other,
+            }
+        }
+    }
+}
+
 /// Metadata about a source file.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FileInfo {
     /// Canonical path to the file.
     pub path: PathBuf,
-    /// The language grammar used: "typescript", "tsx", "javascript", or "rust".
+    /// The language grammar used: "typescript", "tsx", "javascript", "rust", or empty for non-parsed.
     pub language: String,
     /// The owning crate's normalized name (hyphens replaced by underscores).
     ///
     /// `None` for TypeScript/JavaScript files; set during Rust indexing when
     /// the crate's Cargo.toml is parsed. Used for per-crate stats breakdowns.
     pub crate_name: Option<String>,
+    /// Classification of this file's role (source, doc, config, ci, asset, other).
+    pub kind: FileKind,
 }
 
 /// Metadata about an external package (node_modules dependency).

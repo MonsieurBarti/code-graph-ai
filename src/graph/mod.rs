@@ -52,6 +52,27 @@ impl CodeGraph {
             path: path.clone(),
             language: language.to_owned(),
             crate_name: None,
+            kind: node::FileKind::Source,
+        };
+        let idx = self.graph.add_node(GraphNode::File(info));
+        self.file_index.insert(path, idx);
+        idx
+    }
+
+    /// Add a non-parsed file node to the graph. Returns the new node's index.
+    /// If the file has already been added, returns the existing index.
+    ///
+    /// Non-parsed files have no symbol extraction or import resolution.
+    /// They appear as File nodes with a kind tag (doc, config, ci, asset, other).
+    pub fn add_non_parsed_file(&mut self, path: PathBuf, kind: node::FileKind) -> NodeIndex {
+        if let Some(&existing) = self.file_index.get(&path) {
+            return existing;
+        }
+        let info = FileInfo {
+            path: path.clone(),
+            language: String::new(),
+            crate_name: None,
+            kind,
         };
         let idx = self.graph.add_node(GraphNode::File(info));
         self.file_index.insert(path, idx);
