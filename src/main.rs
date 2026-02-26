@@ -27,7 +27,8 @@ use language::LanguageKind;
 use output::{IndexStats, print_summary};
 use parser::ParseResult;
 use parser::imports::ImportKind;
-use walker::walk_project;
+use graph::node::classify_file_kind;
+use walker::{walk_non_parsed_files, walk_project};
 
 /// Rust-specific symbol counts, separated from TS/JS counts for mixed-language projects.
 struct RustSymbolCounts {
@@ -288,6 +289,13 @@ pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
     populate_rust_crate_names(&mut graph, path);
 
     resolver::resolve_all(&mut graph, path, &parse_results, verbose);
+
+    // Phase 12: Discover and add non-parsed files as File nodes (no symbols, no imports).
+    let non_parsed = walk_non_parsed_files(path, &config)?;
+    for file_path in non_parsed {
+        let kind = classify_file_kind(&file_path);
+        graph.add_non_parsed_file(file_path, kind);
+    }
 
     Ok(graph)
 }
