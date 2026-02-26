@@ -231,7 +231,13 @@ fn apply_staleness_diff(
     // Walk current files
     let config = crate::config::CodeGraphConfig::load(project_root);
     let current_files = crate::walker::walk_project(project_root, &config, false, None)?;
-    let current_set: std::collections::HashSet<PathBuf> = current_files.iter().cloned().collect();
+
+    // Phase 12: Also walk non-parsed files to prevent false "deleted" detection.
+    // Non-parsed files are in the cached graph's file_index but walk_project only returns source files.
+    let non_parsed_files = crate::walker::walk_non_parsed_files(project_root, &config)?;
+    let mut current_set: std::collections::HashSet<PathBuf> =
+        current_files.iter().cloned().collect();
+    current_set.extend(non_parsed_files.iter().cloned());
 
     // Find changed and new files
     let mut files_to_reparse: Vec<PathBuf> = Vec::new();
@@ -356,6 +362,14 @@ fn apply_staleness_diff(
             all_parse_results.insert(path, result);
         }
         crate::resolver::resolve_all(&mut graph, project_root, &all_parse_results, false);
+    }
+
+    // Phase 12: Add any new non-parsed files discovered on this cold start
+    for file_path in &non_parsed_files {
+        if !graph.file_index.contains_key(file_path) {
+            let kind = crate::graph::node::classify_file_kind(file_path);
+            graph.add_non_parsed_file(file_path.clone(), kind);
+        }
     }
 
     Ok(graph)
@@ -674,5 +688,56 @@ impl ServerHandler for CodeGraphServer {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             ..Default::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rmcp::ServerHandler;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_get_info_describes_auto_indexing() {
+        let server = CodeGraphServer::new(PathBuf::from("/tmp/test"), false);
+        let info = server.get_info();
+        let instructions = info.instructions.expect("instructions should be set");
+        // SRV-01: Does not tell users to manually index
+        assert!(
+            !instructions.contains("Index with"),
+            "should not mention manual indexing"
+        );
+        // SRV-03: Mentions auto-indexing
+        assert!(
+            instructions.contains("automatically"),
+            "should mention automatic indexing"
+        );
+        // SRV-03: Mentions --watch
+        assert!(
+            instructions.contains("--watch"),
+            "should mention --watch flag"
+        );
+        // SRV-03: Mentions project_path override
+        assert!(
+            instructions.contains("project_path"),
+            "should mention project_path override"
+        );
+        // SRV-03: Mentions all supported languages
+        assert!(
+            instructions.contains("TypeScript") && instructions.contains("Rust"),
+            "should mention supported languages"
+        );
+    }
+
+    #[test]
+    fn test_watch_disabled_by_default() {
+        let server = CodeGraphServer::new(PathBuf::from("/tmp/test"), false);
+        assert!(!server.watch_enabled, "watch should be disabled when false");
+    }
+
+    #[test]
+    fn test_watch_enabled_when_flag_set() {
+        let server = CodeGraphServer::new(PathBuf::from("/tmp/test"), true);
+        assert!(server.watch_enabled, "watch should be enabled when true");
     }
 }
