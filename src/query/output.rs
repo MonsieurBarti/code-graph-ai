@@ -1332,11 +1332,11 @@ pub fn format_context_results(
 // MCP String-returning formatters (siblings of the println!-based CLI formatters)
 // ---------------------------------------------------------------------------
 
-/// Format find results to a String in compact format for MCP tool responses.
+/// Format find results to a String in compact prefix-free format for MCP tool responses.
 ///
-/// Summary header (total count) is written FIRST, before any result lines,
-/// so Claude can count-check results at a glance (CONTEXT.md locked decision).
-/// In mixed-language results, groups by language with `--- {Language} ---` headers.
+/// No summary line. No "def " prefix. Line format: `{rel_path}:{line} {symbol_name} {kind}`
+/// (with optional visibility suffix for Rust). In mixed-language results, groups by language
+/// with `--- {Language} ---` section headers.
 pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> String {
     use std::fmt::Write;
     let show_vis = any_non_private(results);
@@ -1355,7 +1355,6 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
     }
 
     let mut buf = String::new();
-    writeln!(buf, "{} definitions found", results.len()).unwrap();
     let mut last_lang: Option<&'static str> = None;
     for r in &sorted {
         if mixed {
@@ -1372,10 +1371,10 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
         if show_vis {
             writeln!(
                 buf,
-                "def {} {}:{} {} {}",
-                r.symbol_name,
+                "{}:{} {} {} {}",
                 rel.display(),
                 r.line,
+                r.symbol_name,
                 kind_to_str(&r.kind),
                 visibility_str(&r.visibility),
             )
@@ -1383,10 +1382,10 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
         } else {
             writeln!(
                 buf,
-                "def {} {}:{} {}",
-                r.symbol_name,
+                "{}:{} {} {}",
                 rel.display(),
                 r.line,
+                r.symbol_name,
                 kind_to_str(&r.kind)
             )
             .unwrap();
@@ -1533,13 +1532,14 @@ pub fn format_stats_to_string(stats: &ProjectStats, language_filter: Option<&str
     buf
 }
 
-/// Format reference results to a String in compact format for MCP tool responses.
+/// Format reference results to a String in compact prefix-free format for MCP tool responses.
 ///
-/// Summary header (total count) is written FIRST.
+/// No summary line. No "ref " prefix. Line formats:
+/// - Import: `{rel_path} import`
+/// - Call:   `{rel_path}:{line} call {caller_name}`
 pub fn format_refs_to_string(results: &[RefResult], project_root: &Path) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
-    writeln!(buf, "{} references found", results.len()).unwrap();
     for r in results {
         let rel = r
             .file_path
@@ -1547,43 +1547,41 @@ pub fn format_refs_to_string(results: &[RefResult], project_root: &Path) -> Stri
             .unwrap_or(&r.file_path);
         match r.ref_kind {
             RefKind::Import => {
-                writeln!(buf, "ref {} import", rel.display()).unwrap();
+                writeln!(buf, "{} import", rel.display()).unwrap();
             }
             RefKind::Call => {
                 let caller = r.symbol_name.as_deref().unwrap_or("?");
                 let line = r.line.map_or_else(|| "?".to_string(), |l| l.to_string());
-                writeln!(buf, "ref {}:{} call {}", rel.display(), line, caller).unwrap();
+                writeln!(buf, "{}:{} call {}", rel.display(), line, caller).unwrap();
             }
         }
     }
     buf
 }
 
-/// Format impact (blast radius) results to a String in compact flat format for MCP tool responses.
+/// Format impact (blast radius) results to a String in compact prefix-free flat format for MCP tool responses.
 ///
-/// Summary header (total count) is written FIRST. Uses flat (non-tree) format — MCP responses
-/// do not benefit from indentation and tree mode adds ambiguity when parsed by Claude.
+/// No summary line. No "impact " prefix. Line format: `{rel_path}`.
+/// Uses flat (non-tree) format — MCP responses do not benefit from indentation.
 pub fn format_impact_to_string(results: &[ImpactResult], project_root: &Path) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
-    writeln!(buf, "{} affected files", results.len()).unwrap();
     for r in results {
         let rel = r
             .file_path
             .strip_prefix(project_root)
             .unwrap_or(&r.file_path);
-        writeln!(buf, "impact {}", rel.display()).unwrap();
+        writeln!(buf, "{}", rel.display()).unwrap();
     }
     buf
 }
 
-/// Format circular dependency results to a String in compact format for MCP tool responses.
+/// Format circular dependency results to a String in compact prefix-free format for MCP tool responses.
 ///
-/// Summary header (total count) is written FIRST.
+/// No summary line. No "cycle " prefix. Line format: `{file1} -> {file2} -> {file3}`.
 pub fn format_circular_to_string(cycles: &[CircularDep], project_root: &Path) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
-    writeln!(buf, "{} circular dependencies found", cycles.len()).unwrap();
     for cycle in cycles {
         let parts: Vec<String> = cycle
             .files
@@ -1595,168 +1593,111 @@ pub fn format_circular_to_string(cycles: &[CircularDep], project_root: &Path) ->
                     .to_string()
             })
             .collect();
-        writeln!(buf, "cycle {}", parts.join(" -> ")).unwrap();
+        writeln!(buf, "{}", parts.join(" -> ")).unwrap();
     }
     buf
 }
 
-/// Format symbol context results to a String with labeled sections for MCP tool responses.
+/// Format symbol context results to a String in compact prefix-free format for MCP tool responses.
 ///
-/// Summary header (`{N} symbols`) is written FIRST (CONTEXT.md locked decision).
-/// Each non-empty relationship group is preceded by a labeled section delimiter
-/// (`--- callers ---`, `--- callees ---`, etc.) so Claude can parse sections easily
-/// (CONTEXT.md locked decision on context/360-degree labeled sections).
+/// No "N symbols" summary. No "symbol " prefix (bare symbol name on its own line).
+/// No "--- section ---" delimiter lines. No "def ", "ref ", "called-by ", "calls ",
+/// "extends ", "implements ", "extended-by ", "implemented-by " prefixes.
+///
+/// Per-section formats:
+/// - Symbol header:          `{symbol_name}`
+/// - Definitions:            `{rel_path}:{line} {kind}`
+/// - References (import):    `{rel_path} import`
+/// - References (call):      `{rel_path}:{line} call {caller}`
+/// - Callers:                `{caller_name} {rel_path}:{line}`
+/// - Callees:                `{callee_name} {rel_path}:{line}`
+/// - Extends/implements/extended-by/implemented-by: `{name} {rel_path}:{line}`
+///
+/// Empty sections are silently omitted.
 pub fn format_context_to_string(contexts: &[SymbolContext], project_root: &Path) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
-    writeln!(buf, "{} symbols", contexts.len()).unwrap();
     for ctx in contexts {
-        writeln!(buf, "symbol {}", ctx.symbol_name).unwrap();
+        writeln!(buf, "{}", ctx.symbol_name).unwrap();
 
-        if !ctx.definitions.is_empty() {
-            writeln!(buf, "--- definitions ---").unwrap();
-            for def in &ctx.definitions {
-                let rel = def
-                    .file_path
-                    .strip_prefix(project_root)
-                    .unwrap_or(&def.file_path);
-                writeln!(
-                    buf,
-                    "def {}:{} {}",
-                    rel.display(),
-                    def.line,
-                    kind_to_str(&def.kind)
-                )
-                .unwrap();
-            }
+        for def in &ctx.definitions {
+            let rel = def
+                .file_path
+                .strip_prefix(project_root)
+                .unwrap_or(&def.file_path);
+            writeln!(
+                buf,
+                "{}:{} {}",
+                rel.display(),
+                def.line,
+                kind_to_str(&def.kind)
+            )
+            .unwrap();
         }
 
-        if !ctx.references.is_empty() {
-            writeln!(buf, "--- references ---").unwrap();
-            for r in &ctx.references {
-                let rel = r
-                    .file_path
-                    .strip_prefix(project_root)
-                    .unwrap_or(&r.file_path);
-                match r.ref_kind {
-                    RefKind::Import => {
-                        writeln!(buf, "ref {} import", rel.display()).unwrap();
-                    }
-                    RefKind::Call => {
-                        let caller = r.symbol_name.as_deref().unwrap_or("?");
-                        let line = r.line.map_or_else(|| "?".to_string(), |l| l.to_string());
-                        writeln!(buf, "ref {}:{} call {}", rel.display(), line, caller).unwrap();
-                    }
+        for r in &ctx.references {
+            let rel = r
+                .file_path
+                .strip_prefix(project_root)
+                .unwrap_or(&r.file_path);
+            match r.ref_kind {
+                RefKind::Import => {
+                    writeln!(buf, "{} import", rel.display()).unwrap();
+                }
+                RefKind::Call => {
+                    let caller = r.symbol_name.as_deref().unwrap_or("?");
+                    let line = r.line.map_or_else(|| "?".to_string(), |l| l.to_string());
+                    writeln!(buf, "{}:{} call {}", rel.display(), line, caller).unwrap();
                 }
             }
         }
 
-        if !ctx.callers.is_empty() {
-            writeln!(buf, "--- callers ---").unwrap();
-            for caller in &ctx.callers {
-                let rel = caller
-                    .file_path
-                    .strip_prefix(project_root)
-                    .unwrap_or(&caller.file_path);
-                writeln!(
-                    buf,
-                    "called-by {} {}:{}",
-                    caller.symbol_name,
-                    rel.display(),
-                    caller.line
-                )
-                .unwrap();
-            }
+        for caller in &ctx.callers {
+            let rel = caller
+                .file_path
+                .strip_prefix(project_root)
+                .unwrap_or(&caller.file_path);
+            writeln!(buf, "{} {}:{}", caller.symbol_name, rel.display(), caller.line).unwrap();
         }
 
-        if !ctx.callees.is_empty() {
-            writeln!(buf, "--- callees ---").unwrap();
-            for callee in &ctx.callees {
-                let rel = callee
-                    .file_path
-                    .strip_prefix(project_root)
-                    .unwrap_or(&callee.file_path);
-                writeln!(
-                    buf,
-                    "calls {} {}:{}",
-                    callee.symbol_name,
-                    rel.display(),
-                    callee.line
-                )
-                .unwrap();
-            }
+        for callee in &ctx.callees {
+            let rel = callee
+                .file_path
+                .strip_prefix(project_root)
+                .unwrap_or(&callee.file_path);
+            writeln!(buf, "{} {}:{}", callee.symbol_name, rel.display(), callee.line).unwrap();
         }
 
-        if !ctx.extends.is_empty() {
-            writeln!(buf, "--- extends ---").unwrap();
-            for ext in &ctx.extends {
-                let rel = ext
-                    .file_path
-                    .strip_prefix(project_root)
-                    .unwrap_or(&ext.file_path);
-                writeln!(
-                    buf,
-                    "extends {} {}:{}",
-                    ext.symbol_name,
-                    rel.display(),
-                    ext.line
-                )
-                .unwrap();
-            }
+        for ext in &ctx.extends {
+            let rel = ext
+                .file_path
+                .strip_prefix(project_root)
+                .unwrap_or(&ext.file_path);
+            writeln!(buf, "{} {}:{}", ext.symbol_name, rel.display(), ext.line).unwrap();
         }
 
-        if !ctx.implements.is_empty() {
-            writeln!(buf, "--- implements ---").unwrap();
-            for imp in &ctx.implements {
-                let rel = imp
-                    .file_path
-                    .strip_prefix(project_root)
-                    .unwrap_or(&imp.file_path);
-                writeln!(
-                    buf,
-                    "implements {} {}:{}",
-                    imp.symbol_name,
-                    rel.display(),
-                    imp.line
-                )
-                .unwrap();
-            }
+        for imp in &ctx.implements {
+            let rel = imp
+                .file_path
+                .strip_prefix(project_root)
+                .unwrap_or(&imp.file_path);
+            writeln!(buf, "{} {}:{}", imp.symbol_name, rel.display(), imp.line).unwrap();
         }
 
-        if !ctx.extended_by.is_empty() {
-            writeln!(buf, "--- extended-by ---").unwrap();
-            for ext_by in &ctx.extended_by {
-                let rel = ext_by
-                    .file_path
-                    .strip_prefix(project_root)
-                    .unwrap_or(&ext_by.file_path);
-                writeln!(
-                    buf,
-                    "extended-by {} {}:{}",
-                    ext_by.symbol_name,
-                    rel.display(),
-                    ext_by.line
-                )
-                .unwrap();
-            }
+        for ext_by in &ctx.extended_by {
+            let rel = ext_by
+                .file_path
+                .strip_prefix(project_root)
+                .unwrap_or(&ext_by.file_path);
+            writeln!(buf, "{} {}:{}", ext_by.symbol_name, rel.display(), ext_by.line).unwrap();
         }
 
-        if !ctx.implemented_by.is_empty() {
-            writeln!(buf, "--- implemented-by ---").unwrap();
-            for impl_by in &ctx.implemented_by {
-                let rel = impl_by
-                    .file_path
-                    .strip_prefix(project_root)
-                    .unwrap_or(&impl_by.file_path);
-                writeln!(
-                    buf,
-                    "implemented-by {} {}:{}",
-                    impl_by.symbol_name,
-                    rel.display(),
-                    impl_by.line
-                )
-                .unwrap();
-            }
+        for impl_by in &ctx.implemented_by {
+            let rel = impl_by
+                .file_path
+                .strip_prefix(project_root)
+                .unwrap_or(&impl_by.file_path);
+            writeln!(buf, "{} {}:{}", impl_by.symbol_name, rel.display(), impl_by.line).unwrap();
         }
     }
     buf
