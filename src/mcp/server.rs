@@ -623,7 +623,7 @@ impl CodeGraphServer {
             })
             .collect();
 
-        let output = crate::query::output::format_context_to_string(&contexts, &root);
+        let output = crate::query::output::format_context_to_string(&contexts, &root, p.sections.as_deref());
         let output = format!("{}{}", output, crate::mcp::hints::context_hint(&p.symbol));
         Ok(output)
     }

@@ -1598,6 +1598,32 @@ pub fn format_circular_to_string(cycles: &[CircularDep], project_root: &Path) ->
     buf
 }
 
+/// Parse a sections filter string into an active set of section names.
+///
+/// - `None` input → `None` output (no filtering, all sections shown)
+/// - Characters map to section names: r=references, c=callers, e=callees,
+///   x=extends, i=implements, X=extended-by, I=implemented-by
+/// - Commas and whitespace are separators (silently ignored)
+/// - Unknown characters are silently ignored
+/// - Returns `Some(HashSet)` with the matched section names
+pub fn parse_sections(sections: Option<&str>) -> Option<std::collections::HashSet<&'static str>> {
+    let s = sections?;
+    let mut set = std::collections::HashSet::new();
+    for ch in s.chars() {
+        match ch {
+            'r' => { set.insert("references"); }
+            'c' => { set.insert("callers"); }
+            'e' => { set.insert("callees"); }
+            'x' => { set.insert("extends"); }
+            'i' => { set.insert("implements"); }
+            'X' => { set.insert("extended-by"); }
+            'I' => { set.insert("implemented-by"); }
+            _ => {} // separators (comma, space) and unknown chars silently ignored
+        }
+    }
+    Some(set)
+}
+
 /// Format symbol context results to a String in compact prefix-free format for MCP tool responses.
 ///
 /// No "N symbols" summary. No "symbol " prefix (bare symbol name on its own line).
@@ -1614,12 +1640,21 @@ pub fn format_circular_to_string(cycles: &[CircularDep], project_root: &Path) ->
 /// - Extends/implements/extended-by/implemented-by: `{name} {rel_path}:{line}`
 ///
 /// Empty sections are silently omitted.
-pub fn format_context_to_string(contexts: &[SymbolContext], project_root: &Path) -> String {
+///
+/// `sections`: optional filter string (e.g. `"r,c"`). Definitions are always included.
+/// Non-empty sections that were filtered out are listed on an `omitted: ...` line.
+pub fn format_context_to_string(
+    contexts: &[SymbolContext],
+    project_root: &Path,
+    sections: Option<&str>,
+) -> String {
     use std::fmt::Write;
+    let active = parse_sections(sections);
     let mut buf = String::new();
     for ctx in contexts {
         writeln!(buf, "{}", ctx.symbol_name).unwrap();
 
+        // Definitions are ALWAYS rendered regardless of filter.
         for def in &ctx.definitions {
             let rel = def
                 .file_path
@@ -1635,69 +1670,113 @@ pub fn format_context_to_string(contexts: &[SymbolContext], project_root: &Path)
             .unwrap();
         }
 
-        for r in &ctx.references {
-            let rel = r
-                .file_path
-                .strip_prefix(project_root)
-                .unwrap_or(&r.file_path);
-            match r.ref_kind {
-                RefKind::Import => {
-                    writeln!(buf, "{} import", rel.display()).unwrap();
-                }
-                RefKind::Call => {
-                    let caller = r.symbol_name.as_deref().unwrap_or("?");
-                    let line = r.line.map_or_else(|| "?".to_string(), |l| l.to_string());
-                    writeln!(buf, "{}:{} call {}", rel.display(), line, caller).unwrap();
+        // Track non-empty sections that were filtered out.
+        let mut omitted: Vec<&'static str> = Vec::new();
+
+        // References
+        if active.as_ref().map_or(true, |s| s.contains("references")) {
+            for r in &ctx.references {
+                let rel = r
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&r.file_path);
+                match r.ref_kind {
+                    RefKind::Import => {
+                        writeln!(buf, "{} import", rel.display()).unwrap();
+                    }
+                    RefKind::Call => {
+                        let caller = r.symbol_name.as_deref().unwrap_or("?");
+                        let line = r.line.map_or_else(|| "?".to_string(), |l| l.to_string());
+                        writeln!(buf, "{}:{} call {}", rel.display(), line, caller).unwrap();
+                    }
                 }
             }
+        } else if !ctx.references.is_empty() {
+            omitted.push("references");
         }
 
-        for caller in &ctx.callers {
-            let rel = caller
-                .file_path
-                .strip_prefix(project_root)
-                .unwrap_or(&caller.file_path);
-            writeln!(buf, "{} {}:{}", caller.symbol_name, rel.display(), caller.line).unwrap();
+        // Callers
+        if active.as_ref().map_or(true, |s| s.contains("callers")) {
+            for caller in &ctx.callers {
+                let rel = caller
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&caller.file_path);
+                writeln!(buf, "{} {}:{}", caller.symbol_name, rel.display(), caller.line).unwrap();
+            }
+        } else if !ctx.callers.is_empty() {
+            omitted.push("callers");
         }
 
-        for callee in &ctx.callees {
-            let rel = callee
-                .file_path
-                .strip_prefix(project_root)
-                .unwrap_or(&callee.file_path);
-            writeln!(buf, "{} {}:{}", callee.symbol_name, rel.display(), callee.line).unwrap();
+        // Callees
+        if active.as_ref().map_or(true, |s| s.contains("callees")) {
+            for callee in &ctx.callees {
+                let rel = callee
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&callee.file_path);
+                writeln!(buf, "{} {}:{}", callee.symbol_name, rel.display(), callee.line).unwrap();
+            }
+        } else if !ctx.callees.is_empty() {
+            omitted.push("callees");
         }
 
-        for ext in &ctx.extends {
-            let rel = ext
-                .file_path
-                .strip_prefix(project_root)
-                .unwrap_or(&ext.file_path);
-            writeln!(buf, "{} {}:{}", ext.symbol_name, rel.display(), ext.line).unwrap();
+        // Extends
+        if active.as_ref().map_or(true, |s| s.contains("extends")) {
+            for ext in &ctx.extends {
+                let rel = ext
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&ext.file_path);
+                writeln!(buf, "{} {}:{}", ext.symbol_name, rel.display(), ext.line).unwrap();
+            }
+        } else if !ctx.extends.is_empty() {
+            omitted.push("extends");
         }
 
-        for imp in &ctx.implements {
-            let rel = imp
-                .file_path
-                .strip_prefix(project_root)
-                .unwrap_or(&imp.file_path);
-            writeln!(buf, "{} {}:{}", imp.symbol_name, rel.display(), imp.line).unwrap();
+        // Implements
+        if active.as_ref().map_or(true, |s| s.contains("implements")) {
+            for imp in &ctx.implements {
+                let rel = imp
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&imp.file_path);
+                writeln!(buf, "{} {}:{}", imp.symbol_name, rel.display(), imp.line).unwrap();
+            }
+        } else if !ctx.implements.is_empty() {
+            omitted.push("implements");
         }
 
-        for ext_by in &ctx.extended_by {
-            let rel = ext_by
-                .file_path
-                .strip_prefix(project_root)
-                .unwrap_or(&ext_by.file_path);
-            writeln!(buf, "{} {}:{}", ext_by.symbol_name, rel.display(), ext_by.line).unwrap();
+        // Extended-by
+        if active.as_ref().map_or(true, |s| s.contains("extended-by")) {
+            for ext_by in &ctx.extended_by {
+                let rel = ext_by
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&ext_by.file_path);
+                writeln!(buf, "{} {}:{}", ext_by.symbol_name, rel.display(), ext_by.line).unwrap();
+            }
+        } else if !ctx.extended_by.is_empty() {
+            omitted.push("extended-by");
         }
 
-        for impl_by in &ctx.implemented_by {
-            let rel = impl_by
-                .file_path
-                .strip_prefix(project_root)
-                .unwrap_or(&impl_by.file_path);
-            writeln!(buf, "{} {}:{}", impl_by.symbol_name, rel.display(), impl_by.line).unwrap();
+        // Implemented-by
+        if active.as_ref().map_or(true, |s| s.contains("implemented-by")) {
+            for impl_by in &ctx.implemented_by {
+                let rel = impl_by
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&impl_by.file_path);
+                writeln!(buf, "{} {}:{}", impl_by.symbol_name, rel.display(), impl_by.line)
+                    .unwrap();
+            }
+        } else if !ctx.implemented_by.is_empty() {
+            omitted.push("implemented-by");
+        }
+
+        // Emit omitted line only when sections were filtered AND some were non-empty.
+        if !omitted.is_empty() {
+            writeln!(buf, "omitted: {}", omitted.join(", ")).unwrap();
         }
     }
     buf
@@ -1932,7 +2011,7 @@ mod tests {
             extended_by: vec![],
             implemented_by: vec![],
         };
-        let output = format_context_to_string(&[ctx], &root);
+        let output = format_context_to_string(&[ctx], &root, None);
 
         // Must NOT contain old section delimiters
         assert!(!output.contains("--- "), "output should not contain '--- ' delimiter lines");

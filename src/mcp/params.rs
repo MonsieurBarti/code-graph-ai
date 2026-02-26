@@ -45,6 +45,9 @@ pub struct DetectCircularParams {
 pub struct GetContextParams {
     /// Symbol name or regex pattern
     pub symbol: String,
+    /// Sections to include: r=references, c=callers, e=callees, x=extends, i=implements, X=extended-by, I=implemented-by.
+    /// Definitions always included. Omit for all sections.
+    pub sections: Option<String>,
     /// Project root path override
     pub project_path: Option<String>,
 }
