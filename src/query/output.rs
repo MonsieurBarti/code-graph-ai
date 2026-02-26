@@ -2453,3 +2453,68 @@ pub fn format_imports_to_string(entries: &[crate::query::imports::ImportEntry], 
 
     lines.join("\n")
 }
+
+/// Format dead code analysis results to a compact MCP string.
+///
+/// Output format:
+/// ```text
+/// unreachable files (N):
+///   src/unused_module.rs
+///   src/old_helper.ts
+///
+/// unreferenced symbols (N in M files):
+/// src/utils/helpers.rs:
+///   fn unused_helper :10
+///   fn old_function :25
+/// src/lib/parser.ts:
+///   function deadFunc :42
+/// ```
+///
+/// Paths are relative to `root`.
+pub fn format_dead_code_to_string(
+    result: &crate::query::dead_code::DeadCodeResult,
+    root: &Path,
+) -> String {
+    let mut lines: Vec<String> = Vec::new();
+
+    // --- Unreachable files section ---
+    let file_count = result.unreachable_files.len();
+    lines.push(format!("unreachable files ({}):", file_count));
+    if file_count == 0 {
+        lines.push("  none".to_string());
+    } else {
+        for file_path in &result.unreachable_files {
+            let rel = file_path.strip_prefix(root).unwrap_or(file_path);
+            lines.push(format!("  {}", rel.display()));
+        }
+    }
+
+    lines.push(String::new()); // blank line between sections
+
+    // --- Unreferenced symbols section ---
+    let total_symbols: usize = result
+        .unreferenced_symbols
+        .iter()
+        .map(|(_, syms)| syms.len())
+        .sum();
+    let file_groups = result.unreferenced_symbols.len();
+
+    lines.push(format!(
+        "unreferenced symbols ({} in {} files):",
+        total_symbols, file_groups
+    ));
+
+    if total_symbols == 0 {
+        lines.push("  none".to_string());
+    } else {
+        for (file_path, syms) in &result.unreferenced_symbols {
+            let rel = file_path.strip_prefix(root).unwrap_or(file_path);
+            lines.push(format!("{}:", rel.display()));
+            for sym in syms {
+                lines.push(format!("  {} {} :{}", sym.kind, sym.name, sym.line));
+            }
+        }
+    }
+
+    lines.join("\n")
+}

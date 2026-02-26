@@ -1,5 +1,6 @@
 pub mod circular;
 pub mod context;
+pub mod dead_code;
 pub mod file_summary;
 pub mod find;
 pub mod impact;
