@@ -375,3 +375,49 @@ fn compute_crate_stats(graph: &CodeGraph) -> Vec<CrateStats> {
     result.sort_by(|a, b| a.crate_name.cmp(&b.crate_name));
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::CodeGraph;
+    use crate::graph::node::FileKind;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_project_stats_counts_non_parsed_files() {
+        let mut graph = CodeGraph::new();
+
+        // Add source files
+        graph.add_file(PathBuf::from("src/main.rs"), "rust");
+        graph.add_file(PathBuf::from("src/lib.ts"), "typescript");
+
+        // Add non-parsed files
+        graph.add_non_parsed_file(PathBuf::from("README.md"), FileKind::Doc);
+        graph.add_non_parsed_file(PathBuf::from("Cargo.toml"), FileKind::Config);
+        graph.add_non_parsed_file(PathBuf::from(".github/ci.yml"), FileKind::Ci);
+        graph.add_non_parsed_file(PathBuf::from("logo.png"), FileKind::Asset);
+        graph.add_non_parsed_file(PathBuf::from("LICENSE"), FileKind::Other);
+
+        let stats = project_stats(&graph);
+
+        assert_eq!(stats.file_count, 7, "total file count includes all files");
+        assert_eq!(stats.source_files, 2, "source files only");
+        assert_eq!(stats.non_parsed_files, 5, "non-parsed files only");
+        assert_eq!(stats.doc_files, 1);
+        assert_eq!(stats.config_files, 1);
+        assert_eq!(stats.ci_files, 1);
+        assert_eq!(stats.asset_files, 1);
+        assert_eq!(stats.other_files, 1);
+    }
+
+    #[test]
+    fn test_project_stats_zero_non_parsed() {
+        let mut graph = CodeGraph::new();
+        graph.add_file(PathBuf::from("src/main.rs"), "rust");
+
+        let stats = project_stats(&graph);
+
+        assert_eq!(stats.source_files, 1);
+        assert_eq!(stats.non_parsed_files, 0);
+    }
+}

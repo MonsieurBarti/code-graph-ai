@@ -258,3 +258,123 @@ fn is_excluded_by_config(path: &Path, config: &CodeGraphConfig) -> bool {
 
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn tmp() -> TempDir {
+        tempfile::tempdir().expect("tempdir")
+    }
+
+    #[test]
+    fn test_walk_non_parsed_finds_non_source_files() {
+        let dir = tmp();
+        // Create source files (should NOT be returned)
+        fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+        fs::write(dir.path().join("app.ts"), "export {}").unwrap();
+        // Create non-source files (SHOULD be returned)
+        fs::write(dir.path().join("README.md"), "# Hello").unwrap();
+        fs::write(dir.path().join("config.toml"), "[settings]").unwrap();
+        fs::write(dir.path().join("Makefile"), "all:").unwrap();
+
+        let config = CodeGraphConfig::default();
+        let files = walk_non_parsed_files(dir.path(), &config).unwrap();
+
+        let names: Vec<String> = files
+            .iter()
+            .map(|f| f.file_name().unwrap().to_str().unwrap().to_string())
+            .collect();
+
+        assert!(names.contains(&"README.md".to_string()), "should find README.md");
+        assert!(
+            names.contains(&"config.toml".to_string()),
+            "should find config.toml"
+        );
+        assert!(names.contains(&"Makefile".to_string()), "should find Makefile");
+        assert!(
+            !names.contains(&"main.rs".to_string()),
+            "should NOT find source files"
+        );
+        assert!(
+            !names.contains(&"app.ts".to_string()),
+            "should NOT find source files"
+        );
+    }
+
+    #[test]
+    fn test_walk_non_parsed_respects_exclude_patterns() {
+        let dir = tmp();
+        fs::write(dir.path().join("README.md"), "# Hello").unwrap();
+        fs::write(dir.path().join("config.toml"), "[settings]").unwrap();
+
+        // Create a code-graph.toml with exclude patterns
+        let config = CodeGraphConfig {
+            exclude: Some(vec!["*.toml".to_string()]),
+        };
+
+        let files = walk_non_parsed_files(dir.path(), &config).unwrap();
+
+        let names: Vec<String> = files
+            .iter()
+            .map(|f| f.file_name().unwrap().to_str().unwrap().to_string())
+            .collect();
+
+        assert!(
+            names.contains(&"README.md".to_string()),
+            "should find non-excluded files"
+        );
+        assert!(
+            !names.contains(&"config.toml".to_string()),
+            "should exclude *.toml files"
+        );
+    }
+
+    #[test]
+    fn test_walk_non_parsed_excludes_node_modules() {
+        let dir = tmp();
+        let nm = dir.path().join("node_modules").join("pkg");
+        fs::create_dir_all(&nm).unwrap();
+        fs::write(nm.join("package.json"), "{}").unwrap();
+        fs::write(dir.path().join("README.md"), "# Hello").unwrap();
+
+        let config = CodeGraphConfig::default();
+        let files = walk_non_parsed_files(dir.path(), &config).unwrap();
+
+        let names: Vec<String> = files
+            .iter()
+            .map(|f| f.to_str().unwrap().to_string())
+            .collect();
+
+        assert!(
+            !names.iter().any(|n| n.contains("node_modules")),
+            "should not include node_modules files"
+        );
+    }
+
+    #[test]
+    fn test_walk_project_returns_only_source_files() {
+        let dir = tmp();
+        fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+        fs::write(dir.path().join("README.md"), "# Hello").unwrap();
+
+        let config = CodeGraphConfig::default();
+        let files = walk_project(dir.path(), &config, false, None).unwrap();
+
+        let names: Vec<String> = files
+            .iter()
+            .map(|f| f.file_name().unwrap().to_str().unwrap().to_string())
+            .collect();
+
+        assert!(
+            names.contains(&"main.rs".to_string()),
+            "should find source files"
+        );
+        assert!(
+            !names.contains(&"README.md".to_string()),
+            "should NOT find non-source files"
+        );
+    }
+}
