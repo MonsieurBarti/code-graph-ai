@@ -103,8 +103,12 @@ fn is_entry_point_file(file_info: &FileInfo) -> bool {
 
     // Common entry point file names
     let entry_names = [
-        "main.rs", "lib.rs",
-        "index.ts", "index.js", "index.tsx", "index.jsx",
+        "main.rs",
+        "lib.rs",
+        "index.ts",
+        "index.js",
+        "index.tsx",
+        "index.jsx",
     ];
     if entry_names.contains(&file_name) {
         return true;
@@ -216,11 +220,11 @@ pub fn find_dead_code(graph: &CodeGraph, root: &Path, scope: Option<&Path>) -> D
         if let GraphNode::Symbol(_) = &graph.graph[node_idx] {
             // Find the file that contains this symbol via incoming Contains edge
             for edge in graph.graph.edges_directed(node_idx, Direction::Incoming) {
-                if matches!(edge.weight(), EdgeKind::Contains) {
-                    if let GraphNode::File(fi) = &graph.graph[edge.source()] {
-                        sym_to_file.insert(node_idx, fi.clone());
-                        break;
-                    }
+                if matches!(edge.weight(), EdgeKind::Contains)
+                    && let GraphNode::File(fi) = &graph.graph[edge.source()]
+                {
+                    sym_to_file.insert(node_idx, fi.clone());
+                    break;
                 }
             }
         }
@@ -272,7 +276,8 @@ pub fn find_dead_code(graph: &CodeGraph, root: &Path, scope: Option<&Path>) -> D
     }
 
     // Convert map to sorted vec of (path, symbols)
-    let mut unreferenced_symbols: Vec<(PathBuf, Vec<DeadSymbol>)> = dead_by_file.into_iter().collect();
+    let mut unreferenced_symbols: Vec<(PathBuf, Vec<DeadSymbol>)> =
+        dead_by_file.into_iter().collect();
     unreferenced_symbols.sort_by(|a, b| a.0.cmp(&b.0));
     // Sort symbols within each file by line number
     for (_, syms) in &mut unreferenced_symbols {
@@ -368,7 +373,14 @@ mod tests {
 
         graph.add_symbol(
             file_idx,
-            make_symbol("unused_helper", SymbolKind::Function, SymbolVisibility::Private, false, None, 10),
+            make_symbol(
+                "unused_helper",
+                SymbolKind::Function,
+                SymbolVisibility::Private,
+                false,
+                None,
+                10,
+            ),
         );
 
         let result = find_dead_code(&graph, &root, None);
@@ -392,7 +404,14 @@ mod tests {
 
         graph.add_symbol(
             file_idx,
-            make_symbol("main", SymbolKind::Function, SymbolVisibility::Private, false, None, 1),
+            make_symbol(
+                "main",
+                SymbolKind::Function,
+                SymbolVisibility::Private,
+                false,
+                None,
+                1,
+            ),
         );
 
         let result = find_dead_code(&graph, &root, None);
@@ -416,7 +435,14 @@ mod tests {
 
         graph.add_symbol(
             file_idx,
-            make_symbol("public_api", SymbolKind::Function, SymbolVisibility::Pub, false, None, 5),
+            make_symbol(
+                "public_api",
+                SymbolKind::Function,
+                SymbolVisibility::Pub,
+                false,
+                None,
+                5,
+            ),
         );
 
         let result = find_dead_code(&graph, &root, None);
@@ -440,7 +466,14 @@ mod tests {
 
         graph.add_symbol(
             file_idx,
-            make_symbol("exportedFn", SymbolKind::Function, SymbolVisibility::Private, true, None, 3),
+            make_symbol(
+                "exportedFn",
+                SymbolKind::Function,
+                SymbolVisibility::Private,
+                true,
+                None,
+                3,
+            ),
         );
 
         let result = find_dead_code(&graph, &root, None);
@@ -496,7 +529,14 @@ mod tests {
         let file_idx = graph.add_file(file_path.clone(), "rust");
         graph.add_symbol(
             file_idx,
-            make_symbol("test_something", SymbolKind::Function, SymbolVisibility::Private, false, None, 20),
+            make_symbol(
+                "test_something",
+                SymbolKind::Function,
+                SymbolVisibility::Private,
+                false,
+                None,
+                20,
+            ),
         );
 
         // file in tests/ directory
@@ -504,7 +544,14 @@ mod tests {
         let test_file_idx = graph.add_file(test_file_path.clone(), "rust");
         graph.add_symbol(
             test_file_idx,
-            make_symbol("run_test", SymbolKind::Function, SymbolVisibility::Private, false, None, 5),
+            make_symbol(
+                "run_test",
+                SymbolKind::Function,
+                SymbolVisibility::Private,
+                false,
+                None,
+                5,
+            ),
         );
 
         let result = find_dead_code(&graph, &root, None);
@@ -533,7 +580,14 @@ mod tests {
         let in_scope_idx = graph.add_file(in_scope_file.clone(), "rust");
         graph.add_symbol(
             in_scope_idx,
-            make_symbol("in_scope_fn", SymbolKind::Function, SymbolVisibility::Private, false, None, 1),
+            make_symbol(
+                "in_scope_fn",
+                SymbolKind::Function,
+                SymbolVisibility::Private,
+                false,
+                None,
+                1,
+            ),
         );
 
         // File outside scope
@@ -541,7 +595,14 @@ mod tests {
         let out_of_scope_idx = graph.add_file(out_of_scope_file.clone(), "rust");
         graph.add_symbol(
             out_of_scope_idx,
-            make_symbol("out_of_scope_fn", SymbolKind::Function, SymbolVisibility::Private, false, None, 1),
+            make_symbol(
+                "out_of_scope_fn",
+                SymbolKind::Function,
+                SymbolVisibility::Private,
+                false,
+                None,
+                1,
+            ),
         );
 
         // Run with scope = "src/module"

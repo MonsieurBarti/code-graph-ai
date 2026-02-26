@@ -288,12 +288,18 @@ mod tests {
             .map(|f| f.file_name().unwrap().to_str().unwrap().to_string())
             .collect();
 
-        assert!(names.contains(&"README.md".to_string()), "should find README.md");
+        assert!(
+            names.contains(&"README.md".to_string()),
+            "should find README.md"
+        );
         assert!(
             names.contains(&"config.toml".to_string()),
             "should find config.toml"
         );
-        assert!(names.contains(&"Makefile".to_string()), "should find Makefile");
+        assert!(
+            names.contains(&"Makefile".to_string()),
+            "should find Makefile"
+        );
         assert!(
             !names.contains(&"main.rs".to_string()),
             "should NOT find source files"

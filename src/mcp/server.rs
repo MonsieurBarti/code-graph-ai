@@ -517,7 +517,9 @@ fn dispatch_query(
 ) -> Result<String, String> {
     match tool {
         "find_symbol" => {
-            let symbol = params["symbol"].as_str().ok_or("missing required param: symbol")?;
+            let symbol = params["symbol"]
+                .as_str()
+                .ok_or("missing required param: symbol")?;
             let limit_param = params["limit"].as_u64().map(|n| n as usize);
             let kind = params["kind"].as_str();
             let path = params["path"].as_str();
@@ -528,7 +530,13 @@ fn dispatch_query(
             let file_filter = path.map(Path::new);
 
             let results = crate::query::find::find_symbol(
-                graph, symbol, false, &kind_filter, file_filter, root, None,
+                graph,
+                symbol,
+                false,
+                &kind_filter,
+                file_filter,
+                root,
+                None,
             )
             .map_err(|e| e.to_string())?;
 
@@ -549,7 +557,9 @@ fn dispatch_query(
             })
         }
         "find_references" => {
-            let symbol = params["symbol"].as_str().ok_or("missing required param: symbol")?;
+            let symbol = params["symbol"]
+                .as_str()
+                .ok_or("missing required param: symbol")?;
             let limit_param = params["limit"].as_u64().map(|n| n as usize);
 
             let matches = crate::query::find::match_symbols(graph, symbol, false)
@@ -578,7 +588,9 @@ fn dispatch_query(
             })
         }
         "get_impact" => {
-            let symbol = params["symbol"].as_str().ok_or("missing required param: symbol")?;
+            let symbol = params["symbol"]
+                .as_str()
+                .ok_or("missing required param: symbol")?;
             let limit_param = params["limit"].as_u64().map(|n| n as usize);
 
             let matches = crate::query::find::match_symbols(graph, symbol, false)
@@ -607,7 +619,9 @@ fn dispatch_query(
             })
         }
         "get_context" => {
-            let symbol = params["symbol"].as_str().ok_or("missing required param: symbol")?;
+            let symbol = params["symbol"]
+                .as_str()
+                .ok_or("missing required param: symbol")?;
             let sections_param = params["sections"].as_str();
 
             let matches = crate::query::find::match_symbols(graph, symbol, false)
@@ -646,14 +660,18 @@ fn dispatch_query(
             Ok(output)
         }
         "get_file_summary" => {
-            let path_str = params["path"].as_str().ok_or("missing required param: path")?;
+            let path_str = params["path"]
+                .as_str()
+                .ok_or("missing required param: path")?;
             let file_path = std::path::Path::new(path_str);
             let summary = crate::query::file_summary::file_summary(graph, root, file_path)?;
             let output = crate::query::output::format_file_summary_to_string(&summary);
             Ok(output)
         }
         "get_imports" => {
-            let path_str = params["path"].as_str().ok_or("missing required param: path")?;
+            let path_str = params["path"]
+                .as_str()
+                .ok_or("missing required param: path")?;
             let file_path = std::path::Path::new(path_str);
             let entries = crate::query::imports::file_imports(graph, root, file_path)?;
             let output = crate::query::output::format_imports_to_string(&entries, path_str);
@@ -668,7 +686,7 @@ fn dispatch_query(
                     return Err(format!(
                         "Unknown format '{}'. Use 'dot' or 'mermaid'.",
                         other
-                    ))
+                    ));
                 }
             };
             let granularity = match params["granularity"].as_str() {
@@ -679,7 +697,7 @@ fn dispatch_query(
                     return Err(format!(
                         "Unknown granularity '{}'. Use 'symbol', 'file', or 'package'.",
                         other
-                    ))
+                    ));
                 }
             };
             let exclude_patterns: Vec<String> = params["exclude"]
@@ -721,7 +739,11 @@ fn dispatch_query(
             let mut lines = vec![format!(
                 "* {} (default, {})",
                 default_path.display(),
-                if cache_has_default { "indexed" } else { "not indexed" }
+                if cache_has_default {
+                    "indexed"
+                } else {
+                    "not indexed"
+                }
             )];
             if let Some(registry) = registered_projects {
                 for (path, alias) in registry.iter() {
@@ -736,7 +758,9 @@ fn dispatch_query(
             Ok(lines.join("\n"))
         }
         "get_diff" => {
-            let from = params["from"].as_str().ok_or("missing required param: from")?;
+            let from = params["from"]
+                .as_str()
+                .ok_or("missing required param: from")?;
             let to = params["to"].as_str();
             let diff = crate::query::diff::compute_diff(root, from, to, graph)?;
             let output = crate::query::output::format_diff_to_string(&diff);
@@ -839,11 +863,7 @@ impl CodeGraphServer {
             output
         };
 
-        let output = format!(
-            "{}{}",
-            output,
-            crate::mcp::hints::refs_hint(&p.symbol)
-        );
+        let output = format!("{}{}", output, crate::mcp::hints::refs_hint(&p.symbol));
         Ok(output)
     }
 
@@ -882,11 +902,7 @@ impl CodeGraphServer {
             output
         };
 
-        let output = format!(
-            "{}{}",
-            output,
-            crate::mcp::hints::impact_hint(&p.symbol)
-        );
+        let output = format!("{}{}", output, crate::mcp::hints::impact_hint(&p.symbol));
         Ok(output)
     }
 
@@ -901,7 +917,11 @@ impl CodeGraphServer {
 
         let cycles = crate::query::circular::find_circular(&graph, &root);
         let output = crate::query::output::format_circular_to_string(&cycles, &root);
-        let output = format!("{}{}", output, crate::mcp::hints::circular_hint(cycles.len()));
+        let output = format!(
+            "{}{}",
+            output,
+            crate::mcp::hints::circular_hint(cycles.len())
+        );
         Ok(output)
     }
 
@@ -930,7 +950,8 @@ impl CodeGraphServer {
             .collect();
 
         let effective_sections = resolve_sections(p.sections.as_deref(), &self.mcp_config);
-        let output = crate::query::output::format_context_to_string(&contexts, &root, effective_sections);
+        let output =
+            crate::query::output::format_context_to_string(&contexts, &root, effective_sections);
         let output = format!("{}{}", output, crate::mcp::hints::context_hint(&p.symbol));
         Ok(output)
     }
@@ -1027,7 +1048,9 @@ impl CodeGraphServer {
         Ok(output)
     }
 
-    #[tool(description = "File overview: exports, imports, symbol count, dependency role, and graph position — without reading source.")]
+    #[tool(
+        description = "File overview: exports, imports, symbol count, dependency role, and graph position — without reading source."
+    )]
     async fn get_file_summary(
         &self,
         Parameters(p): Parameters<GetFileSummaryParams>,
@@ -1041,7 +1064,9 @@ impl CodeGraphServer {
         Ok(output)
     }
 
-    #[tool(description = "File import/dependency list classified by type (internal, workspace, external, builtin). Shows re-exports.")]
+    #[tool(
+        description = "File import/dependency list classified by type (internal, workspace, external, builtin). Shows re-exports."
+    )]
     async fn get_imports(
         &self,
         Parameters(p): Parameters<GetImportsParams>,
@@ -1055,7 +1080,9 @@ impl CodeGraphServer {
         Ok(output)
     }
 
-    #[tool(description = "Detect unreferenced symbols and unreachable files within a path scope. Returns dead code candidates grouped by file. Entry points (main, pub, exports, trait impls, tests) are excluded.")]
+    #[tool(
+        description = "Detect unreferenced symbols and unreachable files within a path scope. Returns dead code candidates grouped by file. Entry points (main, pub, exports, trait impls, tests) are excluded."
+    )]
     async fn find_dead_code(
         &self,
         Parameters(p): Parameters<FindDeadCodeParams>,
@@ -1074,7 +1101,9 @@ impl CodeGraphServer {
         Ok(format!("{}{}", output, hint))
     }
 
-    #[tool(description = "Compare the current graph against a named snapshot, or compare two snapshots. Reports added/removed/modified files and symbols.")]
+    #[tool(
+        description = "Compare the current graph against a named snapshot, or compare two snapshots. Reports added/removed/modified files and symbols."
+    )]
     async fn get_diff(&self, Parameters(p): Parameters<GetDiffParams>) -> Result<String, String> {
         let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
         let diff = crate::query::diff::compute_diff(&root, &p.from, p.to.as_deref(), &graph)?;
@@ -1088,7 +1117,9 @@ impl CodeGraphServer {
         Ok(format!("{}{}", output, hint))
     }
 
-    #[tool(description = "Register a new project root for multi-project querying. Indexes immediately. Use project_path on other tools to query this project.")]
+    #[tool(
+        description = "Register a new project root for multi-project querying. Indexes immediately. Use project_path on other tools to query this project."
+    )]
     async fn register_project(
         &self,
         Parameters(p): Parameters<RegisterProjectParams>,
@@ -1150,7 +1181,9 @@ impl CodeGraphServer {
         Ok(format!("{}{}", output, hint))
     }
 
-    #[tool(description = "Execute multiple graph queries in a single call. Returns results separated by section headers. Max 10 queries per batch.")]
+    #[tool(
+        description = "Execute multiple graph queries in a single call. Returns results separated by section headers. Max 10 queries per batch."
+    )]
     async fn batch_query(
         &self,
         Parameters(p): Parameters<BatchQueryParams>,
@@ -1369,7 +1402,9 @@ suppress_summary_line = true
         );
         // NAV funnel: instructions describe the navigation funnel tools
         assert!(
-            instructions.contains("get_structure") && instructions.contains("get_file_summary") && instructions.contains("get_imports"),
+            instructions.contains("get_structure")
+                && instructions.contains("get_file_summary")
+                && instructions.contains("get_imports"),
             "should describe navigation funnel tools"
         );
     }
@@ -1395,7 +1430,10 @@ suppress_summary_line = true
         // "MyStruct" -> 6 trigrams: [M,y,S], [y,S,t], [S,t,r], [t,r,u], [r,u,c], [u,c,t]
         let t = trigrams("MyStruct");
         assert_eq!(t.len(), 6, "MyStruct should have 6 trigrams");
-        assert!(t.contains(&['m', 'y', 's']), "should contain [m,y,s] (lowercased)");
+        assert!(
+            t.contains(&['m', 'y', 's']),
+            "should contain [m,y,s] (lowercased)"
+        );
         assert!(t.contains(&['y', 's', 't']), "should contain [y,s,t]");
         assert!(t.contains(&['s', 't', 'r']), "should contain [s,t,r]");
         assert!(t.contains(&['t', 'r', 'u']), "should contain [t,r,u]");
@@ -1490,10 +1528,7 @@ suppress_summary_line = true
             suggestions[0], "MyStruct",
             "MyStruct should be top suggestion for MyStrct"
         );
-        assert!(
-            suggestions.len() <= 3,
-            "at most 3 suggestions"
-        );
+        assert!(suggestions.len() <= 3, "at most 3 suggestions");
         // All suggestions must have been in the graph
         for s in &suggestions {
             assert!(
@@ -1508,9 +1543,18 @@ suppress_summary_line = true
     fn test_suggest_fuzzy_short_query() {
         // Queries shorter than 3 chars return no suggestions
         let graph = make_graph_with_symbols(&["Foo", "Bar", "Baz"]);
-        assert!(suggest_similar_fuzzy(&graph, "ab").is_empty(), "2-char query -> empty");
-        assert!(suggest_similar_fuzzy(&graph, "a").is_empty(), "1-char query -> empty");
-        assert!(suggest_similar_fuzzy(&graph, "").is_empty(), "empty query -> empty");
+        assert!(
+            suggest_similar_fuzzy(&graph, "ab").is_empty(),
+            "2-char query -> empty"
+        );
+        assert!(
+            suggest_similar_fuzzy(&graph, "a").is_empty(),
+            "1-char query -> empty"
+        );
+        assert!(
+            suggest_similar_fuzzy(&graph, "").is_empty(),
+            "empty query -> empty"
+        );
     }
 
     #[test]
@@ -1525,7 +1569,10 @@ suppress_summary_line = true
         // More precisely: verify score threshold is applied
         let suggestions2 = suggest_similar_fuzzy(&graph, "XyzXyzXyz");
         // Foo/Bar/Baz have no trigrams in common with XyzXyzXyz
-        assert!(suggestions2.is_empty(), "no-match query -> empty suggestions");
+        assert!(
+            suggestions2.is_empty(),
+            "no-match query -> empty suggestions"
+        );
     }
 
     #[test]
@@ -1549,10 +1596,7 @@ suppress_summary_line = true
         let suggestions = suggest_similar_fuzzy(&graph, "MyStrct");
         // MyStruct is closer to MyStrct than MyStructBuilder
         if suggestions.len() >= 2 {
-            assert_eq!(
-                suggestions[0], "MyStruct",
-                "best match should be first"
-            );
+            assert_eq!(suggestions[0], "MyStruct", "best match should be first");
         }
     }
 
@@ -1629,7 +1673,10 @@ suppress_summary_line = true
         let root = std::path::Path::new("/tmp");
         let params = serde_json::json!({});
         let result = dispatch_query(&config, &graph, root, "find_symbol", &params, None);
-        assert!(result.is_err(), "find_symbol without symbol param should return Err");
+        assert!(
+            result.is_err(),
+            "find_symbol without symbol param should return Err"
+        );
         assert!(
             result.unwrap_err().contains("missing required param"),
             "error should mention missing required param"
@@ -1657,7 +1704,11 @@ suppress_summary_line = true
 
         let params = serde_json::json!({});
         let result = dispatch_query(&config, &graph, root, "find_dead_code", &params, None);
-        assert!(result.is_ok(), "find_dead_code should succeed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "find_dead_code should succeed: {:?}",
+            result
+        );
         let output = result.unwrap();
         assert!(
             output.contains("unreachable files"),
@@ -1673,7 +1724,10 @@ suppress_summary_line = true
         let root = std::path::Path::new("/tmp");
         let params = serde_json::json!({"path": "/tmp"});
         let result = dispatch_query(&config, &graph, root, "register_project", &params, None);
-        assert!(result.is_err(), "register_project should not be available in batch");
+        assert!(
+            result.is_err(),
+            "register_project should not be available in batch"
+        );
         assert!(
             result.unwrap_err().contains("unknown tool"),
             "error should say unknown tool"
@@ -1688,14 +1742,21 @@ suppress_summary_line = true
         let params = serde_json::json!({});
 
         let mut registry = HashMap::new();
-        registry.insert(
-            PathBuf::from("/tmp/other_project"),
-            "other".to_string(),
-        );
+        registry.insert(PathBuf::from("/tmp/other_project"), "other".to_string());
 
-        let result =
-            dispatch_query(&config, &graph, root, "list_projects", &params, Some(&registry));
-        assert!(result.is_ok(), "list_projects should work in batch: {:?}", result);
+        let result = dispatch_query(
+            &config,
+            &graph,
+            root,
+            "list_projects",
+            &params,
+            Some(&registry),
+        );
+        assert!(
+            result.is_ok(),
+            "list_projects should work in batch: {:?}",
+            result
+        );
         let output = result.unwrap();
         assert!(
             output.contains("/tmp/project"),

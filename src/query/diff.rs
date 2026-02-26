@@ -89,10 +89,7 @@ pub fn graph_to_snapshot(graph: &CodeGraph, root: &Path, name: &str) -> GraphSna
     for idx in graph.graph.node_indices() {
         if let GraphNode::File(ref file_info) = graph.graph[idx] {
             // Compute relative path from root
-            let rel = file_info
-                .path
-                .strip_prefix(root)
-                .unwrap_or(&file_info.path);
+            let rel = file_info.path.strip_prefix(root).unwrap_or(&file_info.path);
             let rel_str = rel.to_string_lossy().to_string();
 
             // Count incoming ResolvedImport / BarrelReExportAll edges (importers)
@@ -180,16 +177,14 @@ fn validate_name(name: &str) -> anyhow::Result<()> {
         anyhow::bail!("snapshot name cannot be empty");
     }
     if name.len() > 64 {
-        anyhow::bail!(
-            "snapshot name too long ({} chars, max 64)",
-            name.len()
-        );
+        anyhow::bail!("snapshot name too long ({} chars, max 64)", name.len());
     }
     for ch in name.chars() {
         if !ch.is_alphanumeric() && ch != '-' && ch != '_' {
             anyhow::bail!(
                 "snapshot name '{}' contains invalid character '{}' — only alphanumeric, hyphens, and underscores allowed",
-                name, ch
+                name,
+                ch
             );
         }
     }
@@ -245,17 +240,14 @@ pub fn list_snapshots(project_root: &Path) -> anyhow::Result<Vec<(String, u64)>>
     for entry in std::fs::read_dir(&dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("json") {
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                // Parse the JSON to get created_at
-                match std::fs::read_to_string(&path) {
-                    Ok(contents) => {
-                        if let Ok(snap) = serde_json::from_str::<GraphSnapshot>(&contents) {
-                            results.push((stem.to_string(), snap.created_at));
-                        }
-                    }
-                    Err(_) => {} // skip unreadable files
-                }
+        if path.extension().and_then(|e| e.to_str()) == Some("json")
+            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+        {
+            // Parse the JSON to get created_at
+            if let Ok(contents) = std::fs::read_to_string(&path)
+                && let Ok(snap) = serde_json::from_str::<GraphSnapshot>(&contents)
+            {
+                results.push((stem.to_string(), snap.created_at));
             }
         }
     }
@@ -288,8 +280,8 @@ pub fn compute_diff(
     to: Option<&str>,
     graph: &CodeGraph,
 ) -> Result<GraphDiff, String> {
-    let from_snap = load_snapshot(root, from)
-        .map_err(|e| format!("cannot load snapshot '{}': {}", from, e))?;
+    let from_snap =
+        load_snapshot(root, from).map_err(|e| format!("cannot load snapshot '{}': {}", from, e))?;
 
     let to_snap: GraphSnapshot = match to {
         Some(name) => load_snapshot(root, name)
@@ -439,7 +431,10 @@ mod tests {
 
         let snap = graph_to_snapshot(&graph, root, "test");
         assert_eq!(snap.name, "test");
-        assert!(!snap.files.is_empty(), "snapshot should have at least one file");
+        assert!(
+            !snap.files.is_empty(),
+            "snapshot should have at least one file"
+        );
 
         // Check the file entry
         let file_key = snap.files.keys().next().unwrap();
@@ -496,7 +491,10 @@ mod tests {
         assert!(create_snapshot(&graph, root, "ValidName123").is_ok());
 
         // Invalid names
-        assert!(create_snapshot(&graph, root, "").is_err(), "empty name should fail");
+        assert!(
+            create_snapshot(&graph, root, "").is_err(),
+            "empty name should fail"
+        );
         assert!(
             create_snapshot(&graph, root, "has space").is_err(),
             "name with space should fail"
@@ -564,10 +562,16 @@ mod tests {
         }
         for (file_key, from_file) in &from.files {
             if let Some(to_file) = to.files.get(file_key) {
-                let from_syms: HashMap<&str, &SnapshotSymbol> =
-                    from_file.symbols.iter().map(|s| (s.name.as_str(), s)).collect();
-                let to_syms: HashMap<&str, &SnapshotSymbol> =
-                    to_file.symbols.iter().map(|s| (s.name.as_str(), s)).collect();
+                let from_syms: HashMap<&str, &SnapshotSymbol> = from_file
+                    .symbols
+                    .iter()
+                    .map(|s| (s.name.as_str(), s))
+                    .collect();
+                let to_syms: HashMap<&str, &SnapshotSymbol> = to_file
+                    .symbols
+                    .iter()
+                    .map(|s| (s.name.as_str(), s))
+                    .collect();
 
                 for name in to_syms.keys() {
                     if !from_syms.contains_key(name) {
@@ -660,7 +664,10 @@ mod tests {
 
         let diff = diff_snapshots(&from, &to);
         assert!(diff.added_files.is_empty());
-        assert_eq!(diff.added_symbols, vec![("src/lib.rs".to_string(), "new_fn".to_string())]);
+        assert_eq!(
+            diff.added_symbols,
+            vec![("src/lib.rs".to_string(), "new_fn".to_string())]
+        );
         assert!(diff.removed_symbols.is_empty());
     }
 

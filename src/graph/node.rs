@@ -113,11 +113,11 @@ pub fn classify_file_kind(path: &std::path::Path) -> FileKind {
         // Documentation
         "md" | "txt" | "rst" | "adoc" => FileKind::Doc,
         // Configuration
-        "toml" | "yaml" | "yml" | "json" | "ini" | "env" | "cfg"
-        | "conf" | "properties" | "xml" => FileKind::Config,
+        "toml" | "yaml" | "yml" | "json" | "ini" | "env" | "cfg" | "conf" | "properties"
+        | "xml" => FileKind::Config,
         // Assets
-        "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico" | "woff"
-        | "woff2" | "ttf" | "eot" | "mp3" | "mp4" | "webm" | "pdf" => FileKind::Asset,
+        "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico" | "woff" | "woff2" | "ttf" | "eot"
+        | "mp3" | "mp4" | "webm" | "pdf" => FileKind::Asset,
         // Special files by name
         _ => {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");

@@ -1,6 +1,6 @@
 [package]
 name = "code-graph-cli"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2024"
 description = "Code intelligence engine for TypeScript/JavaScript/Rust — query the dependency graph instead of reading source files."
 license = "MIT"

@@ -1,6 +1,7 @@
 #!/bin/sh
-# Pre-commit hook: prevent committing files that should be ignored by .gitignore
-# This catches files that were force-added or tracked before being gitignored.
+# Pre-commit hook: prevent committing ignored files, check formatting and clippy.
+# Mirrors CI checks from .github/workflows/ci.yml so issues are caught before commit.
+# Install: run 'make setup' or 'git config core.hooksPath .githooks'
 
 set -e
 
@@ -13,6 +14,20 @@ if [ -n "$ignored_files" ]; then
     echo "$ignored_files" | while read -r f; do echo "  $f"; done
     echo ""
     echo "Remove them from tracking with: git rm --cached <file>"
+    exit 1
+fi
+
+# Check formatting (mirrors CI fmt job: cargo fmt --all -- --check)
+if ! cargo fmt --all -- --check; then
+    echo ""
+    echo "Formatting check failed. Run 'cargo fmt --all' to fix."
+    exit 1
+fi
+
+# Check clippy (mirrors CI clippy job: cargo clippy --all-targets --all-features)
+if ! RUSTFLAGS="-Dwarnings" cargo clippy --all-targets --all-features; then
+    echo ""
+    echo "Clippy check failed. Fix warnings before committing."
     exit 1
 fi
 

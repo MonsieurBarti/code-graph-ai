@@ -2,7 +2,6 @@
 ///
 /// Each function returns a `String` that starts with `\n` to ensure the hint
 /// appears on its own line after the response body. Empty string means no hint.
-
 /// Generate hint for find_symbol results.
 ///
 /// - `symbol`: the queried symbol name
@@ -139,7 +138,10 @@ pub fn list_projects_hint() -> String {
 
 /// Generate hint for register_project results.
 pub fn register_project_hint(alias: &str) -> String {
-    format!("\nhint: find_symbol \".*\" project_path=\"{}\" to explore", alias)
+    format!(
+        "\nhint: find_symbol \".*\" project_path=\"{}\" to explore",
+        alias
+    )
 }
 
 /// Generate hint for get_diff results.
@@ -389,7 +391,10 @@ mod tests {
             "hint with zero dead code should say no dead code found: got '{}'",
             hint
         );
-        assert!(hint.starts_with('\n'), "non-empty hint must start with newline");
+        assert!(
+            hint.starts_with('\n'),
+            "non-empty hint must start with newline"
+        );
     }
 
     #[test]
@@ -400,7 +405,10 @@ mod tests {
             "hint with dead code should suggest get_file_summary: got '{}'",
             hint
         );
-        assert!(hint.starts_with('\n'), "non-empty hint must start with newline");
+        assert!(
+            hint.starts_with('\n'),
+            "non-empty hint must start with newline"
+        );
     }
 
     #[test]
@@ -416,7 +424,10 @@ mod tests {
             "list_projects hint should mention find_dead_code: got '{}'",
             hint
         );
-        assert!(hint.starts_with('\n'), "non-empty hint must start with newline");
+        assert!(
+            hint.starts_with('\n'),
+            "non-empty hint must start with newline"
+        );
     }
 
     #[test]
@@ -432,7 +443,10 @@ mod tests {
             "register_project hint should include the alias: got '{}'",
             hint
         );
-        assert!(hint.starts_with('\n'), "non-empty hint must start with newline");
+        assert!(
+            hint.starts_with('\n'),
+            "non-empty hint must start with newline"
+        );
     }
 
     #[test]
@@ -449,7 +463,10 @@ mod tests {
     #[test]
     fn test_batch_hint_empty() {
         let hint = batch_hint(&[]);
-        assert_eq!(hint, "", "batch_hint with empty slice should return empty string");
+        assert_eq!(
+            hint, "",
+            "batch_hint with empty slice should return empty string"
+        );
     }
 
     #[test]
@@ -471,7 +488,10 @@ mod tests {
             "diff hint with changes should suggest find_dead_code: got '{}'",
             hint
         );
-        assert!(hint.starts_with('\n'), "non-empty hint must start with newline");
+        assert!(
+            hint.starts_with('\n'),
+            "non-empty hint must start with newline"
+        );
     }
 
     #[test]
@@ -482,6 +502,9 @@ mod tests {
             "diff hint with no changes should say no changes: got '{}'",
             hint
         );
-        assert!(hint.starts_with('\n'), "non-empty hint must start with newline");
+        assert!(
+            hint.starts_with('\n'),
+            "non-empty hint must start with newline"
+        );
     }
 }

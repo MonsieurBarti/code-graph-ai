@@ -22,12 +22,12 @@ use rayon::prelude::*;
 
 use cli::{Cli, Commands};
 use config::CodeGraphConfig;
+use graph::node::classify_file_kind;
 use graph::{CodeGraph, edge::EdgeKind, node::SymbolKind};
 use language::LanguageKind;
 use output::{IndexStats, print_summary};
 use parser::ParseResult;
 use parser::imports::ImportKind;
-use graph::node::classify_file_kind;
 use walker::{walk_non_parsed_files, walk_project};
 
 /// Rust-specific symbol counts, separated from TS/JS counts for mixed-language projects.
@@ -213,15 +213,33 @@ fn format_epoch_secs(secs: u64) -> String {
     let mut y = 1970u64;
     let mut remaining = days;
     loop {
-        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
+        let days_in_year =
+            if y.is_multiple_of(4) && (!y.is_multiple_of(100) || y.is_multiple_of(400)) {
+                366
+            } else {
+                365
+            };
         if remaining < days_in_year {
             break;
         }
         remaining -= days_in_year;
         y += 1;
     }
-    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let month_days: [u64; 12] = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let leap = y.is_multiple_of(4) && (!y.is_multiple_of(100) || y.is_multiple_of(400));
+    let month_days: [u64; 12] = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut m = 0usize;
     for (i, &md) in month_days.iter().enumerate() {
         if remaining < md {
@@ -231,7 +249,10 @@ fn format_epoch_secs(secs: u64) -> String {
         remaining -= md;
     }
     let d = remaining + 1;
-    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC", y, m, d, hour, minute, second)
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
+        y, m, d, hour, minute, second
+    )
 }
 
 /// Returns true if the file at `path` belongs to the given language string.

@@ -74,19 +74,22 @@ fn visibility_label(vis: &SymbolVisibility) -> &'static str {
 // ---------------------------------------------------------------------------
 
 /// Collect top-level symbols for a file node via Contains edges.
-fn collect_symbols(graph: &CodeGraph, file_idx: petgraph::stable_graph::NodeIndex) -> Vec<StructureSymbol> {
+fn collect_symbols(
+    graph: &CodeGraph,
+    file_idx: petgraph::stable_graph::NodeIndex,
+) -> Vec<StructureSymbol> {
     let mut symbols: Vec<StructureSymbol> = graph
         .graph
         .edges(file_idx)
         .filter_map(|edge_ref| {
-            if let EdgeKind::Contains = edge_ref.weight() {
-                if let GraphNode::Symbol(ref sym) = graph.graph[edge_ref.target()] {
-                    return Some(StructureSymbol {
-                        name: sym.name.clone(),
-                        kind: kind_to_str(&sym.kind).to_string(),
-                        visibility: visibility_label(&sym.visibility).to_string(),
-                    });
-                }
+            if let EdgeKind::Contains = edge_ref.weight()
+                && let GraphNode::Symbol(ref sym) = graph.graph[edge_ref.target()]
+            {
+                return Some(StructureSymbol {
+                    name: sym.name.clone(),
+                    kind: kind_to_str(&sym.kind).to_string(),
+                    visibility: visibility_label(&sym.visibility).to_string(),
+                });
             }
             None
         })
@@ -101,11 +104,7 @@ fn collect_symbols(graph: &CodeGraph, file_idx: petgraph::stable_graph::NodeInde
 ///
 /// - `paths`: (relative_path, absolute_path) pairs sorted lexicographically.
 /// - `depth`: remaining depth levels to recurse. When 0, emit a Truncated node.
-fn build_tree(
-    graph: &CodeGraph,
-    paths: &[(PathBuf, PathBuf)],
-    depth: usize,
-) -> Vec<StructureNode> {
+fn build_tree(graph: &CodeGraph, paths: &[(PathBuf, PathBuf)], depth: usize) -> Vec<StructureNode> {
     if paths.is_empty() {
         return vec![];
     }
@@ -284,8 +283,14 @@ mod tests {
         let root = PathBuf::from("/tmp/test_project");
 
         let file_idx = graph.add_file(root.join("src/main.rs"), "rust");
-        graph.add_symbol(file_idx, make_symbol("main", SymbolKind::Function, SymbolVisibility::Pub));
-        graph.add_symbol(file_idx, make_symbol("Config", SymbolKind::Struct, SymbolVisibility::Pub));
+        graph.add_symbol(
+            file_idx,
+            make_symbol("main", SymbolKind::Function, SymbolVisibility::Pub),
+        );
+        graph.add_symbol(
+            file_idx,
+            make_symbol("Config", SymbolKind::Struct, SymbolVisibility::Pub),
+        );
 
         let tree = file_structure(&graph, &root, None, 3);
 
@@ -365,9 +370,18 @@ mod tests {
         let root = PathBuf::from("/tmp/test_project");
 
         let file_idx = graph.add_file(root.join("src/lib.rs"), "rust");
-        graph.add_symbol(file_idx, make_symbol("pub_fn", SymbolKind::Function, SymbolVisibility::Pub));
-        graph.add_symbol(file_idx, make_symbol("crate_fn", SymbolKind::Function, SymbolVisibility::PubCrate));
-        graph.add_symbol(file_idx, make_symbol("priv_fn", SymbolKind::Function, SymbolVisibility::Private));
+        graph.add_symbol(
+            file_idx,
+            make_symbol("pub_fn", SymbolKind::Function, SymbolVisibility::Pub),
+        );
+        graph.add_symbol(
+            file_idx,
+            make_symbol("crate_fn", SymbolKind::Function, SymbolVisibility::PubCrate),
+        );
+        graph.add_symbol(
+            file_idx,
+            make_symbol("priv_fn", SymbolKind::Function, SymbolVisibility::Private),
+        );
 
         let tree = file_structure(&graph, &root, None, 3);
 
@@ -381,13 +395,22 @@ mod tests {
 
         assert_eq!(symbols.len(), 3);
 
-        let pub_sym = symbols.iter().find(|s| s.name == "pub_fn").expect("pub_fn not found");
+        let pub_sym = symbols
+            .iter()
+            .find(|s| s.name == "pub_fn")
+            .expect("pub_fn not found");
         assert_eq!(pub_sym.visibility, "pub");
 
-        let crate_sym = symbols.iter().find(|s| s.name == "crate_fn").expect("crate_fn not found");
+        let crate_sym = symbols
+            .iter()
+            .find(|s| s.name == "crate_fn")
+            .expect("crate_fn not found");
         assert_eq!(crate_sym.visibility, "pub(crate)");
 
-        let priv_sym = symbols.iter().find(|s| s.name == "priv_fn").expect("priv_fn not found");
+        let priv_sym = symbols
+            .iter()
+            .find(|s| s.name == "priv_fn")
+            .expect("priv_fn not found");
         assert_eq!(priv_sym.visibility, "private");
     }
 
@@ -417,18 +440,14 @@ mod tests {
         let tree = vec![
             StructureNode::Dir {
                 name: "src".to_string(),
-                children: vec![
-                    StructureNode::SourceFile {
-                        name: "main.rs".to_string(),
-                        symbols: vec![
-                            StructureSymbol {
-                                name: "main".to_string(),
-                                kind: "function".to_string(),
-                                visibility: "pub".to_string(),
-                            },
-                        ],
-                    },
-                ],
+                children: vec![StructureNode::SourceFile {
+                    name: "main.rs".to_string(),
+                    symbols: vec![StructureSymbol {
+                        name: "main".to_string(),
+                        kind: "function".to_string(),
+                        visibility: "pub".to_string(),
+                    }],
+                }],
             },
             StructureNode::NonParsedFile {
                 name: "README.md".to_string(),
@@ -445,8 +464,17 @@ mod tests {
 
         assert!(output.contains("src/"), "Should contain src/");
         assert!(output.contains("main.rs"), "Should contain main.rs");
-        assert!(output.contains("pub main (function)"), "Should contain symbol with visibility");
-        assert!(output.contains("README.md [doc]"), "Should contain README.md with kind tag");
-        assert!(output.contains("Cargo.toml [config]"), "Should contain Cargo.toml with kind tag");
+        assert!(
+            output.contains("pub main (function)"),
+            "Should contain symbol with visibility"
+        );
+        assert!(
+            output.contains("README.md [doc]"),
+            "Should contain README.md with kind tag"
+        );
+        assert!(
+            output.contains("Cargo.toml [config]"),
+            "Should contain Cargo.toml with kind tag"
+        );
     }
 }

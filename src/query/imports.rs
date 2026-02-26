@@ -2,11 +2,7 @@ use std::path::{Path, PathBuf};
 
 use petgraph::visit::EdgeRef;
 
-use crate::graph::{
-    CodeGraph,
-    edge::EdgeKind,
-    node::GraphNode,
-};
+use crate::graph::{CodeGraph, edge::EdgeKind, node::GraphNode};
 
 // ---------------------------------------------------------------------------
 // Data structures
@@ -46,10 +42,10 @@ fn classify_rust_import(path: &str, source_crate: Option<&str>) -> ImportCategor
         "crate" | "super" | "self" => ImportCategory::Internal,
         seg => {
             // Check if it's the source file's own crate
-            if let Some(crate_name) = source_crate {
-                if seg == crate_name {
-                    return ImportCategory::Internal;
-                }
+            if let Some(crate_name) = source_crate
+                && seg == crate_name
+            {
+                return ImportCategory::Internal;
             }
             ImportCategory::External
         }
@@ -137,12 +133,11 @@ pub fn file_imports(
                 let target_idx = edge_ref.target();
                 // Use relative path of target file as specifier
                 let specifier = match &graph.graph[target_idx] {
-                    GraphNode::File(fi) => {
-                        fi.path
-                            .strip_prefix(root)
-                            .map(|p| p.to_string_lossy().into_owned())
-                            .unwrap_or_else(|_| fi.path.to_string_lossy().into_owned())
-                    }
+                    GraphNode::File(fi) => fi
+                        .path
+                        .strip_prefix(root)
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .unwrap_or_else(|_| fi.path.to_string_lossy().into_owned()),
                     _ => continue,
                 };
 
@@ -182,9 +177,10 @@ mod tests {
     use crate::graph::{
         CodeGraph,
         edge::EdgeKind,
-        node::{ExternalPackageInfo, FileInfo, FileKind, GraphNode},
+        node::{FileInfo, FileKind, GraphNode},
     };
 
+    #[allow(dead_code)]
     fn make_file_info(path: PathBuf, crate_name: Option<&str>) -> FileInfo {
         FileInfo {
             path,
@@ -194,8 +190,9 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     fn make_graph_with_source(
-        root: &PathBuf,
+        root: &Path,
         file_name: &str,
         crate_name: Option<&str>,
     ) -> (CodeGraph, PathBuf) {
@@ -203,12 +200,10 @@ mod tests {
         let file_path = root.join(file_name);
         let file_idx = graph.add_file(file_path.clone(), "rust");
         // Update crate_name if provided
-        if let Some(cn) = crate_name {
-            if let Some(node) = graph.graph.node_weight_mut(file_idx) {
-                if let GraphNode::File(fi) = node {
-                    fi.crate_name = Some(cn.to_string());
-                }
-            }
+        if let Some(cn) = crate_name
+            && let Some(GraphNode::File(fi)) = graph.graph.node_weight_mut(file_idx)
+        {
+            fi.crate_name = Some(cn.to_string());
         }
         (graph, file_path)
     }
@@ -228,7 +223,9 @@ mod tests {
         graph.graph.add_edge(
             src_idx,
             tgt_idx,
-            EdgeKind::ResolvedImport { specifier: "./b".into() },
+            EdgeKind::ResolvedImport {
+                specifier: "./b".into(),
+            },
         );
 
         let entries = file_imports(&graph, &root, &src_path).unwrap();
@@ -246,7 +243,7 @@ mod tests {
         let src_idx = graph.add_file(src_path.clone(), "typescript");
 
         // Add an external package node
-        let pkg_idx = graph.add_external_package(src_idx, "react", "react");
+        let _pkg_idx = graph.add_external_package(src_idx, "react", "react");
 
         // The add_external_package already adds the edge, so let's just verify
         let entries = file_imports(&graph, &root, &src_path).unwrap();
@@ -284,11 +281,16 @@ mod tests {
         graph.graph.add_edge(
             src_idx,
             src_idx, // self-edge placeholder (as in real resolver)
-            EdgeKind::ReExport { path: "crate::utils::helper".into() },
+            EdgeKind::ReExport {
+                path: "crate::utils::helper".into(),
+            },
         );
 
         let entries = file_imports(&graph, &root, &src_path).unwrap();
-        assert!(entries.iter().any(|e| e.is_reexport), "ReExport edge should set is_reexport=true");
+        assert!(
+            entries.iter().any(|e| e.is_reexport),
+            "ReExport edge should set is_reexport=true"
+        );
         let reexport = entries.iter().find(|e| e.is_reexport).unwrap();
         assert_eq!(reexport.category, ImportCategory::Internal);
     }
@@ -309,7 +311,10 @@ mod tests {
 
         let entries = file_imports(&graph, &root, &barrel_path).unwrap();
         assert_eq!(entries.len(), 1);
-        assert!(entries[0].is_reexport, "BarrelReExportAll should set is_reexport=true");
+        assert!(
+            entries[0].is_reexport,
+            "BarrelReExportAll should set is_reexport=true"
+        );
         assert_eq!(entries[0].category, ImportCategory::Internal);
     }
 
@@ -325,7 +330,9 @@ mod tests {
         graph.graph.add_edge(
             src_idx,
             src_idx, // placeholder target
-            EdgeKind::RustImport { path: "std::collections::HashMap".into() },
+            EdgeKind::RustImport {
+                path: "std::collections::HashMap".into(),
+            },
         );
 
         let entries = file_imports(&graph, &root, &src_path).unwrap();
@@ -349,7 +356,9 @@ mod tests {
         graph.graph.add_edge(
             src_idx,
             src_idx, // placeholder target
-            EdgeKind::RustImport { path: "serde::Deserialize".into() },
+            EdgeKind::RustImport {
+                path: "serde::Deserialize".into(),
+            },
         );
 
         let entries = file_imports(&graph, &root, &src_path).unwrap();
@@ -370,9 +379,9 @@ mod tests {
         let src_idx = graph.add_file(src_path.clone(), "rust");
 
         // Add 3 edges: the order in which petgraph returns edges should be preserved
-        let pkg1_idx = graph.add_external_package(src_idx, "alpha", "alpha");
-        let pkg2_idx = graph.add_external_package(src_idx, "beta", "beta");
-        let pkg3_idx = graph.add_external_package(src_idx, "gamma", "gamma");
+        let _pkg1_idx = graph.add_external_package(src_idx, "alpha", "alpha");
+        let _pkg2_idx = graph.add_external_package(src_idx, "beta", "beta");
+        let _pkg3_idx = graph.add_external_package(src_idx, "gamma", "gamma");
 
         let entries = file_imports(&graph, &root, &src_path).unwrap();
 

@@ -51,8 +51,8 @@ pub struct FileSummary {
     /// Breakdown of all symbols by kind string (e.g. "fn" -> 3, "struct" -> 1).
     pub symbol_kinds: HashMap<String, usize>,
     pub exports: Vec<ExportedSymbol>,
-    pub import_count: usize,     // outgoing import edges
-    pub importer_count: usize,   // incoming import edges
+    pub import_count: usize,   // outgoing import edges
+    pub importer_count: usize, // incoming import edges
     pub graph_label: Option<GraphLabel>,
 }
 
@@ -75,10 +75,7 @@ fn detect_role(
         _ => {}
     }
 
-    let file_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
     let path_str = path.to_string_lossy();
 
@@ -97,8 +94,7 @@ fn detect_role(
 
     // Entry point detection: common entry point file names near the root
     let entry_point_names = [
-        "main.rs", "main.ts", "main.js", "index.ts", "index.js",
-        "app.ts", "app.js",
+        "main.rs", "main.ts", "main.js", "index.ts", "index.js", "app.ts", "app.js",
     ];
     if entry_point_names.contains(&file_name) {
         // Check depth from root: count components between root and the file's parent dir
@@ -135,15 +131,16 @@ fn detect_role(
             .iter()
             .filter(|s| type_kinds.contains(&s.kind))
             .count();
-        let fn_kinds = [SymbolKind::Function, SymbolKind::ImplMethod, SymbolKind::Method];
+        let fn_kinds = [
+            SymbolKind::Function,
+            SymbolKind::ImplMethod,
+            SymbolKind::Method,
+        ];
         let fn_count = symbols
             .iter()
             .filter(|s| fn_kinds.contains(&s.kind))
             .count();
-        if type_count > 0
-            && fn_count == 0
-            && type_count * 100 / symbols.len() >= 60
-        {
+        if type_count > 0 && fn_count == 0 && type_count * 100 / symbols.len() >= 60 {
             return FileRole::Types;
         }
     }
@@ -200,7 +197,12 @@ pub fn file_summary(
     // Get FileInfo
     let file_info = match &graph.graph[file_idx] {
         GraphNode::File(fi) => fi.clone(),
-        _ => return Err(format!("Node at path is not a File: {}", file_path.display())),
+        _ => {
+            return Err(format!(
+                "Node at path is not a File: {}",
+                file_path.display()
+            ));
+        }
     };
 
     // Collect all symbols via Contains edges (top-level symbols only)
@@ -208,10 +210,10 @@ pub fn file_summary(
         .graph
         .edges(file_idx)
         .filter_map(|edge_ref| {
-            if let EdgeKind::Contains = edge_ref.weight() {
-                if let GraphNode::Symbol(ref sym) = graph.graph[edge_ref.target()] {
-                    return Some(sym.clone());
-                }
+            if let EdgeKind::Contains = edge_ref.weight()
+                && let GraphNode::Symbol(ref sym) = graph.graph[edge_ref.target()]
+            {
+                return Some(sym.clone());
             }
             None
         })
@@ -222,7 +224,9 @@ pub fn file_summary(
     // Build symbol kind breakdown map
     let mut symbol_kinds: HashMap<String, usize> = HashMap::new();
     for sym in &all_symbols {
-        *symbol_kinds.entry(kind_to_str(&sym.kind).to_string()).or_insert(0) += 1;
+        *symbol_kinds
+            .entry(kind_to_str(&sym.kind).to_string())
+            .or_insert(0) += 1;
     }
 
     // Filter exported symbols:
@@ -233,7 +237,8 @@ pub fn file_summary(
         .iter()
         .filter(|sym| {
             if is_rust {
-                sym.visibility == SymbolVisibility::Pub || sym.visibility == SymbolVisibility::PubCrate
+                sym.visibility == SymbolVisibility::Pub
+                    || sym.visibility == SymbolVisibility::PubCrate
             } else {
                 sym.is_exported
             }
@@ -249,8 +254,7 @@ pub fn file_summary(
     let mut reexport_count: usize = 0;
     for edge_ref in graph.graph.edges(file_idx) {
         match edge_ref.weight() {
-            EdgeKind::ResolvedImport { .. }
-            | EdgeKind::RustImport { .. } => {
+            EdgeKind::ResolvedImport { .. } | EdgeKind::RustImport { .. } => {
                 import_count += 1;
             }
             EdgeKind::ReExport { .. } => {
@@ -314,16 +318,19 @@ mod tests {
     use std::io::Write;
     use std::path::PathBuf;
 
-    use petgraph::Direction;
-
     use super::*;
     use crate::graph::{
         CodeGraph,
         edge::EdgeKind,
-        node::{FileInfo, FileKind, SymbolInfo, SymbolKind, SymbolVisibility},
+        node::{SymbolInfo, SymbolKind, SymbolVisibility},
     };
 
-    fn make_symbol(name: &str, kind: SymbolKind, vis: SymbolVisibility, exported: bool) -> SymbolInfo {
+    fn make_symbol(
+        name: &str,
+        kind: SymbolKind,
+        vis: SymbolVisibility,
+        exported: bool,
+    ) -> SymbolInfo {
         SymbolInfo {
             name: name.into(),
             kind,
@@ -408,9 +415,18 @@ mod tests {
         let file_idx = graph.add_file(file_path.clone(), "rust");
 
         // Add 3 struct symbols (all type-defining) and 0 functions
-        graph.add_symbol(file_idx, make_symbol("TypeA", SymbolKind::Struct, SymbolVisibility::Pub, false));
-        graph.add_symbol(file_idx, make_symbol("TypeB", SymbolKind::Struct, SymbolVisibility::Pub, false));
-        graph.add_symbol(file_idx, make_symbol("TypeC", SymbolKind::Enum, SymbolVisibility::Pub, false));
+        graph.add_symbol(
+            file_idx,
+            make_symbol("TypeA", SymbolKind::Struct, SymbolVisibility::Pub, false),
+        );
+        graph.add_symbol(
+            file_idx,
+            make_symbol("TypeB", SymbolKind::Struct, SymbolVisibility::Pub, false),
+        );
+        graph.add_symbol(
+            file_idx,
+            make_symbol("TypeC", SymbolKind::Enum, SymbolVisibility::Pub, false),
+        );
 
         let summary = file_summary(&graph, &root, &file_path).unwrap();
         assert_eq!(
@@ -429,7 +445,15 @@ mod tests {
         let file_path = root.join("src/helpers.rs");
         let file_idx = graph.add_file(file_path.clone(), "rust");
         // Add some function symbols (not all types)
-        graph.add_symbol(file_idx, make_symbol("helper_fn", SymbolKind::Function, SymbolVisibility::Pub, false));
+        graph.add_symbol(
+            file_idx,
+            make_symbol(
+                "helper_fn",
+                SymbolKind::Function,
+                SymbolVisibility::Pub,
+                false,
+            ),
+        );
 
         let summary = file_summary(&graph, &root, &file_path).unwrap();
         assert_eq!(
@@ -454,7 +478,9 @@ mod tests {
             graph.graph.add_edge(
                 importer_idx,
                 hub_idx,
-                EdgeKind::ResolvedImport { specifier: "./central".into() },
+                EdgeKind::ResolvedImport {
+                    specifier: "./central".into(),
+                },
             );
         }
 
@@ -498,7 +524,9 @@ mod tests {
             graph.graph.add_edge(
                 importer_idx,
                 bridge_idx,
-                EdgeKind::ResolvedImport { specifier: "./bridge".into() },
+                EdgeKind::ResolvedImport {
+                    specifier: "./bridge".into(),
+                },
             );
         }
 
@@ -509,7 +537,9 @@ mod tests {
             graph.graph.add_edge(
                 bridge_idx,
                 dep_idx,
-                EdgeKind::ResolvedImport { specifier: format!("./dep{}", i) },
+                EdgeKind::ResolvedImport {
+                    specifier: format!("./dep{}", i),
+                },
             );
         }
 
@@ -537,7 +567,7 @@ mod tests {
                     &format!("ExportedFn{}", i),
                     SymbolKind::Function,
                     SymbolVisibility::Private, // TS uses is_exported
-                    true, // is_exported = true
+                    true,                      // is_exported = true
                 ),
             );
         }
@@ -567,8 +597,7 @@ mod tests {
 
         let summary = file_summary(&graph, &root, &tmp_path).unwrap();
         assert_eq!(
-            summary.line_count,
-            10,
+            summary.line_count, 10,
             "Should count 10 lines in the temp file"
         );
     }
