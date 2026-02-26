@@ -313,6 +313,7 @@ mod tests {
         // Create a code-graph.toml with exclude patterns
         let config = CodeGraphConfig {
             exclude: Some(vec!["*.toml".to_string()]),
+            mcp: Default::default(),
         };
 
         let files = walk_non_parsed_files(dir.path(), &config).unwrap();

@@ -27,16 +27,19 @@ pub struct CodeGraphServer {
     graph_cache: Arc<RwLock<HashMap<PathBuf, Arc<CodeGraph>>>>,
     watcher_handle: Arc<tokio::sync::Mutex<Option<crate::watcher::WatcherHandle>>>,
     watch_enabled: bool,
+    mcp_config: crate::config::McpConfig,
     tool_router: ToolRouter<Self>,
 }
 
 impl CodeGraphServer {
     pub fn new(project_root: PathBuf, watch: bool) -> Self {
+        let config = crate::config::CodeGraphConfig::load(&project_root);
         Self {
             default_project_root: Arc::new(project_root),
             graph_cache: Arc::new(RwLock::new(HashMap::new())),
             watcher_handle: Arc::new(tokio::sync::Mutex::new(None)),
             watch_enabled: watch,
+            mcp_config: config.mcp,
             tool_router: Self::tool_router(),
         }
     }
@@ -442,6 +445,25 @@ fn not_found_msg(symbol: &str, suggestions: &[String]) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Config helpers
+// ---------------------------------------------------------------------------
+
+/// Return the effective limit: use the explicit per-call value when present,
+/// otherwise fall back to the project config default.
+fn resolve_limit(call_limit: Option<usize>, config: &crate::config::McpConfig) -> usize {
+    call_limit.unwrap_or(config.default_limit)
+}
+
+/// Return the effective sections filter: use the explicit per-call value when present,
+/// otherwise fall back to the project config default.
+fn resolve_sections<'a>(
+    call_sections: Option<&'a str>,
+    config: &'a crate::config::McpConfig,
+) -> Option<&'a str> {
+    call_sections.or(config.default_sections.as_deref())
+}
+
+// ---------------------------------------------------------------------------
 // Tool implementations
 // ---------------------------------------------------------------------------
 
@@ -479,12 +501,12 @@ impl CodeGraphServer {
             return Err(not_found_msg(&p.symbol, &suggestions));
         }
 
-        let limit = p.limit.unwrap_or(20);
+        let limit = resolve_limit(p.limit, &self.mcp_config);
         let truncated = results.len() > limit;
         let limited = &results[..results.len().min(limit)];
         let output = crate::query::output::format_find_to_string(limited, &root);
 
-        let output = if truncated {
+        let output = if truncated && !self.mcp_config.suppress_summary_line {
             format!("truncated: {}/{}\n{}", limit, results.len(), output)
         } else {
             output
@@ -523,12 +545,12 @@ impl CodeGraphServer {
 
         let results = crate::query::refs::find_refs(&graph, &p.symbol, &all_indices, &root);
 
-        let limit = p.limit.unwrap_or(30);
+        let limit = resolve_limit(p.limit, &self.mcp_config);
         let truncated = results.len() > limit;
         let limited = &results[..results.len().min(limit)];
         let output = crate::query::output::format_refs_to_string(limited, &root);
 
-        let output = if truncated {
+        let output = if truncated && !self.mcp_config.suppress_summary_line {
             format!("truncated: {}/{}\n{}", limit, results.len(), output)
         } else {
             output
@@ -566,12 +588,12 @@ impl CodeGraphServer {
 
         let results = crate::query::impact::blast_radius(&graph, &all_indices, &root);
 
-        let limit = p.limit.unwrap_or(50);
+        let limit = resolve_limit(p.limit, &self.mcp_config);
         let truncated = results.len() > limit;
         let limited = &results[..results.len().min(limit)];
         let output = crate::query::output::format_impact_to_string(limited, &root);
 
-        let output = if truncated {
+        let output = if truncated && !self.mcp_config.suppress_summary_line {
             format!("truncated: {}/{}\n{}", limit, results.len(), output)
         } else {
             output
@@ -624,7 +646,8 @@ impl CodeGraphServer {
             })
             .collect();
 
-        let output = crate::query::output::format_context_to_string(&contexts, &root, p.sections.as_deref());
+        let effective_sections = resolve_sections(p.sections.as_deref(), &self.mcp_config);
+        let output = crate::query::output::format_context_to_string(&contexts, &root, effective_sections);
         let output = format!("{}{}", output, crate::mcp::hints::context_hint(&p.symbol));
         Ok(output)
     }
@@ -776,8 +799,114 @@ impl ServerHandler for CodeGraphServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::McpConfig;
     use rmcp::ServerHandler;
     use std::path::PathBuf;
+
+    // ---------------------------------------------------------------------------
+    // resolve_limit tests (CFG-02)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_limit_explicit_overrides_config() {
+        let config = McpConfig {
+            default_limit: 20,
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_limit(Some(50), &config),
+            50,
+            "explicit per-call limit should override config default"
+        );
+    }
+
+    #[test]
+    fn test_resolve_limit_none_uses_config() {
+        let config = McpConfig {
+            default_limit: 20,
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_limit(None, &config),
+            20,
+            "None should fall back to config default_limit"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // resolve_sections tests (CFG-02)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_sections_explicit_overrides_config() {
+        let config = McpConfig {
+            default_sections: Some("r".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_sections(Some("r,c"), &config),
+            Some("r,c"),
+            "explicit per-call sections should override config default"
+        );
+    }
+
+    #[test]
+    fn test_resolve_sections_none_uses_config() {
+        let config = McpConfig {
+            default_sections: Some("r".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_sections(None, &config),
+            Some("r"),
+            "None should fall back to config default_sections"
+        );
+    }
+
+    #[test]
+    fn test_resolve_sections_both_none() {
+        let config = McpConfig {
+            default_sections: None,
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_sections(None, &config),
+            None,
+            "None with no config default should return None"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // test_server_loads_mcp_config (CFG-01 + CFG-02)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_server_loads_mcp_config() {
+        let dir = tempfile::tempdir().expect("tempdir should succeed");
+        let toml_content = r#"
+[mcp]
+default_limit = 42
+default_sections = "r,c"
+suppress_summary_line = true
+"#;
+        std::fs::write(dir.path().join("code-graph.toml"), toml_content)
+            .expect("write should succeed");
+
+        let server = CodeGraphServer::new(dir.path().to_path_buf(), false);
+        assert_eq!(
+            server.mcp_config.default_limit, 42,
+            "server should load default_limit from code-graph.toml"
+        );
+        assert_eq!(
+            server.mcp_config.default_sections.as_deref(),
+            Some("r,c"),
+            "server should load default_sections from code-graph.toml"
+        );
+        assert!(
+            server.mcp_config.suppress_summary_line,
+            "server should load suppress_summary_line from code-graph.toml"
+        );
+    }
 
     #[test]
     fn test_get_info_describes_auto_indexing() {
