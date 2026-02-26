@@ -751,11 +751,11 @@ async fn main() -> Result<()> {
             query::output::format_context_results(&results, &format, &path, &symbol);
         }
 
-        Commands::Mcp { path } => {
+        Commands::Mcp { path, watch } => {
             let project_root = path.unwrap_or_else(|| {
                 std::env::current_dir().expect("cannot determine current directory")
             });
-            mcp::run(project_root).await?;
+            mcp::run(project_root, watch).await?;
         }
 
         Commands::Export {

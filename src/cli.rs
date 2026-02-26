@@ -203,6 +203,9 @@ pub enum Commands {
     Mcp {
         /// Path to the project root (defaults to current directory if omitted).
         path: Option<PathBuf>,
+        /// Start a file watcher that auto-reindexes on changes.
+        #[arg(long)]
+        watch: bool,
     },
 
     /// Start a file watcher that monitors for changes and re-indexes incrementally.
