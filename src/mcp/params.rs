@@ -135,9 +135,65 @@ pub struct GetDiffParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct FindByDecoratorParams {
+    /// Regex pattern to match against decorator names (e.g., "Controller", "get|post", "app\\.route")
+    pub pattern: String,
+    /// Filter by programming language: "ts", "js", "rust", "python", "go". Omit for all languages.
+    pub language: Option<String>,
+    /// Filter by framework name: "nestjs", "fastapi", "flask", "actix", etc. Omit for all frameworks.
+    pub framework: Option<String>,
+    /// Max results (default: 30)
+    pub limit: Option<usize>,
+    /// Project root path override
+    pub project_path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GetDiffImpactParams {
+    /// Git ref to diff against (e.g., "main", "HEAD~3", commit SHA).
+    pub base_ref: String,
+    /// Project root path override.
+    pub project_path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct FindClustersParams {
+    /// Directory scope — only cluster symbols under this path (relative to project root).
+    /// Omit for entire project.
+    pub scope: Option<String>,
+    /// Project root path override
+    pub project_path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct TraceFlowParams {
+    /// Entry symbol name (start of the call chain)
+    pub entry: String,
+    /// Target symbol name (end of the call chain)
+    pub target: String,
+    /// Maximum number of paths to return (default: 3)
+    pub max_paths: Option<usize>,
+    /// Maximum hop depth per path (default: 20)
+    pub max_depth: Option<usize>,
+    /// Project root path override
+    pub project_path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PlanRenameParams {
+    /// Symbol name to rename
+    pub symbol: String,
+    /// Proposed new name
+    pub new_name: String,
+    /// Project root path override
+    pub project_path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct BatchQueryEntry {
     /// Tool name: find_symbol, find_references, get_impact, get_context,
-    /// detect_circular, get_stats, get_structure, get_file_summary, get_imports, export_graph, find_dead_code, get_diff
+    /// detect_circular, get_stats, get_structure, get_file_summary, get_imports, export_graph,
+    /// find_dead_code, get_diff, find_by_decorator, find_clusters, trace_flow, plan_rename
     pub tool: String,
     /// Tool parameters as a JSON object (same keys as the individual tool's params)
     #[schemars(with = "serde_json::Value")]

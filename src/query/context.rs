@@ -80,10 +80,12 @@ pub fn symbol_context(
                     kind: sym_info.kind.clone(),
                     file_path: fi.path.clone(),
                     line: sym_info.line,
+                    line_end: sym_info.line_end,
                     col: sym_info.col,
                     is_exported: sym_info.is_exported,
                     is_default: sym_info.is_default,
                     visibility: sym_info.visibility.clone(),
+                    decorators: sym_info.decorators.clone(),
                 });
             }
         }
@@ -338,7 +340,7 @@ mod tests {
 
     use crate::graph::{
         CodeGraph,
-        node::{SymbolInfo, SymbolKind, SymbolVisibility},
+        node::{SymbolInfo, SymbolKind},
     };
 
     fn root() -> PathBuf {
@@ -359,11 +361,8 @@ mod tests {
                 name: "UserService".into(),
                 kind: SymbolKind::Class,
                 line: 1,
-                col: 0,
                 is_exported: true,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
 
@@ -374,11 +373,8 @@ mod tests {
                 name: "handleRequest".into(),
                 kind: SymbolKind::Function,
                 line: 3,
-                col: 0,
                 is_exported: true,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
         // handleRequest calls UserService
@@ -428,11 +424,8 @@ mod tests {
                 name: "BaseService".into(),
                 kind: SymbolKind::Class,
                 line: 1,
-                col: 0,
                 is_exported: true,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
 
@@ -443,11 +436,8 @@ mod tests {
                 name: "ChildService".into(),
                 kind: SymbolKind::Class,
                 line: 1,
-                col: 0,
                 is_exported: true,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
 
@@ -492,11 +482,8 @@ mod tests {
                 name: "IService".into(),
                 kind: SymbolKind::Interface,
                 line: 1,
-                col: 0,
                 is_exported: true,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
 
@@ -507,11 +494,8 @@ mod tests {
                 name: "ServiceImpl".into(),
                 kind: SymbolKind::Class,
                 line: 1,
-                col: 0,
                 is_exported: true,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
 

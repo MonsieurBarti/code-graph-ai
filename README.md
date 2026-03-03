@@ -218,31 +218,11 @@ All query commands support `--format`:
 
 ### Claude Code setup
 
-Add to your Claude Code MCP config (`~/.claude/claude_desktop_config.json` or project `.mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "code-graph": {
-      "command": "code-graph",
-      "args": ["mcp"]
-    }
-  }
-}
+```bash
+claude mcp add --scope user code-graph -- code-graph mcp --watch
 ```
 
-The server defaults to the current working directory. To specify a path or enable auto-reindex:
-
-```json
-{
-  "mcpServers": {
-    "code-graph": {
-      "command": "code-graph",
-      "args": ["mcp", "/path/to/your/project", "--watch"]
-    }
-  }
-}
-```
+This registers `code-graph` as a user-scoped MCP server available in all your projects. The `--watch` flag enables auto-reindex on file changes.
 
 ### Available tools
 

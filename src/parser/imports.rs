@@ -15,6 +15,20 @@ pub enum ImportKind {
     Cjs,
     /// Dynamic import: `import('./module')`
     DynamicImport,
+    /// Python absolute import: `import os` or `from pkg import name`
+    PythonAbsolute,
+    /// Python relative import: `from . import X` (level=1) or `from ..pkg import Y` (level=2)
+    PythonRelative { level: usize },
+    /// Python conditional absolute import (inside try/except block): `try: from fast import X`
+    PythonConditionalAbsolute,
+    /// Python conditional relative import (inside try/except block): `try: from . import X`
+    PythonConditionalRelative { level: usize },
+    /// Go absolute import: `import "pkg"`.
+    GoAbsolute,
+    /// Go blank import: `import _ "pkg"` — side-effect only.
+    GoBlank,
+    /// Go dot import: `import . "pkg"` — all names imported.
+    GoDot,
 }
 
 /// A single imported name from a module.
@@ -33,12 +47,17 @@ pub struct ImportSpecifier {
 /// An import extracted from a source file.
 #[derive(Debug, Clone)]
 pub struct ImportInfo {
-    /// Kind of import (ESM / CJS / dynamic).
+    /// Kind of import (ESM / CJS / dynamic / Python).
     pub kind: ImportKind,
     /// The raw module specifier string, e.g. `"react"` or `"./utils"`.
     pub module_path: String,
     /// The names imported from the module.
     pub specifiers: Vec<ImportSpecifier>,
+    /// 1-based line number where the import statement begins.
+    /// 0 for imports extracted from older code paths that do not set this field.
+    /// Used by Python import extraction (Plan 17-02); consumed by pipeline in Plan 17-03.
+    #[allow(dead_code)]
+    pub line: usize,
 }
 
 /// The kind of export statement.
@@ -391,6 +410,7 @@ pub fn extract_imports(
                     kind: ImportKind::Esm,
                     module_path: path,
                     specifiers,
+                    line: 0,
                 });
             }
         }
@@ -462,6 +482,7 @@ pub fn extract_imports(
                     kind: ImportKind::Cjs,
                     module_path: path,
                     specifiers,
+                    line: 0,
                 });
             }
         }
@@ -491,6 +512,7 @@ pub fn extract_imports(
                     kind: ImportKind::DynamicImport,
                     module_path: path,
                     specifiers: Vec::new(),
+                    line: 0,
                 });
             }
         }

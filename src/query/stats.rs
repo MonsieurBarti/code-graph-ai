@@ -66,6 +66,40 @@ pub struct ProjectStats {
     pub builtin_usage_count: usize,
     /// Number of edges pointing to ExternalPackage nodes (usage count).
     pub external_usage_count: usize,
+    // Python-specific counts (Phase 17)
+    /// Number of Python files in the graph.
+    pub python_file_count: usize,
+    /// Total Python symbols (functions + classes + type_aliases + variables + methods).
+    pub python_symbol_count: usize,
+    /// Python function count.
+    pub python_fns: usize,
+    /// Python class count.
+    pub python_classes: usize,
+    /// Python type alias count (PEP 695 `type X = ...`).
+    pub python_type_aliases: usize,
+    /// Python variable (module-level assignment) count.
+    pub python_variables: usize,
+    /// Python method count (class member methods).
+    pub python_methods: usize,
+    // Go-specific counts (Phase 18)
+    /// Number of Go files in the graph.
+    pub go_file_count: usize,
+    /// Total Go symbols.
+    pub go_symbol_count: usize,
+    /// Go function count.
+    pub go_fns: usize,
+    /// Go struct count.
+    pub go_structs: usize,
+    /// Go interface count.
+    pub go_interfaces: usize,
+    /// Go method count (methods on receivers).
+    pub go_methods: usize,
+    /// Go const count.
+    pub go_consts: usize,
+    /// Go variable count.
+    pub go_variables: usize,
+    /// Go type alias/definition count.
+    pub go_type_aliases: usize,
     // Phase 12: Non-parsed file counts
     /// Total number of non-parsed (non-source) files in the graph.
     pub non_parsed_files: usize,
@@ -202,6 +236,126 @@ pub fn project_stats(graph: &CodeGraph) -> ProjectStats {
     }
 
     // ---------------------------------------------------------------------------
+    // Python symbol counts (Phase 17).
+    // ---------------------------------------------------------------------------
+    let mut python_symbol_count = 0usize;
+    let mut python_fns = 0usize;
+    let mut python_classes = 0usize;
+    let mut python_type_aliases = 0usize;
+    let mut python_variables = 0usize;
+
+    // First pass: collect Python file node indices.
+    let python_file_indices: Vec<petgraph::stable_graph::NodeIndex> = graph
+        .graph
+        .node_indices()
+        .filter(|&idx| {
+            if let GraphNode::File(ref fi) = graph.graph[idx] {
+                fi.language == "python"
+            } else {
+                false
+            }
+        })
+        .collect();
+    let python_file_count = python_file_indices.len();
+
+    // Second pass: count symbols contained in Python files.
+    // This includes both top-level symbols (via Contains edges from file) and
+    // class members (via ChildOf edges from child symbols whose parents are
+    // in Python files).
+    let mut python_methods = 0usize;
+    for file_idx in &python_file_indices {
+        for edge in graph.graph.edges(*file_idx) {
+            if let EdgeKind::Contains = edge.weight()
+                && let GraphNode::Symbol(ref s) = graph.graph[edge.target()]
+            {
+                python_symbol_count += 1;
+                match s.kind {
+                    SymbolKind::Function => python_fns += 1,
+                    SymbolKind::Class => python_classes += 1,
+                    SymbolKind::TypeAlias => python_type_aliases += 1,
+                    SymbolKind::Variable => python_variables += 1,
+                    _ => {}
+                }
+
+                // Also count class methods (ChildOf edges going OUT from this symbol).
+                for child_edge in graph
+                    .graph
+                    .edges_directed(edge.target(), petgraph::Direction::Incoming)
+                {
+                    if let EdgeKind::ChildOf = child_edge.weight()
+                        && let GraphNode::Symbol(ref cs) = graph.graph[child_edge.source()]
+                    {
+                        python_symbol_count += 1;
+                        if matches!(cs.kind, SymbolKind::Method | SymbolKind::Function) {
+                            python_methods += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Go symbol counts (Phase 18).
+    // ---------------------------------------------------------------------------
+    let go_file_indices: Vec<petgraph::stable_graph::NodeIndex> = graph
+        .graph
+        .node_indices()
+        .filter(|&idx| {
+            if let GraphNode::File(ref fi) = graph.graph[idx] {
+                fi.language == "go"
+            } else {
+                false
+            }
+        })
+        .collect();
+    let go_file_count = go_file_indices.len();
+    let mut go_symbol_count = 0usize;
+    let mut go_fns = 0usize;
+    let mut go_structs = 0usize;
+    let mut go_interfaces = 0usize;
+    let mut go_methods = 0usize;
+    let mut go_consts = 0usize;
+    let mut go_variables = 0usize;
+    let mut go_type_aliases = 0usize;
+
+    for file_idx in &go_file_indices {
+        for edge in graph.graph.edges(*file_idx) {
+            if let EdgeKind::Contains = edge.weight()
+                && let GraphNode::Symbol(ref s) = graph.graph[edge.target()]
+            {
+                go_symbol_count += 1;
+                match s.kind {
+                    SymbolKind::Function => go_fns += 1,
+                    SymbolKind::Struct => go_structs += 1,
+                    SymbolKind::Interface => {
+                        go_interfaces += 1;
+                        // Interface methods are added as child symbols (ChildOf edges only,
+                        // no Contains edge from file) — count them here to avoid missing them.
+                        for child_edge in graph
+                            .graph
+                            .edges_directed(edge.target(), Direction::Incoming)
+                        {
+                            if let EdgeKind::ChildOf = child_edge.weight()
+                                && let GraphNode::Symbol(ref cs) = graph.graph[child_edge.source()]
+                                && matches!(cs.kind, SymbolKind::Method | SymbolKind::Function)
+                            {
+                                go_symbol_count += 1;
+                                go_methods += 1;
+                            }
+                        }
+                    }
+                    SymbolKind::Const => go_consts += 1,
+                    SymbolKind::Variable => go_variables += 1,
+                    SymbolKind::TypeAlias => go_type_aliases += 1,
+                    SymbolKind::Method => go_methods += 1,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------
     // Per-crate breakdown (Phase 9).
     //
     // Group Rust file nodes by their crate_name field, then count symbols per crate.
@@ -260,6 +414,24 @@ pub fn project_stats(graph: &CodeGraph) -> ProjectStats {
         builtin_count,
         builtin_usage_count,
         external_usage_count,
+        // Phase 17: Python counts
+        python_file_count,
+        python_symbol_count,
+        python_fns,
+        python_classes,
+        python_type_aliases,
+        python_variables,
+        python_methods,
+        // Phase 18: Go counts
+        go_file_count,
+        go_symbol_count,
+        go_fns,
+        go_structs,
+        go_interfaces,
+        go_methods,
+        go_consts,
+        go_variables,
+        go_type_aliases,
         // Phase 12: Non-parsed file counts
         non_parsed_files,
         doc_files,

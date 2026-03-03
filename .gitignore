@@ -2,6 +2,12 @@
 /target/
 .cargo/
 
+# Web frontend build artifacts
+web/dist/
+web/node_modules/
+web/package-lock.json
+node_modules
+
 # IDE / Editor
 .idea/
 .vscode/
@@ -14,9 +20,14 @@
 .env
 .env.*
 
+# Playwright e2e test artifacts
+playwright-report/
+test-results/
+
 # Claude / Planning / Dev
 .claude/
 .planning/
 .devcontainer/
 .code-graph/
 .mcp.json
+.cache

@@ -32,7 +32,7 @@ struct PackageJson {
 
 /// Source file extensions that code-graph discovers.
 /// .rs files are discovered and counted but not parsed until Phase 8.
-const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "rs"];
+const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "rs", "py", "go"];
 
 /// Walk a project directory and collect source files.
 ///
@@ -320,6 +320,7 @@ mod tests {
         let config = CodeGraphConfig {
             exclude: Some(vec!["*.toml".to_string()]),
             mcp: Default::default(),
+            impact: Default::default(),
         };
 
         let files = walk_non_parsed_files(dir.path(), &config).unwrap();

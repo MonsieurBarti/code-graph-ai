@@ -80,6 +80,16 @@ pub enum Commands {
         /// Example: --language rust  or  --language rust,typescript
         #[arg(long, value_delimiter = ',')]
         language: Vec<String>,
+
+        /// Skip building the vector embedding index (disables RAG agent).
+        ///
+        /// By default, `code-graph index` builds per-symbol vector embeddings using
+        /// fastembed and persists them to `.code-graph/vectors.usearch`. Use this flag
+        /// to skip the embedding pass (faster indexing, no model download required).
+        /// Only available when compiled with `--features rag`.
+        #[cfg(feature = "rag")]
+        #[arg(long)]
+        no_embeddings: bool,
     },
 
     /// Find a symbol's definition (file:line location).
@@ -250,6 +260,56 @@ pub enum Commands {
         action: SnapshotAction,
     },
 
+    /// Set up MCP server configuration for supported editors (Claude Code, Cursor, Windsurf).
+    ///
+    /// Auto-detects editors, writes config files, and verifies the server starts.
+    /// Shows a confirmation prompt before writing. Use --yes to skip the prompt.
+    Setup {
+        /// Path to the project root (defaults to current directory).
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
+        /// Skip confirmation prompt and write immediately (for non-interactive/CI usage).
+        #[arg(long, short = 'y')]
+        yes: bool,
+
+        /// Install Claude Code skills (explore-codebase, debug-impact, refactor-symbol) into .claude/skills/.
+        /// Enabled by default for Claude Code — use --no-skills to skip.
+        #[arg(long)]
+        skills: bool,
+
+        /// Install PreToolUse hook that enriches Grep/Glob results with graph context.
+        /// Enabled by default for Claude Code — use --no-hooks to skip.
+        #[arg(long)]
+        hooks: bool,
+
+        /// Skip skill installation even when Claude Code is detected.
+        #[arg(long)]
+        no_skills: bool,
+
+        /// Skip hook installation even when Claude Code is detected.
+        #[arg(long)]
+        no_hooks: bool,
+    },
+
+    /// Start a web server with interactive graph visualization UI.
+    #[cfg(feature = "web")]
+    Serve {
+        /// Path to the project root (defaults to current directory).
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Port to listen on.
+        #[arg(long, default_value_t = 7070)]
+        port: u16,
+        /// Use Ollama as the default LLM provider for the RAG chat agent (offline mode).
+        ///
+        /// Connects to a locally-running Ollama instance at http://localhost:11434.
+        /// The API key prompt in the chat UI will be skipped.
+        #[cfg(feature = "rag")]
+        #[arg(long)]
+        ollama: bool,
+    },
+
     /// Export the code graph to DOT or Mermaid format for architectural visualization.
     Export {
         /// Path to the project root to index and export.
@@ -367,6 +427,102 @@ mod tests {
                 _ => panic!("expected Delete action"),
             },
             _ => panic!("expected Snapshot command"),
+        }
+    }
+
+    #[test]
+    fn test_setup_skills_flag() {
+        let cli = Cli::parse_from(["code-graph", "setup", "--skills"]);
+        match cli.command {
+            Commands::Setup { skills, .. } => {
+                assert!(skills, "--skills flag should be true");
+            }
+            _ => panic!("expected Setup command"),
+        }
+    }
+
+    #[test]
+    fn test_setup_hooks_flag() {
+        let cli = Cli::parse_from(["code-graph", "setup", "--hooks"]);
+        match cli.command {
+            Commands::Setup { hooks, .. } => {
+                assert!(hooks, "--hooks flag should be true");
+            }
+            _ => panic!("expected Setup command"),
+        }
+    }
+
+    #[test]
+    fn test_setup_no_skills_flag() {
+        let cli = Cli::parse_from(["code-graph", "setup", "--no-skills"]);
+        match cli.command {
+            Commands::Setup { no_skills, .. } => {
+                assert!(no_skills, "--no-skills flag should be true");
+            }
+            _ => panic!("expected Setup command"),
+        }
+    }
+
+    #[test]
+    fn test_setup_no_hooks_flag() {
+        let cli = Cli::parse_from(["code-graph", "setup", "--no-hooks"]);
+        match cli.command {
+            Commands::Setup { no_hooks, .. } => {
+                assert!(no_hooks, "--no-hooks flag should be true");
+            }
+            _ => panic!("expected Setup command"),
+        }
+    }
+
+    /// Verify that `code-graph index . --no-embeddings` parses correctly when rag feature is on.
+    #[test]
+    #[cfg(feature = "rag")]
+    fn test_index_no_embeddings_flag() {
+        let cli = Cli::parse_from(["code-graph", "index", ".", "--no-embeddings"]);
+        match cli.command {
+            Commands::Index { no_embeddings, .. } => {
+                assert!(no_embeddings, "--no-embeddings flag should be true");
+            }
+            _ => panic!("expected Index command"),
+        }
+    }
+
+    /// Verify that `code-graph index .` without --no-embeddings defaults to false.
+    #[test]
+    #[cfg(feature = "rag")]
+    fn test_index_embeddings_enabled_by_default() {
+        let cli = Cli::parse_from(["code-graph", "index", "."]);
+        match cli.command {
+            Commands::Index { no_embeddings, .. } => {
+                assert!(!no_embeddings, "--no-embeddings should default to false");
+            }
+            _ => panic!("expected Index command"),
+        }
+    }
+
+    /// Verify that `code-graph serve --ollama` parses when compiled with rag feature.
+    #[test]
+    #[cfg(all(feature = "web", feature = "rag"))]
+    fn test_serve_ollama_flag() {
+        let cli = Cli::parse_from(["code-graph", "serve", "--ollama"]);
+        match cli.command {
+            Commands::Serve { ollama, .. } => {
+                assert!(ollama, "--ollama flag should be true");
+            }
+            _ => panic!("expected Serve command"),
+        }
+    }
+
+    /// Verify that `code-graph serve` without --ollama defaults to false.
+    #[test]
+    #[cfg(all(feature = "web", feature = "rag"))]
+    fn test_serve_ollama_defaults_to_false() {
+        let cli = Cli::parse_from(["code-graph", "serve"]);
+        match cli.command {
+            Commands::Serve { ollama, .. } => {
+                assert!(!ollama, "--ollama should default to false");
+            }
+            _ => panic!("expected Serve command"),
         }
     }
 }

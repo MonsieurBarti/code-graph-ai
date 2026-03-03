@@ -1,5 +1,9 @@
+pub mod go_imports;
+pub mod go_symbols;
 pub mod imports;
 pub mod languages;
+pub mod python_imports;
+pub mod python_symbols;
 pub mod relationships;
 pub mod symbols;
 
@@ -11,8 +15,12 @@ use tree_sitter::Parser;
 
 use crate::graph::node::SymbolInfo;
 
+use go_imports::extract_go_imports;
+use go_symbols::extract_go_symbols;
 use imports::{ExportInfo, ImportInfo, extract_exports, extract_imports, extract_rust_use};
 use languages::language_for_extension;
+use python_imports::extract_python_imports;
+use python_symbols::extract_python_symbols;
 use relationships::{RelationshipInfo, extract_relationships};
 use symbols::{extract_impl_methods, extract_rust_symbols, extract_symbols};
 
@@ -37,6 +45,16 @@ thread_local! {
     pub static PARSER_RS: RefCell<Parser> = RefCell::new({
         let mut p = Parser::new();
         p.set_language(&tree_sitter_rust::LANGUAGE.into()).unwrap();
+        p
+    });
+    static PARSER_PY: RefCell<Parser> = RefCell::new({
+        let mut p = Parser::new();
+        p.set_language(&tree_sitter_python::LANGUAGE.into()).unwrap();
+        p
+    });
+    static PARSER_GO: RefCell<Parser> = RefCell::new({
+        let mut p = Parser::new();
+        p.set_language(&tree_sitter_go::LANGUAGE.into()).unwrap();
         p
     });
 }
@@ -91,6 +109,49 @@ pub struct ParseResult {
 /// - `tree-sitter` returns `None` (malformed / truncated source)
 pub fn parse_file(path: &Path, source: &[u8]) -> Result<ParseResult> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+    // "go" arm: parse with a fresh parser.
+    if ext == "go" {
+        let language = language_for_extension("go").expect("go language is always Some");
+        let mut parser = Parser::new();
+        parser
+            .set_language(&language)
+            .with_context(|| "failed to set tree-sitter language for extension \"go\"")?;
+        let tree = parser
+            .parse(source, None)
+            .ok_or_else(|| anyhow!("tree-sitter returned None for {:?}", path))?;
+        let symbols = extract_go_symbols(&tree, source, &language);
+        let imports = extract_go_imports(&tree, source);
+        return Ok(ParseResult {
+            symbols,
+            imports,
+            exports: Vec::new(),
+            relationships: Vec::new(),
+            rust_uses: Vec::new(),
+        });
+    }
+
+    // "py" arm: parse with a fresh parser. Always pass None as old_tree (LANG-04 indentation safety).
+    if ext == "py" {
+        let language = language_for_extension("py").expect("py language is always Some");
+        let mut parser = Parser::new();
+        parser
+            .set_language(&language)
+            .with_context(|| "failed to set tree-sitter language for extension \"py\"")?;
+        // Always pass None as old_tree -- LANG-04 indentation safety
+        let tree = parser
+            .parse(source, None)
+            .ok_or_else(|| anyhow!("tree-sitter returned None for {:?}", path))?;
+        let symbols = extract_python_symbols(&tree, source, &language);
+        let imports = extract_python_imports(&tree, source);
+        return Ok(ParseResult {
+            symbols,
+            imports,
+            exports: Vec::new(),
+            relationships: Vec::new(),
+            rust_uses: Vec::new(),
+        });
+    }
 
     // "rs" arm: parse with a fresh parser and extract Rust symbols + use declarations.
     if ext == "rs" {
@@ -162,6 +223,41 @@ pub fn parse_file_parallel(path: &Path, source: &[u8]) -> Result<ParseResult> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     let is_tsx = matches!(ext, "tsx" | "jsx");
+
+    // "go" arm: parse with PARSER_GO.
+    if ext == "go" {
+        let language = language_for_extension("go").expect("go language is always Some");
+        let tree = PARSER_GO
+            .with(|p| p.borrow_mut().parse(source, None))
+            .ok_or_else(|| anyhow!("tree-sitter returned None for {:?}", path))?;
+        let symbols = extract_go_symbols(&tree, source, &language);
+        let imports = extract_go_imports(&tree, source);
+        return Ok(ParseResult {
+            symbols,
+            imports,
+            exports: Vec::new(),
+            relationships: Vec::new(),
+            rust_uses: Vec::new(),
+        });
+    }
+
+    // "py" arm: parse with PARSER_PY. Always pass None as old_tree (LANG-04 indentation safety).
+    if ext == "py" {
+        let language = language_for_extension("py").expect("py language is always Some");
+        // Always pass None -- never reuse old_tree for Python (LANG-04)
+        let tree = PARSER_PY
+            .with(|p| p.borrow_mut().parse(source, None))
+            .ok_or_else(|| anyhow!("tree-sitter returned None for {:?}", path))?;
+        let symbols = extract_python_symbols(&tree, source, &language);
+        let imports = extract_python_imports(&tree, source);
+        return Ok(ParseResult {
+            symbols,
+            imports,
+            exports: Vec::new(),
+            relationships: Vec::new(),
+            rust_uses: Vec::new(),
+        });
+    }
 
     // "rs" arm: parse with PARSER_RS and extract Rust symbols + use declarations.
     if ext == "rs" {

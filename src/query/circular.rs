@@ -108,7 +108,7 @@ mod tests {
 
     use crate::graph::{
         CodeGraph,
-        node::{SymbolInfo, SymbolKind, SymbolVisibility},
+        node::{SymbolInfo, SymbolKind},
     };
 
     #[test]
@@ -238,11 +238,8 @@ mod tests {
                 name: "Foo".into(),
                 kind: SymbolKind::Class,
                 line: 1,
-                col: 0,
                 is_exported: true,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
 

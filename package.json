@@ -1,0 +1,28 @@
+{
+  "name": "workspace",
+  "version": "1.0.0",
+  "description": "High-performance code intelligence engine that indexes TypeScript/JavaScript and Rust codebases into a queryable dependency graph. Built in Rust, designed for AI agents.",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MonsieurBarti/code-graph-ai.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/MonsieurBarti/code-graph-ai/issues"
+  },
+  "homepage": "https://github.com/MonsieurBarti/code-graph-ai#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}

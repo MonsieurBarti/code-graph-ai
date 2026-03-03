@@ -34,4 +34,20 @@ pub enum EdgeKind {
     /// Rust `use` statement (non-pub): unresolved import edge.
     /// `path` is the raw use path string. Resolution deferred to Phase 9.
     RustImport { path: String },
+
+    // Phase 17 additions (Python):
+    /// Python conditional import (e.g. `if TYPE_CHECKING:` block or try/except import).
+    /// `specifier` is the raw import path string.
+    ConditionalImport { specifier: String },
+
+    // Phase 18 additions (Go):
+    /// Go blank import (`import _ "pkg"`) — side-effect only import.
+    SideEffectImport { specifier: String },
+    /// Go dot import (`import . "pkg"`) — all exported names imported into scope.
+    DotImport { specifier: String },
+    /// Go struct embedding: `type Server struct { http.Handler }` — Server embeds Handler.
+    Embeds,
+    /// Symbol has a decorator/attribute. `name` is the decorator name.
+    /// Used for graph-level "has any decorator" traversal queries.
+    HasDecorator { name: String },
 }

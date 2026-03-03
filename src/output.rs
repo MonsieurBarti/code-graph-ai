@@ -42,6 +42,8 @@ pub struct IndexStats {
     pub js_file_count: usize,
     /// Number of Rust (.rs) files discovered and parsed.
     pub rust_file_count: usize,
+    /// Number of Python (.py) files discovered and parsed.
+    pub python_file_count: usize,
     // Rust symbol counts (Phase 8)
     pub rust_fns: usize,
     pub rust_structs: usize,
@@ -103,6 +105,9 @@ pub fn print_summary(stats: &IndexStats, json: bool) {
             "    {} use statements (unresolved), {} pub use re-exports",
             stats.rust_use_statements, stats.rust_pub_use_reexports,
         );
+    }
+    if stats.python_file_count > 0 {
+        println!("  Python: {} files", stats.python_file_count);
     }
 
     println!(

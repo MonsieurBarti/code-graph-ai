@@ -8,11 +8,12 @@ use petgraph::Directed;
 use petgraph::stable_graph::{NodeIndex, StableGraph};
 use petgraph::visit::EdgeRef;
 
+use bm25::SearchEngineBuilder;
 use edge::EdgeKind;
 use node::{ExternalPackageInfo, FileInfo, GraphNode, SymbolInfo, SymbolKind};
 
 /// The in-memory code graph: a directed petgraph StableGraph with O(1) lookup indexes.
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct CodeGraph {
     /// The underlying directed graph, parameterised over node and edge kinds.
     pub graph: StableGraph<GraphNode, EdgeKind, Directed>,
@@ -25,6 +26,25 @@ pub struct CodeGraph {
     /// Maps Rust built-in crate names (`"std"`, `"core"`, `"alloc"`) to their node indices.
     /// Used to deduplicate `GraphNode::Builtin` nodes — one per crate name.
     pub builtin_index: HashMap<String, NodeIndex>,
+    /// Transient BM25 full-text search index over symbol names.
+    /// Not serialized — rebuilt after cache load and watcher events. Used by plan 20-01.
+    #[serde(skip)]
+    pub bm25_index: Option<bm25::SearchEngine<u32>>,
+}
+
+impl Clone for CodeGraph {
+    /// Clone the graph data structures but reset bm25_index to None.
+    /// Call `rebuild_bm25_index()` after cloning if BM25 search is needed.
+    fn clone(&self) -> Self {
+        Self {
+            graph: self.graph.clone(),
+            file_index: self.file_index.clone(),
+            symbol_index: self.symbol_index.clone(),
+            external_index: self.external_index.clone(),
+            builtin_index: self.builtin_index.clone(),
+            bm25_index: None,
+        }
+    }
 }
 
 impl CodeGraph {
@@ -36,6 +56,7 @@ impl CodeGraph {
             symbol_index: HashMap::new(),
             external_index: HashMap::new(),
             builtin_index: HashMap::new(),
+            bm25_index: None,
         }
     }
 
@@ -308,10 +329,63 @@ impl Default for CodeGraph {
     }
 }
 
+/// Split camelCase and snake_case identifiers into space-separated words.
+/// Prepends the original name so exact matches still score high.
+/// "authHandler" -> "authHandler auth handler"
+/// "parse_token" -> "parse_token parse token"
+/// Used by rebuild_bm25_index (plan 20-01).
+pub fn split_identifier(name: &str) -> String {
+    let mut words = Vec::new();
+    let mut current_word = String::new();
+
+    for ch in name.chars() {
+        if ch == '_' {
+            if !current_word.is_empty() {
+                words.push(current_word.clone());
+                current_word.clear();
+            }
+        } else if ch.is_uppercase() && !current_word.is_empty() {
+            words.push(current_word.clone());
+            current_word.clear();
+            current_word.push(ch);
+        } else {
+            current_word.push(ch);
+        }
+    }
+    if !current_word.is_empty() {
+        words.push(current_word);
+    }
+
+    let split_lower = words
+        .iter()
+        .map(|w| w.to_lowercase())
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("{} {}", name, split_lower)
+}
+
+impl CodeGraph {
+    /// Rebuild the BM25 full-text search index from the current symbol_index.
+    /// Called after graph construction, cache load, and watcher events. Used by plan 20-01.
+    pub fn rebuild_bm25_index(&mut self) {
+        let mut engine = SearchEngineBuilder::<u32>::with_avgdl(8.0).build();
+        for (name, indices) in &self.symbol_index {
+            let processed = split_identifier(name);
+            for &idx in indices {
+                engine.upsert(bm25::Document {
+                    id: idx.index() as u32,
+                    contents: processed.clone(),
+                });
+            }
+        }
+        self.bm25_index = Some(engine);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use node::{SymbolKind, SymbolVisibility};
+    use node::SymbolKind;
 
     #[test]
     fn test_add_file_and_symbol() {
@@ -323,11 +397,8 @@ mod tests {
                 name: "foo".into(),
                 kind: SymbolKind::Function,
                 line: 1,
-                col: 0,
                 is_exported: true,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
         assert_eq!(graph.file_count(), 1, "should have one file node");
@@ -361,11 +432,8 @@ mod tests {
                 name: "IUser".into(),
                 kind: SymbolKind::Interface,
                 line: 1,
-                col: 0,
                 is_exported: true,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
         let prop = graph.add_child_symbol(
@@ -375,10 +443,7 @@ mod tests {
                 kind: SymbolKind::Property,
                 line: 2,
                 col: 2,
-                is_exported: false,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
         assert_eq!(
@@ -409,11 +474,7 @@ mod tests {
                     name: "x".into(),
                     kind,
                     line: 1,
-                    col: 0,
-                    is_exported: false,
-                    is_default: false,
-                    visibility: SymbolVisibility::Private,
-                    trait_impl: None,
+                    ..Default::default()
                 },
             );
         }
@@ -522,5 +583,86 @@ mod tests {
             }
             other => panic!("expected File node, got {:?}", other),
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // BM25 index tests (Phase 20 Plan 01)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_split_identifier_camel_case() {
+        let result = super::split_identifier("authHandler");
+        assert_eq!(result, "authHandler auth handler");
+    }
+
+    #[test]
+    fn test_split_identifier_snake_case() {
+        let result = super::split_identifier("parse_token");
+        assert_eq!(result, "parse_token parse token");
+    }
+
+    #[test]
+    fn test_split_identifier_already_lowercase() {
+        let result = super::split_identifier("main");
+        assert_eq!(result, "main main");
+    }
+
+    #[test]
+    fn test_rebuild_bm25_index_empty_graph() {
+        let mut graph = CodeGraph::new();
+        graph.rebuild_bm25_index();
+        assert!(graph.bm25_index.is_some());
+        // Search on empty index returns empty results
+        let results = graph.bm25_index.as_ref().unwrap().search("anything", 10);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_rebuild_bm25_index_populates_from_symbols() {
+        let mut graph = CodeGraph::new();
+        let f = graph.add_file(PathBuf::from("src/auth.ts"), "typescript");
+
+        let auth_idx = graph.add_symbol(
+            f,
+            SymbolInfo {
+                name: "authHandler".into(),
+                kind: SymbolKind::Function,
+                line: 1,
+                ..Default::default()
+            },
+        );
+        graph.add_symbol(
+            f,
+            SymbolInfo {
+                name: "loginService".into(),
+                kind: SymbolKind::Class,
+                line: 10,
+                ..Default::default()
+            },
+        );
+        graph.add_symbol(
+            f,
+            SymbolInfo {
+                name: "parseToken".into(),
+                kind: SymbolKind::Function,
+                line: 20,
+                ..Default::default()
+            },
+        );
+
+        graph.rebuild_bm25_index();
+        assert!(graph.bm25_index.is_some());
+
+        // Search for "auth" — should return authHandler node index
+        let results = graph.bm25_index.as_ref().unwrap().search("auth", 10);
+        assert!(
+            !results.is_empty(),
+            "search for 'auth' should return results"
+        );
+        let found_ids: Vec<u32> = results.iter().map(|r| r.document.id).collect();
+        assert!(
+            found_ids.contains(&(auth_idx.index() as u32)),
+            "authHandler node index should be in BM25 results for 'auth'"
+        );
     }
 }

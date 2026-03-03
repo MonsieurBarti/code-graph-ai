@@ -21,10 +21,12 @@ pub struct WatcherHandle {
 }
 
 /// File extensions we care about for incremental re-index.
-const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "rs"];
+const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "rs", "py", "go"];
 
 /// File basenames that trigger a full re-index.
 /// TypeScript/JS config files and Rust crate root files are all treated as full re-index triggers.
+/// __init__.py is included because it defines package structure and re-exports — any change
+/// requires re-resolving all Python imports referencing that package.
 const FULL_REINDEX_FILES: &[&str] = &[
     "tsconfig.json",
     "package.json",
@@ -33,6 +35,9 @@ const FULL_REINDEX_FILES: &[&str] = &[
     "lib.rs",
     "main.rs",
     "mod.rs",
+    "__init__.py",
+    "go.mod",
+    "go.work",
 ];
 
 /// Rust crate root / module-tree files (subset of FULL_REINDEX_FILES).

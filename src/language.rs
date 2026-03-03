@@ -12,6 +12,8 @@ pub enum LanguageKind {
     TypeScript,
     JavaScript,
     Rust,
+    Python,
+    Go,
 }
 
 impl LanguageKind {
@@ -21,17 +23,8 @@ impl LanguageKind {
             LanguageKind::TypeScript => matches!(ext, "ts" | "tsx"),
             LanguageKind::JavaScript => matches!(ext, "js" | "jsx"),
             LanguageKind::Rust => ext == "rs",
-        }
-    }
-
-    /// Human-readable display name for stats output.
-    // Used by output.rs in Phase 8+ when Rust parsing is added.
-    #[allow(dead_code)]
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            LanguageKind::TypeScript => "TypeScript",
-            LanguageKind::JavaScript => "JavaScript",
-            LanguageKind::Rust => "Rust",
+            LanguageKind::Python => ext == "py",
+            LanguageKind::Go => ext == "go",
         }
     }
 
@@ -46,6 +39,8 @@ impl LanguageKind {
             "typescript" | "ts" => Some(LanguageKind::TypeScript),
             "javascript" | "js" => Some(LanguageKind::JavaScript),
             "rust" | "rs" => Some(LanguageKind::Rust),
+            "python" | "py" => Some(LanguageKind::Python),
+            "go" | "golang" => Some(LanguageKind::Go),
             _ => None,
         }
     }
@@ -56,6 +51,9 @@ const CONFIG_FILES: &[(&str, LanguageKind)] = &[
     ("Cargo.toml", LanguageKind::Rust),
     ("tsconfig.json", LanguageKind::TypeScript),
     ("package.json", LanguageKind::JavaScript),
+    ("pyproject.toml", LanguageKind::Python),
+    ("setup.py", LanguageKind::Python),
+    ("go.mod", LanguageKind::Go),
 ];
 
 /// Detect which languages are present in a project root.
@@ -107,59 +105,6 @@ fn check_config_files(dir: &Path, found: &mut HashSet<LanguageKind>) {
     if dir.join("tsconfig.json").exists() {
         found.remove(&LanguageKind::JavaScript);
     }
-}
-
-/// Minimal deserialization struct for Cargo workspace table.
-#[derive(Deserialize, Default)]
-#[allow(dead_code)]
-struct CargoManifest {
-    workspace: Option<WorkspaceTable>,
-}
-
-#[derive(Deserialize)]
-#[allow(dead_code)]
-struct WorkspaceTable {
-    members: Vec<String>,
-}
-
-/// Parse the `[workspace]` section of a `Cargo.toml` and return resolved member
-/// directory paths. Expands glob patterns using the `glob` crate (already in deps).
-///
-/// Returns an empty vec if `Cargo.toml` is absent, has no `[workspace]` section,
-/// or cannot be parsed — consistent with the graceful-error pattern in `config.rs`.
-///
-/// Used by Phase 9 (Rust Module Resolver) for workspace crate discovery.
-#[allow(dead_code)]
-pub fn cargo_workspace_members(root: &Path) -> Vec<std::path::PathBuf> {
-    let manifest_path = root.join("Cargo.toml");
-    let contents = match std::fs::read_to_string(&manifest_path) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
-
-    let parsed: CargoManifest = match toml::from_str(&contents) {
-        Ok(p) => p,
-        Err(_) => return Vec::new(),
-    };
-
-    let workspace = match parsed.workspace {
-        Some(w) => w,
-        None => return Vec::new(),
-    };
-
-    workspace
-        .members
-        .iter()
-        .flat_map(|pattern| {
-            let glob_pattern = root.join(pattern).to_string_lossy().into_owned();
-            glob::glob(&glob_pattern)
-                .ok()
-                .into_iter()
-                .flatten()
-                .flatten()
-                .filter(|p| p.is_dir())
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -238,6 +183,14 @@ mod tests {
         assert!(LanguageKind::Rust.matches_extension("rs"));
         assert!(!LanguageKind::Rust.matches_extension("ts"));
         assert!(!LanguageKind::Rust.matches_extension("js"));
+
+        assert!(LanguageKind::Python.matches_extension("py"));
+        assert!(!LanguageKind::Python.matches_extension("rs"));
+        assert!(!LanguageKind::Python.matches_extension("ts"));
+
+        assert!(LanguageKind::Go.matches_extension("go"));
+        assert!(!LanguageKind::Go.matches_extension("rs"));
+        assert!(!LanguageKind::Go.matches_extension("ts"));
     }
 
     #[test]
@@ -283,42 +236,24 @@ mod tests {
         );
         assert_eq!(LanguageKind::from_str_loose("RS"), Some(LanguageKind::Rust));
 
-        assert_eq!(LanguageKind::from_str_loose("python"), None);
+        assert_eq!(
+            LanguageKind::from_str_loose("python"),
+            Some(LanguageKind::Python)
+        );
+        assert_eq!(
+            LanguageKind::from_str_loose("py"),
+            Some(LanguageKind::Python)
+        );
+        assert_eq!(
+            LanguageKind::from_str_loose("Python"),
+            Some(LanguageKind::Python)
+        );
+        assert_eq!(LanguageKind::from_str_loose("go"), Some(LanguageKind::Go));
+        assert_eq!(
+            LanguageKind::from_str_loose("golang"),
+            Some(LanguageKind::Go)
+        );
+        assert_eq!(LanguageKind::from_str_loose("Go"), Some(LanguageKind::Go));
         assert_eq!(LanguageKind::from_str_loose(""), None);
-    }
-
-    #[test]
-    fn test_cargo_workspace_members() {
-        let dir = tmp();
-        let member_a = dir.path().join("crates").join("a");
-        let member_b = dir.path().join("crates").join("b");
-        fs::create_dir_all(&member_a).unwrap();
-        fs::create_dir_all(&member_b).unwrap();
-
-        let workspace_toml = r#"
-[workspace]
-members = ["crates/a", "crates/b"]
-"#;
-        fs::write(dir.path().join("Cargo.toml"), workspace_toml).unwrap();
-
-        let members = cargo_workspace_members(dir.path());
-        assert_eq!(members.len(), 2);
-        assert!(members.contains(&member_a));
-        assert!(members.contains(&member_b));
-    }
-
-    #[test]
-    fn test_cargo_workspace_members_no_workspace() {
-        let dir = tmp();
-        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"foo\"").unwrap();
-        let members = cargo_workspace_members(dir.path());
-        assert!(members.is_empty());
-    }
-
-    #[test]
-    fn test_cargo_workspace_members_missing_file() {
-        let dir = tmp();
-        let members = cargo_workspace_members(dir.path());
-        assert!(members.is_empty());
     }
 }

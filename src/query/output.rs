@@ -19,6 +19,7 @@ fn language_of_file(path: &Path) -> &'static str {
         "ts" | "tsx" => "TypeScript",
         "js" | "jsx" => "JavaScript",
         "rs" => "Rust",
+        "py" => "Python",
         _ => "Unknown",
     }
 }
@@ -34,13 +35,14 @@ fn is_mixed_language<F: Fn(&T) -> &Path, T>(items: &[T], get_path: F) -> bool {
         .any(|i| language_of_file(get_path(i)) != first_lang)
 }
 
-/// Sort key for language grouping: Rust < TypeScript < JavaScript < Unknown (alphabetical).
+/// Sort key for language grouping: Rust < TypeScript < JavaScript < Python < Unknown (alphabetical).
 fn language_sort_key(lang: &str) -> u8 {
     match lang {
         "JavaScript" => 1,
-        "Rust" => 2,
-        "TypeScript" => 3,
-        _ => 4,
+        "Python" => 2,
+        "Rust" => 3,
+        "TypeScript" => 4,
+        _ => 5,
     }
 }
 
@@ -283,7 +285,7 @@ fn stats_has_rust(stats: &ProjectStats) -> bool {
 
 /// Determine if the stats have TypeScript/JavaScript symbols present.
 fn stats_has_ts_js(stats: &ProjectStats) -> bool {
-    // Total symbols minus Rust-specific symbols indicates TS/JS presence.
+    // Total symbols minus Rust-specific, Python-specific, and Go-specific symbols indicates TS/JS presence.
     let rust_total = stats.rust_fns
         + stats.rust_structs
         + stats.rust_enums
@@ -293,27 +295,44 @@ fn stats_has_ts_js(stats: &ProjectStats) -> bool {
         + stats.rust_consts
         + stats.rust_statics
         + stats.rust_macros;
-    stats.symbol_count > rust_total
-        || stats.functions > stats.rust_fns
-        || stats.classes > 0
-        || stats.interfaces > 0
-        || stats.variables > 0
+    let non_rust_non_py_non_go = stats
+        .symbol_count
+        .saturating_sub(rust_total + stats.python_symbol_count + stats.go_symbol_count);
+    non_rust_non_py_non_go > 0
+        || stats.classes > stats.python_classes
+        || stats.interfaces > stats.go_interfaces
+        || stats.variables > stats.python_variables + stats.go_variables
+        || stats.methods > stats.python_methods + stats.go_methods
         || stats.components > 0
+}
+
+/// Determine if the stats have Python symbols or files present.
+fn stats_has_python(stats: &ProjectStats) -> bool {
+    stats.python_file_count > 0 || stats.python_symbol_count > 0
+}
+
+/// Determine if the stats have Go symbols or files present.
+fn stats_has_go(stats: &ProjectStats) -> bool {
+    stats.go_file_count > 0 || stats.go_symbol_count > 0
 }
 
 /// Format and print project stats to stdout according to the selected output format.
 ///
 /// `language_filter`: if Some("rust"), show only Rust section; if Some("typescript"),
-/// show only TypeScript section; if None, show all sections with totals.
+/// show only TypeScript section; if Some("python"), show Python section; if None, show all.
 pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter: Option<&str>) {
     let show_rust = language_filter.is_none() || language_filter == Some("rust");
     let show_ts = language_filter.is_none()
         || language_filter == Some("typescript")
         || language_filter == Some("javascript");
+    let show_python = language_filter.is_none() || language_filter == Some("python");
+    let show_go = language_filter.is_none() || language_filter == Some("go");
     let show_totals = language_filter.is_none();
 
     let has_rust = stats_has_rust(stats);
     let has_ts = stats_has_ts_js(stats);
+    let has_python = stats_has_python(stats);
+    let has_go = stats_has_go(stats);
 
     match format {
         OutputFormat::Compact => {
@@ -385,30 +404,44 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
                 }
             }
             if show_ts && has_ts {
-                let ts_fns = stats.functions.saturating_sub(stats.rust_fns);
+                // Subtract Rust-specific, Python, and Go symbols to get TS/JS-only counts.
+                let ts_fns = stats
+                    .functions
+                    .saturating_sub(stats.rust_fns + stats.python_fns + stats.go_fns);
+                let ts_classes = stats.classes.saturating_sub(stats.python_classes);
                 let ts_enums = stats.enums.saturating_sub(stats.rust_enums);
-                let ts_type_aliases = stats.type_aliases.saturating_sub(stats.rust_type_aliases);
+                let ts_type_aliases = stats.type_aliases.saturating_sub(
+                    stats.rust_type_aliases + stats.python_type_aliases + stats.go_type_aliases,
+                );
+                let ts_variables = stats
+                    .variables
+                    .saturating_sub(stats.python_variables + stats.go_variables);
+                let ts_methods = stats
+                    .methods
+                    .saturating_sub(stats.python_methods + stats.go_methods);
+                let rust_total = stats.rust_fns
+                    + stats.rust_structs
+                    + stats.rust_enums
+                    + stats.rust_traits
+                    + stats.rust_impl_methods
+                    + stats.rust_type_aliases
+                    + stats.rust_consts
+                    + stats.rust_statics
+                    + stats.rust_macros;
+                let ts_total = stats
+                    .symbol_count
+                    .saturating_sub(rust_total + stats.python_symbol_count + stats.go_symbol_count);
                 println!(
                     "TypeScript: {} symbols (function: {} class: {} interface: {} type: {} enum: {} variable: {} component: {} method: {} property: {})",
-                    stats.symbol_count.saturating_sub(
-                        stats.rust_fns
-                            + stats.rust_structs
-                            + stats.rust_enums
-                            + stats.rust_traits
-                            + stats.rust_impl_methods
-                            + stats.rust_type_aliases
-                            + stats.rust_consts
-                            + stats.rust_statics
-                            + stats.rust_macros
-                    ),
+                    ts_total,
                     ts_fns,
-                    stats.classes,
+                    ts_classes,
                     stats.interfaces,
                     ts_type_aliases,
                     ts_enums,
-                    stats.variables,
+                    ts_variables,
                     stats.components,
-                    stats.methods,
+                    ts_methods,
                     stats.properties,
                 );
                 println!(
@@ -416,18 +449,53 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
                     stats.import_edges, stats.external_packages, stats.unresolved_imports,
                 );
             }
-            if show_totals && has_rust && has_ts {
-                println!("---");
+            if show_python && has_python {
                 println!(
-                    "Total: {} files, {} symbols",
-                    stats.file_count, stats.symbol_count
+                    "Python: {} files, {} symbols (fn: {} class: {} method: {} type: {} variable: {})",
+                    stats.python_file_count,
+                    stats.python_symbol_count,
+                    stats.python_fns,
+                    stats.python_classes,
+                    stats.python_methods,
+                    stats.python_type_aliases,
+                    stats.python_variables,
                 );
+            }
+            if show_go && has_go {
+                println!(
+                    "Go: {} files, {} symbols (fn: {} struct: {} interface: {} method: {} const: {} var: {} type: {})",
+                    stats.go_file_count,
+                    stats.go_symbol_count,
+                    stats.go_fns,
+                    stats.go_structs,
+                    stats.go_interfaces,
+                    stats.go_methods,
+                    stats.go_consts,
+                    stats.go_variables,
+                    stats.go_type_aliases,
+                );
+            }
+            if show_totals && (has_rust || has_ts || has_python || has_go) {
+                let language_count = [has_rust, has_ts, has_python, has_go]
+                    .iter()
+                    .filter(|&&x| x)
+                    .count();
+                if language_count > 1 {
+                    println!("---");
+                    println!(
+                        "Total: {} files, {} symbols",
+                        stats.file_count, stats.symbol_count
+                    );
+                } else {
+                    println!("files {}", stats.file_count);
+                    println!("symbols {}", stats.symbol_count);
+                }
             } else if show_totals {
                 println!("files {}", stats.file_count);
                 println!("symbols {}", stats.symbol_count);
             }
-            // Fallback: show full stats if neither Rust nor TS-specific sections match
-            if !has_rust && !has_ts {
+            // Fallback: show full stats if no language-specific sections match
+            if !has_rust && !has_ts && !has_python && !has_go {
                 println!("files {}", stats.file_count);
                 println!("symbols {}", stats.symbol_count);
                 println!(
@@ -468,18 +536,26 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
             }
 
             if show_ts && has_ts {
-                let ts_fns = stats.functions.saturating_sub(stats.rust_fns);
+                // Subtract both Rust-specific and Python symbols to get TS/JS-only counts.
+                let ts_fns = stats
+                    .functions
+                    .saturating_sub(stats.rust_fns + stats.python_fns);
+                let ts_classes = stats.classes.saturating_sub(stats.python_classes);
                 let ts_enums = stats.enums.saturating_sub(stats.rust_enums);
-                let ts_type_aliases = stats.type_aliases.saturating_sub(stats.rust_type_aliases);
+                let ts_type_aliases = stats
+                    .type_aliases
+                    .saturating_sub(stats.rust_type_aliases + stats.python_type_aliases);
+                let ts_variables = stats.variables.saturating_sub(stats.python_variables);
+                let ts_methods = stats.methods.saturating_sub(stats.python_methods);
                 println!("{}", header("--- TypeScript/JavaScript ---"));
                 println!("  Functions:    {}", ts_fns);
-                println!("  Classes:      {}", stats.classes);
+                println!("  Classes:      {}", ts_classes);
                 println!("  Interfaces:   {}", stats.interfaces);
                 println!("  Type Aliases: {}", ts_type_aliases);
                 println!("  Enums:        {}", ts_enums);
-                println!("  Variables:    {}", stats.variables);
+                println!("  Variables:    {}", ts_variables);
                 println!("  Components:   {}", stats.components);
-                println!("  Methods:      {}", stats.methods);
+                println!("  Methods:      {}", ts_methods);
                 println!("  Properties:   {}", stats.properties);
                 println!();
                 println!("{}", header("--- Import Summary ---"));
@@ -502,6 +578,19 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
                 println!("  Resolved imports:  {}", stats.import_edges);
                 println!("  External packages: {}", stats.external_packages);
                 println!("  Unresolved:        {}", stats.unresolved_imports);
+            }
+
+            // Python section — only when Python symbols/files are present and filter allows
+            if show_python && has_python {
+                println!();
+                println!("{}", header("--- Python ---"));
+                println!("  Files:        {}", stats.python_file_count);
+                println!("  Symbols:      {}", stats.python_symbol_count);
+                println!("  Functions:    {}", stats.python_fns);
+                println!("  Classes:      {}", stats.python_classes);
+                println!("  Methods:      {}", stats.python_methods);
+                println!("  Type Aliases: {}", stats.python_type_aliases);
+                println!("  Variables:    {}", stats.python_variables);
             }
 
             // Rust section — only when Rust symbols are present and filter allows
@@ -623,6 +712,13 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
                     "builtin_usage_count": stats.builtin_usage_count,
                 },
                 "crate_stats": crate_stats_json,
+                "python_file_count": stats.python_file_count,
+                "python_symbol_count": stats.python_symbol_count,
+                "python_fns": stats.python_fns,
+                "python_classes": stats.python_classes,
+                "python_methods": stats.python_methods,
+                "python_type_aliases": stats.python_type_aliases,
+                "python_variables": stats.python_variables,
             });
             println!(
                 "{}",
@@ -777,7 +873,13 @@ pub fn format_impact_results(
                         .strip_prefix(project_root)
                         .unwrap_or(&r.file_path);
                     let indent = "  ".repeat(r.depth.saturating_sub(1));
-                    println!("{}impact {}", indent, rel.display());
+                    println!(
+                        "{}impact {} [{}: {}]",
+                        indent,
+                        rel.display(),
+                        r.confidence,
+                        r.basis
+                    );
                 }
             } else {
                 for r in results {
@@ -785,7 +887,7 @@ pub fn format_impact_results(
                         .file_path
                         .strip_prefix(project_root)
                         .unwrap_or(&r.file_path);
-                    println!("impact {}", rel.display());
+                    println!("impact {} [{}: {}]", rel.display(), r.confidence, r.basis);
                 }
             }
             println!("{} files affected", results.len());
@@ -809,15 +911,22 @@ pub fn format_impact_results(
 
             if use_color {
                 println!(
-                    "\x1b[1m{:>5}  {:<file_w$}\x1b[0m",
+                    "\x1b[1m{:>5}  {:<file_w$}  {:<10}  BASIS\x1b[0m",
                     "DEPTH",
                     "FILE",
+                    "CONFIDENCE",
                     file_w = file_w,
                 );
             } else {
-                println!("{:>5}  {:<file_w$}", "DEPTH", "FILE", file_w = file_w,);
+                println!(
+                    "{:>5}  {:<file_w$}  {:<10}  BASIS",
+                    "DEPTH",
+                    "FILE",
+                    "CONFIDENCE",
+                    file_w = file_w,
+                );
             }
-            println!("{}", "-".repeat(file_w + 8));
+            println!("{}", "-".repeat(file_w + 8 + 14 + 20));
 
             for r in results {
                 let rel = r
@@ -825,9 +934,11 @@ pub fn format_impact_results(
                     .strip_prefix(project_root)
                     .unwrap_or(&r.file_path);
                 println!(
-                    "{:>5}  {:<file_w$}",
+                    "{:>5}  {:<file_w$}  {:<10}  {}",
                     r.depth,
                     rel.display(),
+                    r.confidence.to_string(),
+                    r.basis,
                     file_w = file_w,
                 );
             }
@@ -844,6 +955,8 @@ pub fn format_impact_results(
                     serde_json::json!({
                         "file": rel.to_string_lossy(),
                         "depth": r.depth,
+                        "confidence": r.confidence.to_string(),
+                        "basis": r.basis,
                     })
                 })
                 .collect();
@@ -1370,12 +1483,17 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
             .file_path
             .strip_prefix(project_root)
             .unwrap_or(&r.file_path);
+        let line_range = if r.line_end > r.line {
+            format!("L{}-L{}", r.line, r.line_end)
+        } else {
+            format!("L{}", r.line)
+        };
         if show_vis {
             writeln!(
                 buf,
                 "{}:{} {} {} {}",
                 rel.display(),
-                r.line,
+                line_range,
                 r.symbol_name,
                 kind_to_str(&r.kind),
                 visibility_str(&r.visibility),
@@ -1386,7 +1504,7 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
                 buf,
                 "{}:{} {} {}",
                 rel.display(),
-                r.line,
+                line_range,
                 r.symbol_name,
                 kind_to_str(&r.kind)
             )
@@ -1394,6 +1512,69 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
         }
     }
     buf
+}
+
+/// Format find results with a match method tag prepended.
+///
+/// Produces: `"[exact]\nsrc/foo.rs:L10 authHandler function\n..."`
+///
+/// Used by the tiered find_symbol pipeline in the MCP server to annotate
+/// results with how they were found.
+pub fn format_find_to_string_tagged(
+    results: &[FindResult],
+    project_root: &Path,
+    method: crate::query::find::MatchMethod,
+) -> String {
+    let base = format_find_to_string(results, project_root);
+    format!("{}\n{}", method, base)
+}
+
+/// Format find_by_decorator results to a String for MCP tool responses.
+///
+/// Each result is formatted as:
+/// `@decorator_name[args] symbol_name (kind) file:line`
+/// Followed by `  framework: <fw>` if a framework label is available.
+pub fn format_decorator_to_string(
+    results: &[crate::query::decorators::DecoratorMatch],
+    project_root: &Path,
+    limit: usize,
+) -> String {
+    use std::fmt::Write;
+    if results.is_empty() {
+        return "No decorated symbols found.".to_string();
+    }
+    let mut out = String::new();
+    for r in results {
+        let rel_path = r
+            .file_path
+            .strip_prefix(project_root)
+            .unwrap_or(&r.file_path);
+        let kind_str = kind_to_str(&r.kind);
+        // Build decorator suffix: name + optional args
+        let args_str = r
+            .decorator_args
+            .as_deref()
+            .map(|a| a.to_string())
+            .unwrap_or_default();
+        writeln!(
+            out,
+            "@{}{} {} {} {}:{}",
+            r.decorator_name,
+            args_str,
+            r.symbol_name,
+            kind_str,
+            rel_path.display(),
+            r.line,
+        )
+        .unwrap();
+        if let Some(ref fw) = r.framework {
+            writeln!(out, "  framework: {fw}").unwrap();
+        }
+    }
+    if results.len() >= limit {
+        writeln!(out, "… truncated at {} results", limit).unwrap();
+    }
+    out
 }
 
 /// Format project stats to a String in compact format for MCP tool responses.
@@ -1563,7 +1744,7 @@ pub fn format_refs_to_string(results: &[RefResult], project_root: &Path) -> Stri
 
 /// Format impact (blast radius) results to a String in compact prefix-free flat format for MCP tool responses.
 ///
-/// No summary line. No "impact " prefix. Line format: `{rel_path}`.
+/// No summary line. No "impact " prefix. Line format: `{rel_path} (depth N) [TIER: basis]`.
 /// Uses flat (non-tree) format — MCP responses do not benefit from indentation.
 pub fn format_impact_to_string(results: &[ImpactResult], project_root: &Path) -> String {
     use std::fmt::Write;
@@ -1573,7 +1754,15 @@ pub fn format_impact_to_string(results: &[ImpactResult], project_root: &Path) ->
             .file_path
             .strip_prefix(project_root)
             .unwrap_or(&r.file_path);
-        writeln!(buf, "{}", rel.display()).unwrap();
+        writeln!(
+            buf,
+            "{} (depth {}) [{}: {}]",
+            rel.display(),
+            r.depth,
+            r.confidence,
+            r.basis
+        )
+        .unwrap();
     }
     buf
 }
@@ -1676,11 +1865,26 @@ pub fn format_context_to_string(
                 .file_path
                 .strip_prefix(project_root)
                 .unwrap_or(&def.file_path);
+            // Show decorators if present (e.g. "@Controller @Injectable")
+            if !def.decorators.is_empty() {
+                let decorator_str: Vec<String> = def
+                    .decorators
+                    .iter()
+                    .map(|d| format!("@{}", d.name))
+                    .collect();
+                writeln!(buf, "{}", decorator_str.join(" ")).unwrap();
+            }
+            // Show line range (L5-L20) if line_end > line, else just line
+            let line_range = if def.line_end > def.line {
+                format!("L{}-L{}", def.line, def.line_end)
+            } else {
+                format!("L{}", def.line)
+            };
             writeln!(
                 buf,
                 "{}:{} {}",
                 rel.display(),
-                def.line,
+                line_range,
                 kind_to_str(&def.kind)
             )
             .unwrap();
@@ -2247,10 +2451,12 @@ mod tests {
             kind,
             file_path: PathBuf::from(path),
             line,
+            line_end: 0,
             col: 0,
             is_exported: false,
             is_default: false,
             visibility: SymbolVisibility::Private,
+            decorators: Vec::new(),
         }
     }
 
@@ -2275,10 +2481,10 @@ mod tests {
             !output.contains("definitions found"),
             "output should not contain 'definitions found' summary"
         );
-        // Must contain new compact format: path:line name kind
+        // Must contain new compact format: path:L{line} name kind
         assert!(
-            output.contains("src/foo.ts:10 MyFunc function"),
-            "output should contain compact format 'src/foo.ts:10 MyFunc function', got: {output}"
+            output.contains("src/foo.ts:L10 MyFunc function"),
+            "output should contain compact format 'src/foo.ts:L10 MyFunc function', got: {output}"
         );
     }
 
@@ -2324,10 +2530,14 @@ mod tests {
 
     #[test]
     fn test_mcp_impact_format_no_prefix() {
+        use crate::query::impact::ConfidenceTier;
+
         let root = PathBuf::from("/project");
         let results = vec![ImpactResult {
             file_path: PathBuf::from("/project/src/affected.ts"),
             depth: 1,
+            confidence: ConfidenceTier::High,
+            basis: "direct caller at depth 1".to_string(),
         }];
         let output = format_impact_to_string(&results, &root);
 
@@ -2345,6 +2555,38 @@ mod tests {
         assert!(
             output.contains("src/affected.ts"),
             "output should contain relative path, got: {output}"
+        );
+        // Must contain confidence tag
+        assert!(
+            output.contains("[HIGH: direct caller at depth 1]"),
+            "output should contain confidence tag, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_format_impact_with_confidence() {
+        use crate::query::impact::ConfidenceTier;
+
+        let root = PathBuf::from("/project");
+        let results = vec![ImpactResult {
+            file_path: PathBuf::from("/project/src/affected.ts"),
+            depth: 1,
+            confidence: ConfidenceTier::High,
+            basis: "direct caller at depth 1".to_string(),
+        }];
+        let output = format_impact_to_string(&results, &root);
+
+        assert!(
+            output.contains("[HIGH: direct caller at depth 1]"),
+            "output should contain '[HIGH: direct caller at depth 1]', got: {output}"
+        );
+        assert!(
+            output.contains("src/affected.ts"),
+            "output should contain file path, got: {output}"
+        );
+        assert!(
+            output.contains("(depth 1)"),
+            "output should contain depth info, got: {output}"
         );
     }
 
@@ -2425,9 +2667,9 @@ mod tests {
             output.contains("MyStruct"),
             "output should contain symbol name, got: {output}"
         );
-        // Definition in compact format: path:line kind
+        // Definition in compact format: path:L{line} kind
         assert!(
-            output.contains("src/lib.rs:5 struct"),
+            output.contains("src/lib.rs:L5 struct"),
             "output should contain definition in compact format, got: {output}"
         );
         // Caller in compact format: caller_name path:line
@@ -2551,7 +2793,7 @@ mod tests {
         );
         // Definitions always included
         assert!(
-            output.contains("src/foo.rs:10 function"),
+            output.contains("src/foo.rs:L10 function"),
             "definitions always included, got: {output}"
         );
         // Callers must NOT appear (filtered out)
@@ -2590,7 +2832,7 @@ mod tests {
         let output = format_context_to_string(&[ctx], &root, Some("c"));
 
         assert!(
-            output.contains("src/foo.rs:10 function"),
+            output.contains("src/foo.rs:L10 function"),
             "definitions always included even when not in sections filter, got: {output}"
         );
     }
@@ -2669,6 +2911,274 @@ mod tests {
         assert!(
             !output.contains("omitted:"),
             "omitted line should NOT appear when no filter, got: {output}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cluster / Flow / Rename string formatters (for MCP tool responses)
+// ---------------------------------------------------------------------------
+
+use crate::query::clusters::ClusterResult;
+use crate::query::flow::FlowResult;
+use crate::query::rename::RenameItem;
+
+/// Format cluster results as a human-readable string for MCP responses.
+///
+/// Output format:
+/// ```text
+/// Functional Clusters (N groups):
+/// auth (3 symbols): authenticate, authorize, hash_password
+/// api (2 symbols): get_users, create_user
+/// ```
+pub fn format_clusters_to_string(clusters: &[ClusterResult]) -> String {
+    if clusters.is_empty() {
+        return "Functional Clusters (0 groups): none detected.".to_string();
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format!("Functional Clusters ({} groups):", clusters.len()));
+
+    for c in clusters {
+        let top = if c.top_symbols.is_empty() {
+            "(no symbols)".to_string()
+        } else {
+            c.top_symbols.join(", ")
+        };
+        lines.push(format!("{} ({} symbols): {}", c.label, c.member_count, top));
+    }
+
+    lines.join("\n")
+}
+
+/// Format flow trace results as a human-readable string for MCP responses.
+///
+/// Output format (paths found):
+/// ```text
+/// Flow Trace: entry -> target
+/// A -> B -> C (2 hops)
+/// A -> D -> C (2 hops)
+/// ```
+///
+/// Output format (no paths):
+/// ```text
+/// Flow Trace: entry -> target
+/// No direct path found between entry and target.
+/// Shared dependency: SomeSharedNode
+/// ```
+pub fn format_flow_to_string(result: &FlowResult, entry: &str, target: &str) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format!("Flow Trace: {} -> {}", entry, target));
+
+    if result.paths.is_empty() {
+        lines.push(format!(
+            "No direct path found between {} and {}.",
+            entry, target
+        ));
+        if let Some(ref shared) = result.shared_dependency {
+            lines.push(format!("Shared dependency: {}", shared));
+        }
+    } else {
+        for path in &result.paths {
+            let chain = path.hops.join(" -> ");
+            lines.push(format!("{} ({} hops)", chain, path.depth));
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// Format rename plan items as a human-readable string for MCP responses.
+///
+/// Output format:
+/// ```text
+/// Rename Plan: Foo -> Bar (3 sites)
+/// src/foo.rs:10  Foo -> Bar
+/// src/bar.rs:5   Foo -> Bar
+/// src/baz.rs:0   Foo -> Bar  [import site — verify manually]
+/// ```
+pub fn format_rename_to_string(items: &[RenameItem], root: &Path) -> String {
+    if items.is_empty() {
+        return "Rename Plan: no sites found — symbol not in graph.".to_string();
+    }
+
+    // Derive old/new from the first item (all items share the same old/new).
+    let old_text = &items[0].old_text;
+    let new_text = &items[0].new_text;
+
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format!(
+        "Rename Plan: {} -> {} ({} sites)",
+        old_text,
+        new_text,
+        items.len()
+    ));
+
+    for item in items {
+        let rel = item.file_path.strip_prefix(root).unwrap_or(&item.file_path);
+        let line_str = if item.line == 0 {
+            "?".to_string()
+        } else {
+            item.line.to_string()
+        };
+        let note_str = item
+            .note
+            .as_deref()
+            .map(|n| format!("  [{}]", n))
+            .unwrap_or_default();
+        lines.push(format!(
+            "{}:{}  {} -> {}{}",
+            rel.display(),
+            line_str,
+            item.old_text,
+            item.new_text,
+            note_str,
+        ));
+    }
+
+    lines.join("\n")
+}
+
+#[cfg(test)]
+mod formatter_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    use crate::query::clusters::ClusterResult;
+    use crate::query::flow::{FlowPath, FlowResult};
+    use crate::query::rename::RenameItem;
+
+    #[test]
+    fn test_format_clusters_to_string() {
+        let clusters = vec![
+            ClusterResult {
+                label: "auth".to_string(),
+                member_count: 3,
+                top_symbols: vec![
+                    "authenticate".to_string(),
+                    "authorize".to_string(),
+                    "hash_pw".to_string(),
+                ],
+            },
+            ClusterResult {
+                label: "api".to_string(),
+                member_count: 2,
+                top_symbols: vec!["get_users".to_string(), "create_user".to_string()],
+            },
+        ];
+
+        let output = format_clusters_to_string(&clusters);
+
+        assert!(
+            output.contains("Functional Clusters (2 groups):"),
+            "header line missing, got: {output}"
+        );
+        assert!(
+            output.contains("auth"),
+            "auth cluster missing in output: {output}"
+        );
+        assert!(
+            output.contains("authenticate"),
+            "top symbol missing in output: {output}"
+        );
+        assert!(
+            output.contains("api"),
+            "api cluster missing in output: {output}"
+        );
+        assert!(
+            output.contains("get_users"),
+            "api top symbol missing in output: {output}"
+        );
+        // Member counts
+        assert!(
+            output.contains("3 symbols"),
+            "auth member count missing: {output}"
+        );
+        assert!(
+            output.contains("2 symbols"),
+            "api member count missing: {output}"
+        );
+    }
+
+    #[test]
+    fn test_format_flow_to_string() {
+        let result = FlowResult {
+            paths: vec![FlowPath {
+                hops: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+                depth: 2,
+            }],
+            shared_dependency: None,
+        };
+
+        let output = format_flow_to_string(&result, "A", "C");
+
+        assert!(
+            output.contains("Flow Trace: A -> C"),
+            "header missing in output: {output}"
+        );
+        assert!(
+            output.contains("A -> B -> C"),
+            "chain notation missing in output: {output}"
+        );
+        assert!(
+            output.contains("2 hops"),
+            "hop count missing in output: {output}"
+        );
+    }
+
+    #[test]
+    fn test_format_flow_to_string_no_path() {
+        let result = FlowResult {
+            paths: vec![],
+            shared_dependency: Some("SharedDep".to_string()),
+        };
+
+        let output = format_flow_to_string(&result, "A", "Z");
+
+        assert!(
+            output.contains("No direct path found"),
+            "no-path message missing: {output}"
+        );
+        assert!(
+            output.contains("SharedDep"),
+            "shared dependency missing: {output}"
+        );
+    }
+
+    #[test]
+    fn test_format_rename_to_string() {
+        let root = PathBuf::from("/proj");
+        let items = vec![
+            RenameItem {
+                file_path: root.join("src/foo.rs"),
+                line: 10,
+                old_text: "Foo".to_string(),
+                new_text: "Bar".to_string(),
+                note: None,
+            },
+            RenameItem {
+                file_path: root.join("src/importer.rs"),
+                line: 0,
+                old_text: "Foo".to_string(),
+                new_text: "Bar".to_string(),
+                note: Some("import site — verify manually".to_string()),
+            },
+        ];
+
+        let output = format_rename_to_string(&items, &root);
+
+        assert!(
+            output.contains("Rename Plan: Foo -> Bar (2 sites)"),
+            "header missing: {output}"
+        );
+        assert!(
+            output.contains("src/foo.rs"),
+            "foo.rs path missing: {output}"
+        );
+        assert!(output.contains("10"), "line number missing: {output}");
+        assert!(
+            output.contains("import site"),
+            "import site note missing: {output}"
         );
     }
 }

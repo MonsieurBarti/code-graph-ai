@@ -525,6 +525,7 @@ mod tests {
                     is_namespace: false,
                 })
                 .collect(),
+            line: 0,
         }
     }
 

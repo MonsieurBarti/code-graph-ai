@@ -413,11 +413,9 @@ mod tests {
             name: "hello".to_string(),
             kind: SymbolKind::Function,
             line: 1,
-            col: 0,
             is_exported: true,
-            is_default: false,
             visibility: SymbolVisibility::Pub,
-            trait_impl: None,
+            ..Default::default()
         };
         graph.add_symbol(file_idx, sym);
 

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -6,15 +6,22 @@ use rayon::prelude::*;
 
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{ServerCapabilities, ServerInfo};
+use rmcp::model::{
+    GetPromptRequestParams, GetPromptResult, ListPromptsResult, ListResourcesResult,
+    PaginatedRequestParams, Prompt, PromptArgument, PromptMessage, PromptMessageContent,
+    PromptMessageRole, RawResource, ReadResourceRequestParams, ReadResourceResult,
+    ResourceContents, ServerCapabilities, ServerInfo,
+};
+use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use tokio::sync::RwLock;
 
 use super::params::{
-    BatchQueryParams, DetectCircularParams, ExportGraphParams, FindDeadCodeParams,
-    FindReferencesParams, FindSymbolParams, GetContextParams, GetDiffParams, GetFileSummaryParams,
-    GetImpactParams, GetImportsParams, GetStatsParams, GetStructureParams, ListProjectsParams,
-    RegisterProjectParams,
+    BatchQueryParams, DetectCircularParams, ExportGraphParams, FindByDecoratorParams,
+    FindClustersParams, FindDeadCodeParams, FindReferencesParams, FindSymbolParams,
+    GetContextParams, GetDiffImpactParams, GetDiffParams, GetFileSummaryParams, GetImpactParams,
+    GetImportsParams, GetStatsParams, GetStructureParams, ListProjectsParams, PlanRenameParams,
+    RegisterProjectParams, TraceFlowParams,
 };
 use crate::graph::CodeGraph;
 
@@ -107,6 +114,10 @@ impl CodeGraphServer {
                 path.display()
             ));
         }
+
+        // Rebuild transient BM25 index (not serialized, so always None after cache load/deserialize)
+        let mut graph = graph;
+        graph.rebuild_bm25_index();
 
         let graph = Arc::new(graph);
         cache.insert(path.clone(), Arc::clone(&graph));
@@ -310,6 +321,8 @@ fn apply_staleness_diff(
                     "tsx" => "tsx",
                     "js" | "jsx" => "javascript",
                     "rs" => "rust",
+                    "py" => "python",
+                    "go" => "go",
                     _ => return None,
                 };
             let result = crate::parser::parse_file_parallel(path, &source).ok()?;
@@ -325,8 +338,6 @@ fn apply_staleness_diff(
                 graph.add_child_symbol(sym_idx, child.clone());
             }
         }
-        // Emit Rust use/pub-use edge placeholders (same as build_graph does).
-        // Phase 9 resolve_all will replace these self-edges with resolved targets.
         for rust_use in &result.rust_uses {
             if rust_use.is_pub_use {
                 graph.graph.add_edge(
@@ -381,6 +392,12 @@ fn apply_staleness_diff(
         }
     }
 
+    // Phase 25: Enrich decorator frameworks and add HasDecorator self-edges after partial re-parse.
+    // Called unconditionally (no guard on files_to_reparse) — both functions are idempotent and
+    // cached graphs from before Phase 18 may lack HasDecorator edges entirely.
+    crate::query::decorators::enrich_decorator_frameworks(&mut graph);
+    crate::query::decorators::add_has_decorator_edges(&mut graph);
+
     Ok(graph)
 }
 
@@ -388,32 +405,14 @@ fn apply_staleness_diff(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Compute character-level trigrams from a string (lowercased).
-/// Returns an empty set for strings shorter than 3 characters.
-fn trigrams(s: &str) -> HashSet<[char; 3]> {
-    let chars: Vec<char> = s.to_lowercase().chars().collect();
-    if chars.len() < 3 {
-        return HashSet::new();
-    }
-    chars.windows(3).map(|w| [w[0], w[1], w[2]]).collect()
-}
-
-/// Jaccard similarity between two trigram sets: |A ∩ B| / |A ∪ B|.
-/// Returns 0.0 if both sets are empty (no useful comparison possible).
-fn jaccard_similarity(a: &HashSet<[char; 3]>, b: &HashSet<[char; 3]>) -> f32 {
-    let intersection = a.intersection(b).count();
-    let union = a.union(b).count();
-    if union == 0 {
-        return 0.0;
-    }
-    intersection as f32 / union as f32
-}
-
 /// Suggest similar symbol names using trigram Jaccard similarity.
 ///
 /// Returns at most 3 candidates with Jaccard >= 0.3, sorted descending by score.
 /// Returns an empty vec for queries shorter than 3 characters (no trigrams to compare).
+/// Delegates to `crate::query::find::trigrams` and `crate::query::find::jaccard_similarity`.
 fn suggest_similar_fuzzy(graph: &CodeGraph, query: &str) -> Vec<String> {
+    use crate::query::find::{jaccard_similarity, trigrams};
+
     let query_trigrams = trigrams(query);
     if query_trigrams.is_empty() {
         return Vec::new();
@@ -447,6 +446,36 @@ fn not_found_msg(symbol: &str, suggestions: &[String]) -> String {
         msg.push_str(&format!(" Did you mean: {}?", suggestions.join(", ")));
     }
     msg
+}
+
+/// Format find results with a match method tag, applying limit + truncation + hints.
+///
+/// Used by the tiered find_symbol pipeline to produce consistent tagged output
+/// for [exact], [trigram], and [BM25] result sets.
+fn format_tagged_find_output(
+    results: Vec<crate::query::find::FindResult>,
+    limit: usize,
+    root: &Path,
+    method: crate::query::find::MatchMethod,
+    symbol: &str,
+    config: &crate::config::McpConfig,
+) -> String {
+    let truncated = results.len() > limit;
+    let limited = &results[..results.len().min(limit)];
+    let output = crate::query::output::format_find_to_string_tagged(limited, root, method);
+
+    let output = if truncated && !config.suppress_summary_line {
+        format!("truncated: {}/{}\n{}", limit, results.len(), output)
+    } else {
+        output
+    };
+
+    let first_name = limited.first().map(|r| r.symbol_name.as_str());
+    format!(
+        "{}{}",
+        output,
+        crate::mcp::hints::find_hint(symbol, limited.len(), truncated, first_name)
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -766,6 +795,59 @@ fn dispatch_query(
             let output = crate::query::output::format_diff_to_string(&diff);
             Ok(output)
         }
+        "find_by_decorator" => {
+            let pattern = params["pattern"]
+                .as_str()
+                .ok_or("missing required param: pattern")?;
+            let language = params["language"].as_str();
+            let framework = params["framework"].as_str();
+            let limit_param = params["limit"].as_u64().map(|n| n as usize);
+            let limit = resolve_limit(limit_param, config);
+
+            let results = crate::query::decorators::find_by_decorator(
+                graph, pattern, language, framework, limit,
+            )
+            .map_err(|e| e.to_string())?;
+
+            let output = crate::query::output::format_decorator_to_string(&results, root, limit);
+            Ok(output)
+        }
+        "find_clusters" => {
+            let scope = params["scope"].as_str().map(std::path::Path::new);
+            let clusters = crate::query::clusters::find_clusters(graph, root, scope, 50);
+            let output = crate::query::output::format_clusters_to_string(&clusters);
+            Ok(output)
+        }
+        "trace_flow" => {
+            let entry = params["entry"]
+                .as_str()
+                .ok_or("missing required param: entry")?;
+            let target = params["target"]
+                .as_str()
+                .ok_or("missing required param: target")?;
+            let max_paths = params["max_paths"]
+                .as_u64()
+                .map(|n| n as usize)
+                .unwrap_or(3);
+            let max_depth = params["max_depth"]
+                .as_u64()
+                .map(|n| n as usize)
+                .unwrap_or(20);
+            let result = crate::query::flow::trace_flow(graph, entry, target, max_paths, max_depth);
+            let output = crate::query::output::format_flow_to_string(&result, entry, target);
+            Ok(output)
+        }
+        "plan_rename" => {
+            let symbol = params["symbol"]
+                .as_str()
+                .ok_or("missing required param: symbol")?;
+            let new_name = params["new_name"]
+                .as_str()
+                .ok_or("missing required param: new_name")?;
+            let items = crate::query::rename::plan_rename(graph, symbol, new_name, root);
+            let output = crate::query::output::format_rename_to_string(&items, root);
+            Ok(output)
+        }
         _ => Err(format!("unknown tool: {}", tool)),
     }
 }
@@ -783,6 +865,8 @@ impl CodeGraphServer {
         &self,
         Parameters(p): Parameters<FindSymbolParams>,
     ) -> Result<String, String> {
+        use crate::query::find::MatchMethod;
+
         let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
 
         let kind_filter: Vec<String> = p
@@ -791,7 +875,9 @@ impl CodeGraphServer {
             .unwrap_or_default();
 
         let file_filter = p.path.as_ref().map(Path::new);
+        let limit = resolve_limit(p.limit, &self.mcp_config);
 
+        // Tier 1: Exact/regex match
         let results = crate::query::find::find_symbol(
             &graph,
             &p.symbol,
@@ -803,29 +889,64 @@ impl CodeGraphServer {
         )
         .map_err(|e| e.to_string())?;
 
-        if results.is_empty() {
-            let suggestions = suggest_similar_fuzzy(&graph, &p.symbol);
-            return Err(not_found_msg(&p.symbol, &suggestions));
+        if !results.is_empty() {
+            return Ok(format_tagged_find_output(
+                results,
+                limit,
+                &root,
+                MatchMethod::Exact,
+                &p.symbol,
+                &self.mcp_config,
+            ));
         }
 
-        let limit = resolve_limit(p.limit, &self.mcp_config);
-        let truncated = results.len() > limit;
-        let limited = &results[..results.len().min(limit)];
-        let output = crate::query::output::format_find_to_string(limited, &root);
+        // Tier 2: Trigram fuzzy match
+        let trigram_results = crate::query::find::find_symbol_trigram(&graph, &p.symbol, limit);
 
-        let output = if truncated && !self.mcp_config.suppress_summary_line {
-            format!("truncated: {}/{}\n{}", limit, results.len(), output)
-        } else {
-            output
-        };
+        // Tier 3: BM25 fallback
+        let bm25_results = crate::query::find::bm25_search(&graph, &p.symbol, limit);
 
-        let first_name = limited.first().map(|r| r.symbol_name.as_str());
-        let output = format!(
-            "{}{}",
-            output,
-            crate::mcp::hints::find_hint(&p.symbol, limited.len(), truncated, first_name)
-        );
-        Ok(output)
+        // If both tiers have results, merge with Reciprocal Rank Fusion
+        if !trigram_results.is_empty() && !bm25_results.is_empty() {
+            let merged =
+                crate::query::find::reciprocal_rank_fusion(&trigram_results, &bm25_results);
+            return Ok(format_tagged_find_output(
+                merged,
+                limit,
+                &root,
+                MatchMethod::Trigram,
+                &p.symbol,
+                &self.mcp_config,
+            ));
+        }
+
+        // Only trigram has results
+        if !trigram_results.is_empty() {
+            return Ok(format_tagged_find_output(
+                trigram_results,
+                limit,
+                &root,
+                MatchMethod::Trigram,
+                &p.symbol,
+                &self.mcp_config,
+            ));
+        }
+
+        // Only BM25 has results
+        if !bm25_results.is_empty() {
+            return Ok(format_tagged_find_output(
+                bm25_results,
+                limit,
+                &root,
+                MatchMethod::Bm25,
+                &p.symbol,
+                &self.mcp_config,
+            ));
+        }
+
+        // Nothing found at all
+        let suggestions = suggest_similar_fuzzy(&graph, &p.symbol);
+        Err(not_found_msg(&p.symbol, &suggestions))
     }
 
     #[tool(
@@ -903,6 +1024,57 @@ impl CodeGraphServer {
         };
 
         let output = format!("{}{}", output, crate::mcp::hints::impact_hint(&p.symbol));
+        Ok(output)
+    }
+
+    #[tool(
+        description = "Map git-changed files to affected symbols with risk tier classification. \
+        Runs git diff --name-only against a base ref and traces the blast radius of each changed file. \
+        Each changed file is classified as HIGH (>20 affected), MEDIUM (5-20), or LOW (<5) risk."
+    )]
+    async fn get_diff_impact(
+        &self,
+        Parameters(p): Parameters<GetDiffImpactParams>,
+    ) -> Result<String, String> {
+        let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
+
+        // Shell out to git diff
+        let output = std::process::Command::new("git")
+            .args(["diff", "--name-only", &p.base_ref])
+            .current_dir(&root)
+            .output()
+            .map_err(|e| format!("failed to run git: {e}. Ensure git is in PATH."))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("git diff failed: {stderr}"));
+        }
+
+        let changed_files: Vec<PathBuf> = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| root.join(l))
+            .collect();
+
+        if changed_files.is_empty() {
+            return Ok(format!(
+                "No changed files found relative to '{}'.{}",
+                p.base_ref,
+                crate::mcp::hints::diff_impact_hint()
+            ));
+        }
+
+        let config = crate::config::CodeGraphConfig::load(&root);
+        let results = crate::query::impact::diff_impact(
+            &graph,
+            &changed_files,
+            &root,
+            config.impact.high_threshold,
+            config.impact.medium_threshold,
+        );
+
+        let output = format_diff_impact_output(&results, &root);
+        let output = format!("{}{}", output, crate::mcp::hints::diff_impact_hint());
         Ok(output)
     }
 
@@ -1182,6 +1354,85 @@ impl CodeGraphServer {
     }
 
     #[tool(
+        description = "Find all symbols decorated with a given name or pattern across all languages (TS/JS, Rust, Python, Go). Returns decorated symbol name, file:line, decorator name, arguments, and framework label. Use regex patterns for flexible matching."
+    )]
+    async fn find_by_decorator(
+        &self,
+        Parameters(p): Parameters<FindByDecoratorParams>,
+    ) -> Result<String, String> {
+        let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
+
+        let limit = resolve_limit(p.limit, &self.mcp_config);
+
+        let results = crate::query::decorators::find_by_decorator(
+            &graph,
+            &p.pattern,
+            p.language.as_deref(),
+            p.framework.as_deref(),
+            limit,
+        )
+        .map_err(|e| e.to_string())?;
+
+        let output = crate::query::output::format_decorator_to_string(&results, &root, limit);
+
+        let hint = crate::mcp::hints::decorator_hint(&results, &p.pattern, limit);
+
+        Ok(format!("{}{}", output, hint))
+    }
+
+    #[tool(
+        description = "Discover functional groups of related symbols via community detection. Returns labeled clusters with member counts and top symbols. Use to understand codebase organization at a glance."
+    )]
+    async fn find_clusters(
+        &self,
+        Parameters(p): Parameters<FindClustersParams>,
+    ) -> Result<String, String> {
+        let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
+        let scope = p.scope.as_deref().map(std::path::Path::new);
+        let clusters = crate::query::clusters::find_clusters(&graph, &root, scope, 50);
+        let text = crate::query::output::format_clusters_to_string(&clusters);
+        let hint = crate::mcp::hints::cluster_hint(clusters.len());
+        Ok(format!("{text}{hint}"))
+    }
+
+    #[tool(
+        description = "Trace call-chain paths between two symbols via BFS. Returns up to 3 distinct paths following Calls and Imports edges, with 20-hop depth cap and cycle detection. Use to understand how data or control flows from one symbol to another."
+    )]
+    async fn trace_flow(
+        &self,
+        Parameters(p): Parameters<TraceFlowParams>,
+    ) -> Result<String, String> {
+        let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
+        let result = crate::query::flow::trace_flow(
+            &graph,
+            &p.entry,
+            &p.target,
+            p.max_paths.unwrap_or(3),
+            p.max_depth.unwrap_or(20),
+        );
+        let path_count = result.paths.len();
+        let text = crate::query::output::format_flow_to_string(&result, &p.entry, &p.target);
+        let hint = crate::mcp::hints::flow_hint(path_count, &p.entry, &p.target);
+        let _ = root; // root not needed for flow output
+        Ok(format!("{text}{hint}"))
+    }
+
+    #[tool(
+        description = "Generate a structured rename plan showing all locations where a symbol would need to change. Returns file, line, old text, and new text for each site. Does NOT modify any files — plan only. Use before renaming to understand the full scope of changes."
+    )]
+    async fn plan_rename(
+        &self,
+        Parameters(p): Parameters<PlanRenameParams>,
+    ) -> Result<String, String> {
+        let (graph, root) = self.resolve_graph(p.project_path.as_deref()).await?;
+        let items = crate::query::rename::plan_rename(&graph, &p.symbol, &p.new_name, &root);
+        let item_count = items.len();
+        let text = crate::query::output::format_rename_to_string(&items, &root);
+        let hint = crate::mcp::hints::rename_hint(item_count, &p.symbol);
+        Ok(format!("{text}{hint}"))
+    }
+
+    #[tool(
         description = "Execute multiple graph queries in a single call. Returns results separated by section headers. Max 10 queries per batch."
     )]
     async fn batch_query(
@@ -1233,6 +1484,285 @@ impl CodeGraphServer {
 }
 
 // ---------------------------------------------------------------------------
+// Diff impact output formatter
+// ---------------------------------------------------------------------------
+
+fn format_diff_impact_output(
+    results: &[crate::query::impact::DiffImpactResult],
+    root: &Path,
+) -> String {
+    use std::fmt::Write;
+    let mut buf = String::new();
+
+    for r in results {
+        let rel = r.changed_file.strip_prefix(root).unwrap_or(&r.changed_file);
+        writeln!(
+            buf,
+            "## {} [{}] ({} affected files)",
+            rel.display(),
+            r.risk,
+            r.affected.len()
+        )
+        .unwrap();
+        for a in &r.affected {
+            let arel = a.file_path.strip_prefix(root).unwrap_or(&a.file_path);
+            writeln!(
+                buf,
+                "  {} (depth {}) [{}: {}]",
+                arel.display(),
+                a.depth,
+                a.confidence,
+                a.basis
+            )
+            .unwrap();
+        }
+    }
+
+    if buf.is_empty() {
+        buf.push_str("No impact detected from changed files.");
+    }
+    buf
+}
+
+// ---------------------------------------------------------------------------
+// Static documentation of the code-graph graph model and MCP tool catalog.
+// ---------------------------------------------------------------------------
+
+const GRAPH_SCHEMA_DOC: &str = r#"# Code-Graph Schema
+
+## Node Types
+- **File** — Source file in the project (TS/JS, Rust, Python, Go)
+- **Symbol** — Named code entity (function, class, struct, interface, enum, variable, method, property, type, const, static, macro, component, trait, impl_method)
+- **ExternalPackage** — Third-party dependency (npm package, crate, pip package, Go module)
+- **UnresolvedImport** — Import that could not be resolved to a file in the project
+- **Builtin** — Language built-in (std, core, alloc for Rust)
+
+## Edge Types
+- **ResolvedImport** — File A imports from file B (with optional specifiers)
+- **UnresolvedImport** — Import that could not be resolved
+- **Contains** — File contains a symbol definition
+- **ChildOf** — Symbol is a child of another symbol (method of class, field of struct)
+- **Calls** — Symbol A calls symbol B
+- **Extends** — Class/interface extends another
+- **Implements** — Class implements an interface
+- **BarrelReexportAll** — Barrel file re-exports all from another file
+- **HasDecorator** — Symbol has a decorator/attribute
+- **SideEffectImport** — Import with side effects only (Go blank imports)
+
+## Symbol Kinds
+function, class, interface, type, enum, variable, component, method, property, struct, trait, impl_method, const, static, macro
+
+## Available MCP Tools
+- **find_symbol** — Find symbol definitions by name or regex pattern
+- **find_references** — Find all files and call sites that reference a symbol
+- **get_context** — 360-degree view: definition, references, callers, callees, type hierarchy
+- **get_impact** — Blast radius of changing a symbol (transitive dependent files)
+- **detect_circular** — Detect circular dependency cycles
+- **get_stats** — Project overview: file count, symbol breakdown, import summary
+- **get_structure** — Directory/module tree with top-level symbols
+- **get_file_summary** — File overview: exports, imports, dependency role
+- **get_imports** — File import/dependency list classified by type
+- **find_dead_code** — Detect unreferenced symbols and unreachable files
+- **find_by_decorator** — Find symbols by decorator/attribute name
+- **get_diff** — Compare graph against a named snapshot
+- **export_graph** — Export graph to DOT or Mermaid format
+- **batch_query** — Execute multiple queries in a single call
+- **register_project** — Register a new project root for multi-project querying
+- **list_projects** — List all registered project roots
+"#;
+
+// ---------------------------------------------------------------------------
+// Private helper functions for MCP Prompts and Resources
+// (Logic extracted from async trait methods so tests can call them synchronously)
+// ---------------------------------------------------------------------------
+
+fn build_list_prompts_result() -> ListPromptsResult {
+    ListPromptsResult {
+        meta: None,
+        next_cursor: None,
+        prompts: vec![
+            Prompt {
+                name: "impact-analysis".into(),
+                title: None,
+                description: Some(
+                    "Guided multi-step impact analysis workflow for understanding the blast radius of changing a symbol"
+                        .into(),
+                ),
+                arguments: Some(vec![PromptArgument {
+                    name: "symbol".into(),
+                    title: None,
+                    description: Some("Symbol name to analyze impact for".into()),
+                    required: Some(true),
+                }]),
+                icons: None,
+                meta: None,
+            },
+            Prompt {
+                name: "architecture-map".into(),
+                title: None,
+                description: Some(
+                    "Guided architecture exploration workflow for understanding project structure and dependencies"
+                        .into(),
+                ),
+                arguments: None,
+                icons: None,
+                meta: None,
+            },
+            Prompt {
+                name: "refactor-check".into(),
+                title: None,
+                description: Some(
+                    "Safety check workflow before refactoring — validates blast radius, references, and circular dependencies"
+                        .into(),
+                ),
+                arguments: Some(vec![PromptArgument {
+                    name: "symbol".into(),
+                    title: None,
+                    description: Some("Symbol name to check refactoring safety for".into()),
+                    required: Some(true),
+                }]),
+                icons: None,
+                meta: None,
+            },
+        ],
+    }
+}
+
+fn build_get_prompt_result(
+    name: &str,
+    arguments: Option<&rmcp::model::JsonObject>,
+) -> Result<GetPromptResult, rmcp::ErrorData> {
+    match name {
+        "impact-analysis" => {
+            let symbol = arguments
+                .and_then(|m| m.get("symbol"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "<symbol>".to_string());
+            Ok(GetPromptResult {
+                description: Some(format!("Impact analysis workflow for `{symbol}`")),
+                messages: vec![PromptMessage {
+                    role: PromptMessageRole::User,
+                    content: PromptMessageContent::text(format!(
+                        "Analyze the impact of changing `{symbol}` using the code-graph tools:\n\n\
+                         1. **Get blast radius** (get_impact) — find all files transitively affected by `{symbol}`\n\
+                         2. **Find all references** (find_references) — identify every import and call site\n\
+                         3. **Check for circular dependencies** (detect_circular) — flag any cycles involving affected files\n\
+                         4. **Summarize risk** — classify as HIGH (>20 affected files), MEDIUM (5-20), or LOW (<5) and list the most critical downstream consumers"
+                    )),
+                }],
+            })
+        }
+        "architecture-map" => Ok(GetPromptResult {
+            description: Some("Architecture exploration workflow".to_string()),
+            messages: vec![PromptMessage {
+                role: PromptMessageRole::User,
+                content: PromptMessageContent::text(
+                    "Map the project architecture using code-graph tools:\n\n\
+                     1. **Project overview** (get_stats) — get file counts, symbol counts, and language breakdown\n\
+                     2. **Directory structure** (get_structure) — explore the module tree with top-level symbols\n\
+                     3. **Key entry points** (get_file_summary) — identify hub files, bridge files, and entry points\n\
+                     4. **Dependency patterns** (get_imports) — trace import chains for critical modules\n\
+                     5. **Circular dependencies** (detect_circular) — identify architectural debt\n\n\
+                     Produce a summary of the architecture: layers, key modules, data flow direction, and any structural concerns."
+                        .to_string(),
+                ),
+            }],
+        }),
+        "refactor-check" => {
+            let symbol = arguments
+                .and_then(|m| m.get("symbol"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "<symbol>".to_string());
+            Ok(GetPromptResult {
+                description: Some(format!("Refactoring safety check for `{symbol}`")),
+                messages: vec![PromptMessage {
+                    role: PromptMessageRole::User,
+                    content: PromptMessageContent::text(format!(
+                        "Before refactoring `{symbol}`, perform a safety check:\n\n\
+                         1. **Blast radius** (get_impact) — how many files are transitively affected?\n\
+                         2. **All reference sites** (find_references) — list every file that imports or calls `{symbol}`\n\
+                         3. **Circular dependencies** (detect_circular) — are any affected files in dependency cycles?\n\
+                         4. **Symbol context** (get_context) — understand callers, callees, type hierarchy\n\
+                         5. **Safe refactoring order** — suggest which files to modify first (leaf consumers before hubs)\n\n\
+                         Flag any risks: HIGH if >20 affected files or circular deps involved, MEDIUM if 5-20, LOW if <5."
+                    )),
+                }],
+            })
+        }
+        _ => Err(rmcp::ErrorData::invalid_params("unknown prompt", None)),
+    }
+}
+
+fn build_list_resources_result() -> ListResourcesResult {
+    use rmcp::model::AnnotateAble;
+    ListResourcesResult {
+        meta: None,
+        next_cursor: None,
+        resources: vec![
+            RawResource {
+                uri: "code-graph://stats".into(),
+                name: "Project Statistics".into(),
+                title: None,
+                description: Some(
+                    "Current project file count, symbol count, and language breakdown".into(),
+                ),
+                mime_type: Some("text/plain".into()),
+                size: None,
+                icons: None,
+                meta: None,
+            }
+            .no_annotation(),
+            RawResource {
+                uri: "code-graph://schema".into(),
+                name: "Graph Schema".into(),
+                title: None,
+                description: Some(
+                    "Graph model documentation: node types, edge types, and available MCP tools"
+                        .into(),
+                ),
+                mime_type: Some("text/plain".into()),
+                size: None,
+                icons: None,
+                meta: None,
+            }
+            .no_annotation(),
+            RawResource {
+                uri: "code-graph://clusters".into(),
+                name: "Cluster Analysis".into(),
+                title: None,
+                description: Some(
+                    "Functional groups of related symbols with labels and member counts".into(),
+                ),
+                mime_type: Some("text/plain".into()),
+                size: None,
+                icons: None,
+                meta: None,
+            }
+            .no_annotation(),
+        ],
+    }
+}
+
+fn build_read_resource_schema_result(uri: &str) -> Result<ReadResourceResult, rmcp::ErrorData> {
+    match uri {
+        "code-graph://schema" => Ok(ReadResourceResult {
+            contents: vec![ResourceContents::TextResourceContents {
+                uri: uri.to_string(),
+                mime_type: Some("text/plain".into()),
+                text: GRAPH_SCHEMA_DOC.to_string(),
+                meta: None,
+            }],
+        }),
+        _ => Err(rmcp::ErrorData::invalid_params(
+            format!("unknown resource URI: {uri}"),
+            None,
+        )),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ServerHandler
 // ---------------------------------------------------------------------------
 
@@ -1241,19 +1771,92 @@ impl ServerHandler for CodeGraphServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(
-                "code-graph indexes and queries TypeScript/JavaScript/Rust dependency graphs. \
+                "code-graph indexes and queries TypeScript/JavaScript/Rust/Python/Go dependency graphs. \
+                 Supports: TypeScript, JavaScript, Rust, Python, Go. \
                  The graph is built automatically on first tool call — no manual indexing needed. \
                  When started with --watch, file changes are auto-reindexed. \
                  All tools accept an optional project_path parameter to override the default project root. \
                  Navigation funnel: get_structure (project tree) → get_file_summary (file overview) → \
                  get_imports (dependency list) → get_context (symbol detail). \
                  Dead code analysis: find_dead_code detects unreferenced symbols and unreachable files. \
+                 Decorator/framework queries: find_by_decorator finds all NestJS controllers, Flask routes, Actix handlers, etc. \
                  Multi-project support: register_project adds a new project root; list_projects shows all registered projects. \
                  Snapshot/diff workflow: Use code-graph snapshot create <name> to save a baseline, then get_diff to see what changed."
                     .into(),
             ),
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
+            capabilities: ServerCapabilities::builder()
+                .enable_tools()
+                .enable_prompts()
+                .enable_resources()
+                .build(),
             ..Default::default()
+        }
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, rmcp::ErrorData> {
+        Ok(build_list_prompts_result())
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResult, rmcp::ErrorData> {
+        build_get_prompt_result(&request.name, request.arguments.as_ref())
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, rmcp::ErrorData> {
+        Ok(build_list_resources_result())
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResult, rmcp::ErrorData> {
+        let uri = request.uri.as_str();
+        match uri {
+            "code-graph://stats" => {
+                let (graph, _root) = self
+                    .resolve_graph(None)
+                    .await
+                    .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+                let stats = crate::query::stats::project_stats(&graph);
+                let text = crate::query::output::format_stats_to_string(&stats, None);
+                Ok(ReadResourceResult {
+                    contents: vec![ResourceContents::TextResourceContents {
+                        uri: request.uri,
+                        mime_type: Some("text/plain".into()),
+                        text,
+                        meta: None,
+                    }],
+                })
+            }
+            "code-graph://clusters" => {
+                let (graph, root) = self
+                    .resolve_graph(None)
+                    .await
+                    .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+                let clusters = crate::query::clusters::find_clusters(&graph, &root, None, 50);
+                let text = crate::query::output::format_clusters_to_string(&clusters);
+                Ok(ReadResourceResult {
+                    contents: vec![ResourceContents::TextResourceContents {
+                        uri: request.uri,
+                        mime_type: Some("text/plain".into()),
+                        text,
+                        meta: None,
+                    }],
+                })
+            }
+            _ => build_read_resource_schema_result(uri),
         }
     }
 }
@@ -1262,6 +1865,7 @@ impl ServerHandler for CodeGraphServer {
 mod tests {
     use super::*;
     use crate::config::McpConfig;
+    use crate::query::find::{jaccard_similarity, trigrams};
     use rmcp::ServerHandler;
     use std::path::PathBuf;
 
@@ -1615,6 +2219,137 @@ suppress_summary_line = true
     }
 
     // ---------------------------------------------------------------------------
+    // MCP Prompts + Resources capability tests (MCPP-01..04, MCPR-01..03)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_get_info_has_prompts_capability() {
+        let server = CodeGraphServer::new(PathBuf::from("/tmp/test"), false);
+        let info = server.get_info();
+        assert!(
+            info.capabilities.prompts.is_some(),
+            "get_info capabilities should declare prompts"
+        );
+    }
+
+    #[test]
+    fn test_get_info_has_resources_capability() {
+        let server = CodeGraphServer::new(PathBuf::from("/tmp/test"), false);
+        let info = server.get_info();
+        assert!(
+            info.capabilities.resources.is_some(),
+            "get_info capabilities should declare resources"
+        );
+    }
+
+    #[test]
+    fn test_list_prompts_returns_three() {
+        // Call the private helper directly — avoids constructing RequestContext
+        let list = build_list_prompts_result();
+        assert_eq!(list.prompts.len(), 3, "should return exactly 3 prompts");
+        let names: Vec<&str> = list.prompts.iter().map(|p| p.name.as_str()).collect();
+        assert!(
+            names.contains(&"impact-analysis"),
+            "should have impact-analysis"
+        );
+        assert!(
+            names.contains(&"architecture-map"),
+            "should have architecture-map"
+        );
+        assert!(
+            names.contains(&"refactor-check"),
+            "should have refactor-check"
+        );
+    }
+
+    #[test]
+    fn test_get_prompt_impact_analysis() {
+        let mut args = rmcp::model::JsonObject::new();
+        args.insert("symbol".to_string(), serde_json::json!("UserService"));
+        let prompt = build_get_prompt_result("impact-analysis", Some(&args))
+            .expect("get_prompt should succeed for impact-analysis");
+        assert!(!prompt.messages.is_empty(), "should return messages");
+        let text = match &prompt.messages[0].content {
+            rmcp::model::PromptMessageContent::Text { text } => text.clone(),
+            _ => panic!("expected Text content"),
+        };
+        assert!(
+            text.contains("UserService"),
+            "message should contain symbol name"
+        );
+        assert!(
+            text.contains("get_impact"),
+            "message should reference get_impact tool"
+        );
+        assert!(
+            text.contains("find_references"),
+            "message should reference find_references"
+        );
+        assert!(
+            text.contains("detect_circular"),
+            "message should reference detect_circular"
+        );
+    }
+
+    #[test]
+    fn test_get_prompt_architecture_map() {
+        let prompt = build_get_prompt_result("architecture-map", None)
+            .expect("get_prompt should succeed for architecture-map");
+        assert!(!prompt.messages.is_empty(), "should return messages");
+        let text = match &prompt.messages[0].content {
+            rmcp::model::PromptMessageContent::Text { text } => text.clone(),
+            _ => panic!("expected Text content"),
+        };
+        assert!(
+            text.contains("get_structure"),
+            "message should reference get_structure"
+        );
+        assert!(
+            text.contains("get_stats"),
+            "message should reference get_stats"
+        );
+        assert!(
+            text.contains("get_file_summary"),
+            "message should reference get_file_summary"
+        );
+    }
+
+    #[test]
+    fn test_get_prompt_refactor_check() {
+        let mut args = rmcp::model::JsonObject::new();
+        args.insert("symbol".to_string(), serde_json::json!("AuthModule"));
+        let prompt = build_get_prompt_result("refactor-check", Some(&args))
+            .expect("get_prompt should succeed for refactor-check");
+        assert!(!prompt.messages.is_empty(), "should return messages");
+        let text = match &prompt.messages[0].content {
+            rmcp::model::PromptMessageContent::Text { text } => text.clone(),
+            _ => panic!("expected Text content"),
+        };
+        assert!(
+            text.contains("AuthModule"),
+            "message should contain symbol name"
+        );
+        // impact-first approach: blast radius -> refs -> circular -> safe order
+        let blast_pos = text.find("get_impact").unwrap_or(usize::MAX);
+        let refs_pos = text.find("find_references").unwrap_or(usize::MAX);
+        let circ_pos = text.find("detect_circular").unwrap_or(usize::MAX);
+        assert!(
+            blast_pos < refs_pos,
+            "get_impact should come before find_references"
+        );
+        assert!(
+            refs_pos < circ_pos,
+            "find_references should come before detect_circular"
+        );
+    }
+
+    #[test]
+    fn test_get_prompt_unknown_returns_error() {
+        let result = build_get_prompt_result("nonexistent", None);
+        assert!(result.is_err(), "unknown prompt should return error");
+    }
+
+    // ---------------------------------------------------------------------------
     // format_query_header tests (BATCH-01)
     // ---------------------------------------------------------------------------
 
@@ -1762,5 +2497,154 @@ suppress_summary_line = true
             output.contains("/tmp/project"),
             "output should contain default project path"
         );
+    }
+
+    // ---------------------------------------------------------------------------
+    // MCP Resources tests (MCPR-01..03)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_list_resources_returns_two() {
+        // Call the private helper directly — avoids constructing RequestContext
+        // NOTE: now returns 3 resources (stats, schema, clusters) — kept for regression
+        let list = build_list_resources_result();
+        assert!(
+            list.resources.len() >= 2,
+            "should return at least 2 resources"
+        );
+        let uris: Vec<&str> = list.resources.iter().map(|r| r.uri.as_str()).collect();
+        assert!(
+            uris.contains(&"code-graph://stats"),
+            "should have code-graph://stats"
+        );
+        assert!(
+            uris.contains(&"code-graph://schema"),
+            "should have code-graph://schema"
+        );
+    }
+
+    #[test]
+    fn test_list_resources_includes_clusters() {
+        let list = build_list_resources_result();
+        assert_eq!(
+            list.resources.len(),
+            3,
+            "should return exactly 3 resources (stats, schema, clusters)"
+        );
+        let uris: Vec<&str> = list.resources.iter().map(|r| r.uri.as_str()).collect();
+        assert!(
+            uris.contains(&"code-graph://clusters"),
+            "should have code-graph://clusters"
+        );
+        assert!(
+            uris.contains(&"code-graph://stats"),
+            "should have code-graph://stats"
+        );
+        assert!(
+            uris.contains(&"code-graph://schema"),
+            "should have code-graph://schema"
+        );
+    }
+
+    #[test]
+    fn test_dispatch_find_clusters() {
+        let config = McpConfig::default();
+        let graph = CodeGraph::default();
+        let root = std::path::Path::new("/tmp/project");
+        let params = serde_json::json!({});
+        let result = dispatch_query(&config, &graph, root, "find_clusters", &params, None);
+        assert!(
+            result.is_ok(),
+            "find_clusters dispatch should succeed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_dispatch_trace_flow() {
+        let config = McpConfig::default();
+        let graph = CodeGraph::default();
+        let root = std::path::Path::new("/tmp/project");
+        let params = serde_json::json!({"entry": "funcA", "target": "funcB"});
+        let result = dispatch_query(&config, &graph, root, "trace_flow", &params, None);
+        assert!(
+            result.is_ok(),
+            "trace_flow dispatch should succeed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_dispatch_trace_flow_missing_param() {
+        let config = McpConfig::default();
+        let graph = CodeGraph::default();
+        let root = std::path::Path::new("/tmp/project");
+        // Missing "target" param
+        let params = serde_json::json!({"entry": "funcA"});
+        let result = dispatch_query(&config, &graph, root, "trace_flow", &params, None);
+        assert!(
+            result.is_err(),
+            "trace_flow without target should return Err"
+        );
+    }
+
+    #[test]
+    fn test_dispatch_plan_rename() {
+        let config = McpConfig::default();
+        let graph = CodeGraph::default();
+        let root = std::path::Path::new("/tmp/project");
+        let params = serde_json::json!({"symbol": "Foo", "new_name": "Bar"});
+        let result = dispatch_query(&config, &graph, root, "plan_rename", &params, None);
+        assert!(
+            result.is_ok(),
+            "plan_rename dispatch should succeed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_dispatch_plan_rename_missing_param() {
+        let config = McpConfig::default();
+        let graph = CodeGraph::default();
+        let root = std::path::Path::new("/tmp/project");
+        // Missing "new_name" param
+        let params = serde_json::json!({"symbol": "Foo"});
+        let result = dispatch_query(&config, &graph, root, "plan_rename", &params, None);
+        assert!(
+            result.is_err(),
+            "plan_rename without new_name should return Err"
+        );
+    }
+
+    #[test]
+    fn test_read_resource_schema() {
+        let resource_result = build_read_resource_schema_result("code-graph://schema")
+            .expect("read_resource should succeed for schema");
+        assert!(
+            !resource_result.contents.is_empty(),
+            "should return contents"
+        );
+        let text = match &resource_result.contents[0] {
+            rmcp::model::ResourceContents::TextResourceContents { text, .. } => text.clone(),
+            _ => panic!("expected TextResourceContents"),
+        };
+        assert!(
+            text.contains("Node Types"),
+            "schema should mention Node Types"
+        );
+        assert!(
+            text.contains("Edge Types"),
+            "schema should mention Edge Types"
+        );
+        assert!(
+            text.contains("find_symbol"),
+            "schema should list find_symbol tool"
+        );
+    }
+
+    #[test]
+    fn test_read_resource_unknown_returns_error() {
+        let result = build_read_resource_schema_result("code-graph://nonexistent");
+        assert!(result.is_err(), "unknown resource URI should return error");
     }
 }

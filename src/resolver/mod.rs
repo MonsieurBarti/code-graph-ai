@@ -1,6 +1,8 @@
 pub mod barrel;
 pub mod cargo_workspace;
 pub mod file_resolver;
+pub mod go_resolver;
+pub mod python_resolver;
 pub mod rust_mod_tree;
 pub mod rust_resolver;
 pub mod workspace;
@@ -45,6 +47,16 @@ pub struct ResolveStats {
     pub rust_builtin: usize,
     /// Rust use paths that could not be resolved — `UnresolvedImport` nodes created.
     pub rust_unresolved: usize,
+
+    // --- Go-specific (Step 8) ---
+    /// Go imports resolved to local file nodes.
+    pub go_resolved: usize,
+    /// Go imports classified as stdlib (external).
+    pub go_stdlib: usize,
+    /// Go imports classified as external packages.
+    pub go_external: usize,
+    /// Go imports that could not be resolved.
+    pub go_unresolved: usize,
 }
 
 /// Run the full import resolution pipeline on the code graph.
@@ -325,6 +337,54 @@ pub fn resolve_all(
             eprintln!(
                 "  Rust resolution: {} resolved, {} external, {} builtin, {} unresolved",
                 rust_stats.resolved, rust_stats.external, rust_stats.builtin, rust_stats.unresolved
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 7: Python import resolution.
+    // -----------------------------------------------------------------------
+    // Only run when there are Python files in the graph (avoids overhead
+    // on pure TypeScript/JavaScript/Rust projects).
+    let has_python_files = graph.graph.node_indices().any(|idx| {
+        if let crate::graph::node::GraphNode::File(ref f) = graph.graph[idx] {
+            f.language == "python"
+        } else {
+            false
+        }
+    });
+    if has_python_files {
+        let py_stats = python_resolver::resolve_python_imports(graph, parse_results, project_root);
+        stats.resolved += py_stats.resolved;
+        stats.unresolved += py_stats.unresolved;
+        if verbose {
+            eprintln!(
+                "  Python resolution: {} resolved, {} unresolved, {} conditional",
+                py_stats.resolved, py_stats.unresolved, py_stats.conditional,
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 8: Go import resolution.
+    // -----------------------------------------------------------------------
+    let has_go_files = graph.graph.node_indices().any(|idx| {
+        if let crate::graph::node::GraphNode::File(ref f) = graph.graph[idx] {
+            f.language == "go"
+        } else {
+            false
+        }
+    });
+    if has_go_files {
+        let go_stats = go_resolver::resolve_go_imports(graph, parse_results, project_root, verbose);
+        stats.go_resolved = go_stats.resolved;
+        stats.go_stdlib = go_stats.stdlib;
+        stats.go_external = go_stats.external;
+        stats.go_unresolved = go_stats.unresolved;
+        if verbose {
+            eprintln!(
+                "  Go resolution: {} resolved, {} stdlib, {} external, {} unresolved",
+                go_stats.resolved, go_stats.stdlib, go_stats.external, go_stats.unresolved
             );
         }
     }

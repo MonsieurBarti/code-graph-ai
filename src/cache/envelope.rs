@@ -12,7 +12,12 @@ use crate::graph::CodeGraph;
 /// `FileInfo.crate_name: Option<String>` field was added, and `builtin_index` field
 /// was added to `CodeGraph` — all change bincode serialization layout.
 /// Bumped to 4 in Phase 12 when `FileKind` enum and `kind` field were added to `FileInfo`.
-pub const CACHE_VERSION: u32 = 4;
+/// Bumped to 5 in Phase 17 when `line_end` and `decorators` fields were added to `SymbolInfo`,
+/// Python language support was added, and `ConditionalImport` edge kind was added.
+/// Bumped to 6 in Phase 18 when `DecoratorInfo.framework` field was added,
+/// SideEffectImport/DotImport/Embeds/HasDecorator edge kinds were added,
+/// Go language support was added, and GoAbsolute/GoBlank/GoDot import kinds were added.
+pub const CACHE_VERSION: u32 = 6;
 
 /// Cache directory name (created in project root).
 pub const CACHE_DIR: &str = ".code-graph";
@@ -107,7 +112,7 @@ pub fn load_cache(project_root: &Path) -> Option<CacheEnvelope> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::node::{SymbolInfo, SymbolKind, SymbolVisibility};
+    use crate::graph::node::{SymbolInfo, SymbolKind};
 
     #[test]
     fn test_roundtrip_cache() {
@@ -123,11 +128,7 @@ mod tests {
                 name: "hello".into(),
                 kind: SymbolKind::Function,
                 line: 1,
-                col: 0,
-                is_exported: true,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
 

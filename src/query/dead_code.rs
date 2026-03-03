@@ -317,11 +317,10 @@ mod tests {
             name: name.into(),
             kind,
             line,
-            col: 0,
             is_exported: exported,
-            is_default: false,
             visibility: vis,
             trait_impl,
+            ..Default::default()
         }
     }
 

@@ -155,6 +155,99 @@ pub fn diff_hint(has_changes: bool) -> String {
     }
 }
 
+/// Generate hint for find_by_decorator results.
+pub fn decorator_hint(
+    results: &[crate::query::decorators::DecoratorMatch],
+    pattern: &str,
+    limit: usize,
+) -> String {
+    if results.is_empty() {
+        return format!(
+            "\n\nhint: no symbols found with decorator matching '{}'. Try a broader pattern or check available decorators with find_symbol",
+            pattern
+        );
+    }
+    let mut hint = String::new();
+    if results.len() >= limit {
+        hint.push_str(&format!(
+            "\n\nhint: results truncated at {}. Use `limit` for more or narrow with `language`/`framework` filter",
+            limit
+        ));
+    }
+    // Suggest framework filter if results span multiple frameworks
+    let mut frameworks: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for r in results {
+        if let Some(ref fw) = r.framework {
+            frameworks.insert(fw.as_str());
+        }
+    }
+    if frameworks.len() > 1 {
+        let mut fw_list: Vec<&str> = frameworks.into_iter().collect();
+        fw_list.sort();
+        hint.push_str(&format!(
+            "\n\nhint: results span frameworks: {}. Use `framework` param to filter",
+            fw_list.join(", ")
+        ));
+    }
+    hint
+}
+
+/// Generate hint for get_diff_impact results.
+///
+/// Suggests using get_impact for detailed analysis on a specific changed symbol.
+pub fn diff_impact_hint() -> String {
+    "\nhint: get_impact \"symbol_name\" for detailed impact of a specific symbol".to_string()
+}
+
+/// Generate hint for find_clusters results.
+///
+/// - `cluster_count`: number of clusters returned
+///
+/// Returns empty string when no clusters found.
+/// Otherwise suggests `trace_flow` or `get_context` on top symbols.
+pub fn cluster_hint(cluster_count: usize) -> String {
+    if cluster_count == 0 {
+        return String::new();
+    }
+    "\nhint: trace_flow \"<entry>\" \"<target>\" to trace call chains | alt: get_context \"<symbol>\" on top cluster symbols".to_string()
+}
+
+/// Generate hint for trace_flow results.
+///
+/// - `path_count`: number of paths found
+/// - `entry`: the entry symbol name
+/// - `target`: the target symbol name
+///
+/// If paths found: suggest `get_context` on intermediate symbols.
+/// If no paths found: suggest `find_references` on both symbols.
+pub fn flow_hint(path_count: usize, entry: &str, target: &str) -> String {
+    if path_count == 0 {
+        format!(
+            "\nhint: find_references \"{}\" | alt: find_references \"{}\" to explore connectivity",
+            entry, target
+        )
+    } else {
+        "\nhint: get_context \"<intermediate_symbol>\" to explore symbols along the path"
+            .to_string()
+    }
+}
+
+/// Generate hint for plan_rename results.
+///
+/// - `item_count`: number of rename sites found
+/// - `symbol`: the symbol being renamed
+///
+/// Suggests `get_impact` on the symbol to check blast radius before renaming.
+pub fn rename_hint(item_count: usize, symbol: &str) -> String {
+    if item_count == 0 {
+        return String::new();
+    }
+    format!(
+        "\nhint: get_impact \"{}\" to check blast radius before applying rename",
+        symbol
+    )
+}
+
 /// Generate a combined hint for batch_query responses.
 ///
 /// Strategy: If any query was a find_symbol with exactly one result,
@@ -495,6 +588,49 @@ mod tests {
     }
 
     #[test]
+    fn test_decorator_hint_empty() {
+        let hint = decorator_hint(&[], "Controller", 30);
+        assert!(
+            hint.contains("no symbols found"),
+            "empty results should say no symbols found: got '{}'",
+            hint
+        );
+        assert!(
+            hint.contains("Controller"),
+            "hint should mention the pattern: got '{}'",
+            hint
+        );
+    }
+
+    #[test]
+    fn test_decorator_hint_truncated() {
+        use crate::graph::node::SymbolKind;
+        use crate::query::decorators::DecoratorMatch;
+        use std::path::PathBuf;
+
+        let results: Vec<DecoratorMatch> = (0..5)
+            .map(|i| DecoratorMatch {
+                symbol_name: format!("Class{i}"),
+                kind: SymbolKind::Class,
+                file_path: PathBuf::from("src/app.ts"),
+                line: i + 1,
+                line_end: i + 2,
+                decorator_name: "Controller".into(),
+                decorator_args: None,
+                framework: Some("nestjs".into()),
+                language: "typescript".into(),
+            })
+            .collect();
+
+        let hint = decorator_hint(&results, "Controller", 5);
+        assert!(
+            hint.contains("truncated"),
+            "at-limit results should mention truncation: got '{}'",
+            hint
+        );
+    }
+
+    #[test]
     fn test_diff_hint_no_changes() {
         let hint = diff_hint(false);
         assert!(
@@ -505,6 +641,106 @@ mod tests {
         assert!(
             hint.starts_with('\n'),
             "non-empty hint must start with newline"
+        );
+    }
+
+    #[test]
+    fn test_cluster_hint_empty() {
+        let hint = cluster_hint(0);
+        assert_eq!(hint, "", "zero clusters -> empty hint string");
+    }
+
+    #[test]
+    fn test_cluster_hint_nonempty() {
+        let hint = cluster_hint(3);
+        assert!(
+            !hint.is_empty(),
+            "non-zero cluster count should produce non-empty hint"
+        );
+        assert!(
+            hint.starts_with('\n'),
+            "non-empty cluster hint must start with newline: got '{}'",
+            hint
+        );
+        assert!(
+            hint.contains("trace_flow") || hint.contains("get_context"),
+            "cluster hint should suggest trace_flow or get_context: got '{}'",
+            hint
+        );
+    }
+
+    #[test]
+    fn test_flow_hint_with_paths() {
+        let hint = flow_hint(2, "funcA", "funcB");
+        assert!(!hint.is_empty(), "flow hint with paths should be non-empty");
+        assert!(
+            hint.starts_with('\n'),
+            "non-empty flow hint must start with newline: got '{}'",
+            hint
+        );
+        assert!(
+            hint.contains("get_context"),
+            "flow hint with paths should suggest get_context: got '{}'",
+            hint
+        );
+    }
+
+    #[test]
+    fn test_flow_hint_no_paths() {
+        let hint = flow_hint(0, "funcA", "funcB");
+        assert!(
+            !hint.is_empty(),
+            "flow hint with no paths should still be non-empty"
+        );
+        assert!(
+            hint.starts_with('\n'),
+            "non-empty flow hint must start with newline: got '{}'",
+            hint
+        );
+        assert!(
+            hint.contains("find_references"),
+            "flow hint with no paths should suggest find_references: got '{}'",
+            hint
+        );
+        assert!(
+            hint.contains("funcA"),
+            "flow hint with no paths should mention entry symbol: got '{}'",
+            hint
+        );
+        assert!(
+            hint.contains("funcB"),
+            "flow hint with no paths should mention target symbol: got '{}'",
+            hint
+        );
+    }
+
+    #[test]
+    fn test_rename_hint_empty() {
+        let hint = rename_hint(0, "Foo");
+        assert_eq!(hint, "", "zero rename items -> empty hint string");
+    }
+
+    #[test]
+    fn test_rename_hint_nonempty() {
+        let hint = rename_hint(3, "Foo");
+        assert!(
+            !hint.is_empty(),
+            "non-zero rename items should produce non-empty hint"
+        );
+        assert!(
+            hint.starts_with('\n'),
+            "non-empty rename hint must start with newline: got '{}'",
+            hint
+        );
+        assert!(
+            hint.contains("get_impact"),
+            "rename hint should suggest get_impact: got '{}'",
+            hint
+        );
+        assert!(
+            hint.contains("Foo"),
+            "rename hint should mention the symbol: got '{}'",
+            hint
         );
     }
 }

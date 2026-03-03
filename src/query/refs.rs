@@ -179,7 +179,7 @@ mod tests {
 
     use crate::graph::{
         CodeGraph,
-        node::{SymbolInfo, SymbolKind, SymbolVisibility},
+        node::{SymbolInfo, SymbolKind},
     };
 
     fn make_graph() -> (CodeGraph, PathBuf) {
@@ -202,11 +202,8 @@ mod tests {
                 name: "foo".into(),
                 kind: SymbolKind::Function,
                 line: 1,
-                col: 0,
                 is_exported: true,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
 
@@ -263,11 +260,8 @@ mod tests {
                 name: "foo".into(),
                 kind: SymbolKind::Function,
                 line: 1,
-                col: 0,
                 is_exported: true,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
 
@@ -279,11 +273,7 @@ mod tests {
                 name: "bar".into(),
                 kind: SymbolKind::Function,
                 line: 5,
-                col: 0,
-                is_exported: false,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
         graph.add_calls_edge(bar_sym, foo_sym);
@@ -334,11 +324,8 @@ mod tests {
                 name: "foo".into(),
                 kind: SymbolKind::Function,
                 line: 1,
-                col: 0,
                 is_exported: true,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
 

@@ -2,12 +2,12 @@
 name = "code-graph-cli"
 version = "1.2.0"
 edition = "2024"
-description = "Code intelligence engine for TypeScript/JavaScript/Rust — query the dependency graph instead of reading source files."
+description = "Code intelligence engine for TypeScript/JavaScript/Rust/Python/Go — query the dependency graph instead of reading source files."
 license = "MIT"
 repository = "https://github.com/MonsieurBarti/code-graph-ai"
 homepage = "https://github.com/MonsieurBarti/code-graph-ai"
 readme = "README.md"
-keywords = ["typescript", "rust", "code-graph", "mcp", "dependency-analysis"]
+keywords = ["typescript", "rust", "go", "code-graph", "mcp"]
 categories = ["development-tools", "command-line-utilities"]
 exclude = [".planning/", ".github/", ".claude/", ".devcontainer/", "target/"]
 
@@ -15,11 +15,21 @@ exclude = [".planning/", ".github/", ".claude/", ".devcontainer/", "target/"]
 name = "code-graph"
 path = "src/main.rs"
 
+[features]
+web = ["dep:axum", "dep:tower-http", "dep:rust-embed", "dep:mime_guess"]
+rag = ["web", "dep:fastembed", "dep:usearch", "dep:genai", "dep:oauth2", "dep:uuid"]
+
 [dependencies]
+axum = { version = "0.8", features = ["ws"], optional = true }
+tower-http = { version = "0.6", features = ["cors"], optional = true }
+rust-embed = { version = "8", optional = true }
+mime_guess = { version = "2", optional = true }
 tree-sitter = "0.26"
 tree-sitter-typescript = "0.23"
 tree-sitter-javascript = "0.25"
 tree-sitter-rust = "0.24.0"
+tree-sitter-python = "0.25"
+tree-sitter-go = "0.25"
 ignore = "0.4"
 petgraph = { version = "0.6", features = ["stable_graph", "serde-1"] }
 bincode = { version = "2", features = ["serde"] }
@@ -38,3 +48,9 @@ tokio = { version = "1", features = ["full"] }
 schemars = "1"
 notify = "8"
 notify-debouncer-mini = "0.7"
+bm25 = "2.3.2"
+fastembed = { version = "5", optional = true }
+usearch = { version = "2", optional = true }
+genai = { version = "0.5", optional = true }
+oauth2 = { version = "4", optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }

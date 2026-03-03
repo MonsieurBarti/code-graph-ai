@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -9,8 +10,26 @@ use regex::RegexBuilder;
 use crate::graph::{
     CodeGraph,
     edge::EdgeKind,
-    node::{GraphNode, SymbolKind, SymbolVisibility},
+    node::{DecoratorInfo, GraphNode, SymbolKind, SymbolVisibility},
 };
+
+/// Indicates how a search result was matched. Used in BM25/hybrid search (plan 20-01).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchMethod {
+    Exact,
+    Trigram,
+    Bm25,
+}
+
+impl std::fmt::Display for MatchMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MatchMethod::Exact => write!(f, "[exact]"),
+            MatchMethod::Trigram => write!(f, "[trigram]"),
+            MatchMethod::Bm25 => write!(f, "[BM25]"),
+        }
+    }
+}
 
 /// A single matching symbol definition returned by `find_symbol`.
 #[derive(Debug, Clone)]
@@ -19,10 +38,12 @@ pub struct FindResult {
     pub kind: SymbolKind,
     pub file_path: PathBuf,
     pub line: usize,
+    pub line_end: usize,
     pub col: usize,
     pub is_exported: bool,
     pub is_default: bool,
     pub visibility: SymbolVisibility,
+    pub decorators: Vec<DecoratorInfo>,
 }
 
 /// Convert a `SymbolKind` to its lowercase string representation used in output and filtering.
@@ -171,10 +192,12 @@ pub fn find_symbol(
                 kind: sym_info.kind.clone(),
                 file_path: file_info.path.clone(),
                 line: sym_info.line,
+                line_end: sym_info.line_end,
                 col: sym_info.col,
                 is_exported: sym_info.is_exported,
                 is_default: sym_info.is_default,
                 visibility: sym_info.visibility.clone(),
+                decorators: sym_info.decorators.clone(),
             });
         }
     }
@@ -211,6 +234,165 @@ pub fn match_symbols(
     Ok(matches)
 }
 
+// ---------------------------------------------------------------------------
+// Trigram helpers (moved from server.rs so find.rs can reuse them)
+// ---------------------------------------------------------------------------
+
+/// Compute character-level trigrams from a string (lowercased).
+/// Returns an empty set for strings shorter than 3 characters. Used in plan 20-01.
+pub(crate) fn trigrams(s: &str) -> HashSet<[char; 3]> {
+    let chars: Vec<char> = s.to_lowercase().chars().collect();
+    if chars.len() < 3 {
+        return HashSet::new();
+    }
+    chars.windows(3).map(|w| [w[0], w[1], w[2]]).collect()
+}
+
+/// Jaccard similarity between two trigram sets: |A ∩ B| / |A ∪ B|.
+/// Returns 0.0 if both sets are empty (no useful comparison possible). Used in plan 20-01.
+pub(crate) fn jaccard_similarity(a: &HashSet<[char; 3]>, b: &HashSet<[char; 3]>) -> f32 {
+    let intersection = a.intersection(b).count();
+    let union = a.union(b).count();
+    if union == 0 {
+        return 0.0;
+    }
+    intersection as f32 / union as f32
+}
+
+// ---------------------------------------------------------------------------
+// Tiered search functions
+// ---------------------------------------------------------------------------
+
+/// Find symbols using trigram similarity. Returns `FindResult` items for all
+/// symbols whose Jaccard similarity with `query` is >= 0.3.
+/// Results are sorted by score descending and limited to `limit`. Used in plan 20-01.
+pub fn find_symbol_trigram(graph: &CodeGraph, query: &str, limit: usize) -> Vec<FindResult> {
+    let query_trigrams = trigrams(query);
+    if query_trigrams.is_empty() {
+        return Vec::new();
+    }
+
+    const THRESHOLD: f32 = 0.3;
+
+    let mut scored: Vec<(FindResult, f32)> = Vec::new();
+
+    for (name, node_indices) in &graph.symbol_index {
+        let name_trigrams = trigrams(name);
+        let score = jaccard_similarity(&query_trigrams, &name_trigrams);
+        if score < THRESHOLD {
+            continue;
+        }
+
+        for &sym_idx in node_indices {
+            let sym_info = match &graph.graph[sym_idx] {
+                crate::graph::node::GraphNode::Symbol(info) => info.clone(),
+                _ => continue,
+            };
+
+            let file_info = find_containing_file(graph, sym_idx)
+                .or_else(|| find_containing_file_of_child(graph, sym_idx));
+
+            if let Some(fi) = file_info {
+                scored.push((
+                    FindResult {
+                        symbol_name: sym_info.name.clone(),
+                        kind: sym_info.kind.clone(),
+                        file_path: fi.path.clone(),
+                        line: sym_info.line,
+                        line_end: sym_info.line_end,
+                        col: sym_info.col,
+                        is_exported: sym_info.is_exported,
+                        is_default: sym_info.is_default,
+                        visibility: sym_info.visibility.clone(),
+                        decorators: sym_info.decorators.clone(),
+                    },
+                    score,
+                ));
+            }
+        }
+    }
+
+    // Sort descending by score
+    scored.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.0.file_path.cmp(&b.0.file_path))
+            .then(a.0.line.cmp(&b.0.line))
+    });
+    scored.truncate(limit);
+    scored.into_iter().map(|(r, _)| r).collect()
+}
+
+/// Search for symbols using the BM25 full-text index.
+/// Returns an empty vec if the BM25 index is not built yet (`bm25_index` is None). Used in plan 20-01.
+pub fn bm25_search(graph: &CodeGraph, query: &str, limit: usize) -> Vec<FindResult> {
+    let engine = match &graph.bm25_index {
+        Some(e) => e,
+        None => return Vec::new(),
+    };
+
+    let search_results = engine.search(query, limit);
+    let mut results = Vec::new();
+
+    for sr in search_results {
+        let node_idx = petgraph::stable_graph::NodeIndex::new(sr.document.id as usize);
+        if let Some(GraphNode::Symbol(sym)) = graph.graph.node_weight(node_idx) {
+            let file_info = find_containing_file(graph, node_idx)
+                .or_else(|| find_containing_file_of_child(graph, node_idx));
+
+            if let Some(fi) = file_info {
+                results.push(FindResult {
+                    symbol_name: sym.name.clone(),
+                    kind: sym.kind.clone(),
+                    file_path: fi.path.clone(),
+                    line: sym.line,
+                    line_end: sym.line_end,
+                    col: sym.col,
+                    is_exported: sym.is_exported,
+                    is_default: sym.is_default,
+                    visibility: sym.visibility.clone(),
+                    decorators: sym.decorators.clone(),
+                });
+            }
+        }
+    }
+
+    results
+}
+
+/// Merge two ranked result lists using Reciprocal Rank Fusion (k=60).
+/// Returns a unified list sorted by combined RRF score, highest first. Used in plan 20-01.
+pub fn reciprocal_rank_fusion(list_a: &[FindResult], list_b: &[FindResult]) -> Vec<FindResult> {
+    let k = 60.0_f32;
+    let mut scores: HashMap<String, (f32, FindResult)> = HashMap::new();
+
+    for (rank, result) in list_a.iter().enumerate() {
+        let key = format!("{}:{}", result.symbol_name, result.line);
+        let score = 1.0 / (k + (rank + 1) as f32);
+        scores
+            .entry(key)
+            .and_modify(|(s, _)| *s += score)
+            .or_insert((score, result.clone()));
+    }
+    for (rank, result) in list_b.iter().enumerate() {
+        let key = format!("{}:{}", result.symbol_name, result.line);
+        let score = 1.0 / (k + (rank + 1) as f32);
+        scores
+            .entry(key)
+            .and_modify(|(s, _)| *s += score)
+            .or_insert((score, result.clone()));
+    }
+
+    let mut merged: Vec<(f32, FindResult)> = scores.into_values().collect();
+    merged.sort_by(|a, b| {
+        b.0.partial_cmp(&a.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.1.file_path.cmp(&b.1.file_path))
+            .then(a.1.line.cmp(&b.1.line))
+    });
+    merged.into_iter().map(|(_, r)| r).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,7 +400,7 @@ mod tests {
 
     use crate::graph::{
         CodeGraph,
-        node::{SymbolInfo, SymbolKind, SymbolVisibility},
+        node::{SymbolInfo, SymbolKind},
     };
 
     fn make_graph_with_symbols() -> (CodeGraph, PathBuf) {
@@ -232,11 +414,8 @@ mod tests {
                 name: "UserService".into(),
                 kind: SymbolKind::Class,
                 line: 10,
-                col: 0,
                 is_exported: true,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
 
@@ -247,11 +426,8 @@ mod tests {
                 name: "AuthService".into(),
                 kind: SymbolKind::Class,
                 line: 5,
-                col: 0,
                 is_exported: true,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
         graph.add_symbol(
@@ -260,11 +436,7 @@ mod tests {
                 name: "greetUser".into(),
                 kind: SymbolKind::Function,
                 line: 20,
-                col: 0,
-                is_exported: false,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
 
@@ -336,9 +508,7 @@ mod tests {
                 line: 1,
                 col: 16,
                 is_exported: true,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                ..Default::default()
             },
         );
 
@@ -352,6 +522,146 @@ mod tests {
             results[0].file_path,
             root.join("src/greet.ts"),
             "greet should be in greet.ts, not main.ts"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // MatchMethod tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_match_method_display() {
+        assert_eq!(MatchMethod::Exact.to_string(), "[exact]");
+        assert_eq!(MatchMethod::Trigram.to_string(), "[trigram]");
+        assert_eq!(MatchMethod::Bm25.to_string(), "[BM25]");
+    }
+
+    // -----------------------------------------------------------------------
+    // Trigram search tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_find_symbol_trigram_returns_fuzzy_matches() {
+        // "authHandler" should be found when querying "authHandlr" (typo)
+        let root = PathBuf::from("/proj");
+        let mut graph = CodeGraph::new();
+        let f = graph.add_file(root.join("src/auth.ts"), "typescript");
+        graph.add_symbol(
+            f,
+            SymbolInfo {
+                name: "authHandler".into(),
+                kind: SymbolKind::Function,
+                line: 1,
+                is_exported: true,
+                ..Default::default()
+            },
+        );
+
+        let results = find_symbol_trigram(&graph, "authHandlr", 10);
+        assert!(
+            !results.is_empty(),
+            "trigram search should find authHandler for typo authHandlr"
+        );
+        assert_eq!(results[0].symbol_name, "authHandler");
+    }
+
+    // -----------------------------------------------------------------------
+    // BM25 search tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_bm25_search_returns_results() {
+        let root = PathBuf::from("/proj");
+        let mut graph = CodeGraph::new();
+        let f = graph.add_file(root.join("src/auth.ts"), "typescript");
+        graph.add_symbol(
+            f,
+            SymbolInfo {
+                name: "authHandler".into(),
+                kind: SymbolKind::Function,
+                line: 1,
+                is_exported: true,
+                ..Default::default()
+            },
+        );
+
+        // Rebuild BM25 index first
+        graph.rebuild_bm25_index();
+
+        let results = bm25_search(&graph, "auth handler", 10);
+        assert!(
+            !results.is_empty(),
+            "BM25 search for 'auth handler' should find authHandler"
+        );
+        assert_eq!(results[0].symbol_name, "authHandler");
+    }
+
+    #[test]
+    fn test_bm25_search_no_index_returns_empty() {
+        let root = PathBuf::from("/proj");
+        let mut graph = CodeGraph::new();
+        let f = graph.add_file(root.join("src/auth.ts"), "typescript");
+        graph.add_symbol(
+            f,
+            SymbolInfo {
+                name: "authHandler".into(),
+                kind: SymbolKind::Function,
+                line: 1,
+                ..Default::default()
+            },
+        );
+        // Do NOT call rebuild_bm25_index — bm25_index stays None
+
+        let results = bm25_search(&graph, "auth", 10);
+        assert!(
+            results.is_empty(),
+            "bm25_search with no index should return empty vec"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Reciprocal Rank Fusion tests
+    // -----------------------------------------------------------------------
+
+    fn make_find_result(name: &str, line: usize) -> FindResult {
+        FindResult {
+            symbol_name: name.to_string(),
+            kind: SymbolKind::Function,
+            file_path: PathBuf::from("/proj/src/a.ts"),
+            line,
+            line_end: line,
+            col: 0,
+            is_exported: false,
+            is_default: false,
+            visibility: crate::graph::node::SymbolVisibility::Private,
+            decorators: vec![],
+        }
+    }
+
+    #[test]
+    fn test_reciprocal_rank_fusion_empty_lists() {
+        let result = reciprocal_rank_fusion(&[], &[]);
+        assert!(
+            result.is_empty(),
+            "merging empty lists should produce empty result"
+        );
+    }
+
+    #[test]
+    fn test_reciprocal_rank_fusion_merges_lists() {
+        // list_a: alpha at rank 0, beta at rank 1
+        // list_b: beta at rank 0, gamma at rank 1
+        // Expected: beta scores highest (appears in both)
+        let list_a = vec![make_find_result("alpha", 1), make_find_result("beta", 2)];
+        let list_b = vec![make_find_result("beta", 2), make_find_result("gamma", 3)];
+
+        let merged = reciprocal_rank_fusion(&list_a, &list_b);
+        assert_eq!(merged.len(), 3, "merged list should have 3 unique results");
+        // beta appears in both lists with rank 1 (list_a) and rank 0 (list_b),
+        // so its RRF score = 1/(60+2) + 1/(60+1) > any single-list entry
+        assert_eq!(
+            merged[0].symbol_name, "beta",
+            "beta should rank first since it appears in both lists"
         );
     }
 }

@@ -261,11 +261,8 @@ mod tests {
             name: name.into(),
             kind,
             line: 1,
-            col: 0,
-            is_exported: false,
-            is_default: false,
             visibility: vis,
-            trait_impl: None,
+            ..Default::default()
         }
     }
 

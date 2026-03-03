@@ -49,6 +49,22 @@ pub enum SymbolKind {
     Macro,
 }
 
+/// A decorator or attribute applied to a symbol.
+/// Unified across TS/JS (@decorator), Rust (#[attr]), Python (@decorator), and Go (struct tags, //go: directives).
+#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DecoratorInfo {
+    /// Full dotted name: "Controller", "app.route", "derive".
+    pub name: String,
+    /// Object portion for attribute decorators (e.g. "app" in @app.route). None for simple identifiers.
+    pub object: Option<String>,
+    /// Attribute portion (e.g. "route" in @app.route). None for simple identifiers.
+    pub attribute: Option<String>,
+    /// Raw text of arguments if any. e.g. `("Clone, Debug")` for #[derive(Clone, Debug)].
+    pub args_raw: Option<String>,
+    /// Framework name inferred from a static registry (e.g. "nestjs", "fastapi"). None if unknown.
+    pub framework: Option<String>,
+}
+
 /// Metadata about a symbol extracted from source code.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SymbolInfo {
@@ -60,6 +76,8 @@ pub struct SymbolInfo {
     pub line: usize,
     /// 0-based column offset where the symbol begins.
     pub col: usize,
+    /// 1-based line number where the symbol ends (inclusive).
+    pub line_end: usize,
     /// Whether the symbol is explicitly exported.
     pub is_exported: bool,
     /// Whether the symbol is a default export.
@@ -70,6 +88,25 @@ pub struct SymbolInfo {
     /// For Rust impl methods: the trait name if this is a trait impl (e.g. `"Display"`).
     /// `None` for inherent impls and all TypeScript/JavaScript symbols.
     pub trait_impl: Option<String>,
+    /// Decorators/attributes applied to this symbol.
+    pub decorators: Vec<DecoratorInfo>,
+}
+
+impl Default for SymbolInfo {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            kind: SymbolKind::Variable,
+            line: 0,
+            col: 0,
+            line_end: 0,
+            is_exported: false,
+            is_default: false,
+            visibility: SymbolVisibility::Private,
+            trait_impl: None,
+            decorators: Vec::new(),
+        }
+    }
 }
 
 /// Classification of a file's role in the project.
@@ -109,7 +146,7 @@ pub fn classify_file_kind(path: &std::path::Path) -> FileKind {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     match ext {
         // Source files
-        "ts" | "tsx" | "js" | "jsx" | "rs" => FileKind::Source,
+        "ts" | "tsx" | "js" | "jsx" | "rs" | "py" | "go" => FileKind::Source,
         // Documentation
         "md" | "txt" | "rst" | "adoc" => FileKind::Doc,
         // Configuration
@@ -201,6 +238,10 @@ mod tests {
         );
         assert_eq!(
             classify_file_kind(std::path::Path::new("App.jsx")),
+            FileKind::Source
+        );
+        assert_eq!(
+            classify_file_kind(std::path::Path::new("main.go")),
             FileKind::Source
         );
     }

@@ -335,11 +335,9 @@ mod tests {
             name: name.into(),
             kind,
             line: 1,
-            col: 0,
             is_exported: exported,
-            is_default: false,
             visibility: vis,
-            trait_impl: None,
+            ..Default::default()
         }
     }
 

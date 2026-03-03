@@ -2,6 +2,33 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+/// Impact analysis configuration parsed from the `[impact]` section of `code-graph.toml`.
+#[derive(Debug, Deserialize, Clone)]
+pub struct ImpactConfig {
+    /// Files above this count are classified as HIGH risk (default: 20).
+    #[serde(default = "default_high_threshold")]
+    pub high_threshold: usize,
+    /// Files at or above this count (but below high) are MEDIUM risk (default: 5).
+    #[serde(default = "default_medium_threshold")]
+    pub medium_threshold: usize,
+}
+
+fn default_high_threshold() -> usize {
+    20
+}
+fn default_medium_threshold() -> usize {
+    5
+}
+
+impl Default for ImpactConfig {
+    fn default() -> Self {
+        Self {
+            high_threshold: default_high_threshold(),
+            medium_threshold: default_medium_threshold(),
+        }
+    }
+}
+
 /// MCP-specific configuration parsed from the `[mcp]` section of `code-graph.toml`.
 #[derive(Debug, Deserialize, Clone)]
 pub struct McpConfig {
@@ -45,6 +72,10 @@ pub struct CodeGraphConfig {
     /// MCP tool behaviour defaults (limit, sections, truncation suppression).
     #[serde(default)]
     pub mcp: McpConfig,
+
+    /// Impact analysis configuration (thresholds for risk tiers).
+    #[serde(default)]
+    pub impact: ImpactConfig,
 }
 
 impl CodeGraphConfig {
@@ -161,6 +192,54 @@ default_limit = "not_a_number"
         assert!(
             result.is_err(),
             "parsing invalid type for default_limit should fail, triggering load() fallback"
+        );
+    }
+
+    // IMPACT-01: Default ImpactConfig has high_threshold=20, medium_threshold=5
+    #[test]
+    fn test_impact_config_defaults() {
+        let cfg = parse_config("");
+        assert_eq!(
+            cfg.impact.high_threshold, 20,
+            "default high_threshold should be 20"
+        );
+        assert_eq!(
+            cfg.impact.medium_threshold, 5,
+            "default medium_threshold should be 5"
+        );
+    }
+
+    // IMPACT-01: Parsing [impact] section from TOML populates thresholds
+    #[test]
+    fn test_impact_config_from_toml() {
+        let toml_str = r#"
+[impact]
+high_threshold = 30
+medium_threshold = 10
+"#;
+        let cfg = parse_config(toml_str);
+        assert_eq!(cfg.impact.high_threshold, 30, "high_threshold should be 30");
+        assert_eq!(
+            cfg.impact.medium_threshold, 10,
+            "medium_threshold should be 10"
+        );
+    }
+
+    // IMPACT-01: Partial [impact] section -> specified value respected, rest default
+    #[test]
+    fn test_impact_config_partial() {
+        let toml_str = r#"
+[impact]
+high_threshold = 50
+"#;
+        let cfg = parse_config(toml_str);
+        assert_eq!(
+            cfg.impact.high_threshold, 50,
+            "explicit high_threshold should be 50"
+        );
+        assert_eq!(
+            cfg.impact.medium_threshold, 5,
+            "medium_threshold should default to 5"
         );
     }
 }

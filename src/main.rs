@@ -8,9 +8,14 @@ mod mcp;
 mod output;
 mod parser;
 mod query;
+#[cfg(feature = "rag")]
+mod rag;
 mod resolver;
+mod setup;
 mod walker;
 mod watcher;
+#[cfg(feature = "web")]
+mod web;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -189,8 +194,10 @@ fn parse_language_filter(lang_str: Option<&str>) -> Result<Option<&'static str>>
             Some(LanguageKind::Rust) => Ok(Some("rust")),
             Some(LanguageKind::TypeScript) => Ok(Some("typescript")),
             Some(LanguageKind::JavaScript) => Ok(Some("javascript")),
+            Some(LanguageKind::Python) => Ok(Some("python")),
+            Some(LanguageKind::Go) => Ok(Some("go")),
             None => anyhow::bail!(
-                "unknown language '{}'. Valid: rust/rs, typescript/ts, javascript/js",
+                "unknown language '{}'. Valid: rust/rs, typescript/ts, javascript/js, python/py, go/golang",
                 s
             ),
         },
@@ -265,6 +272,8 @@ fn file_language_matches(path: &Path, lang: &str) -> bool {
         "rust" => ext == "rs",
         "typescript" => matches!(ext, "ts" | "tsx"),
         "javascript" => matches!(ext, "js" | "jsx"),
+        "python" => ext == "py",
+        "go" => ext == "go",
         _ => false,
     }
 }
@@ -288,6 +297,8 @@ pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
                     "tsx" => "tsx",
                     "js" | "jsx" => "javascript",
                     "rs" => "rust",
+                    "py" => "python",
+                    "go" => "go",
                     _ => return None,
                 };
             let result = parser::parse_file_parallel(file_path, &source).ok()?;
@@ -348,6 +359,10 @@ pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
 
     resolver::resolve_all(&mut graph, path, &parse_results, verbose);
 
+    // Phase 18: Enrich decorator frameworks and add HasDecorator self-edges.
+    crate::query::decorators::enrich_decorator_frameworks(&mut graph);
+    crate::query::decorators::add_has_decorator_edges(&mut graph);
+
     // Phase 12: Discover and add non-parsed files as File nodes (no symbols, no imports).
     let non_parsed = walk_non_parsed_files(path, &config)?;
     for file_path in non_parsed {
@@ -368,6 +383,8 @@ async fn main() -> Result<()> {
             verbose,
             json,
             language,
+            #[cfg(feature = "rag")]
+            no_embeddings,
         } => {
             // 1. Load config (always succeeds — defaults when file is absent).
             let config = CodeGraphConfig::load(&path);
@@ -403,7 +420,6 @@ async fn main() -> Result<()> {
             let files = walk_project(&path, &config, verbose, allowed_languages.as_ref())?;
 
             // 5. Compute per-language file counts from the walk result BEFORE parsing.
-            // Rust files are counted but not parsed — they must not enter the parse pipeline.
             let ts_file_count = files
                 .iter()
                 .filter(|f| matches!(f.extension().and_then(|e| e.to_str()), Some("ts" | "tsx")))
@@ -415,6 +431,10 @@ async fn main() -> Result<()> {
             let rust_file_count = files
                 .iter()
                 .filter(|f| matches!(f.extension().and_then(|e| e.to_str()), Some("rs")))
+                .count();
+            let python_file_count = files
+                .iter()
+                .filter(|f| matches!(f.extension().and_then(|e| e.to_str()), Some("py")))
                 .count();
 
             // 6. Create graph.
@@ -432,7 +452,7 @@ async fn main() -> Result<()> {
             // Parse results map — retained for the resolution step.
             let mut parse_results: HashMap<PathBuf, ParseResult> = HashMap::new();
 
-            // 7. Parse all TS/JS/RS files in parallel (rayon par_iter).
+            // 7. Parse all TS/JS/RS/Python/Go files in parallel (rayon par_iter).
             let raw_results: Vec<(PathBuf, &'static str, ParseResult)> = files
                 .par_iter()
                 .filter_map(|file_path| {
@@ -443,6 +463,8 @@ async fn main() -> Result<()> {
                             "tsx" => "tsx",
                             "js" | "jsx" => "javascript",
                             "rs" => "rust",
+                            "py" => "python",
+                            "go" => "go",
                             _ => return None,
                         };
                     let result = parser::parse_file_parallel(file_path, &source).ok()?;
@@ -474,6 +496,14 @@ async fn main() -> Result<()> {
                         ImportKind::Esm => esm_imports += 1,
                         ImportKind::Cjs => cjs_imports += 1,
                         ImportKind::DynamicImport => dynamic_imports += 1,
+                        // Python and Go import kinds — counted in total_imports but not in per-kind counters
+                        ImportKind::PythonAbsolute
+                        | ImportKind::PythonRelative { .. }
+                        | ImportKind::PythonConditionalAbsolute
+                        | ImportKind::PythonConditionalRelative { .. }
+                        | ImportKind::GoAbsolute
+                        | ImportKind::GoBlank
+                        | ImportKind::GoDot => {}
                     }
                 }
 
@@ -534,6 +564,10 @@ async fn main() -> Result<()> {
                 );
             }
 
+            // Phase 18: Enrich decorator frameworks and add HasDecorator self-edges.
+            crate::query::decorators::enrich_decorator_frameworks(&mut graph);
+            crate::query::decorators::add_has_decorator_edges(&mut graph);
+
             // 8. Compute stats from graph.
             let elapsed_secs = start.elapsed().as_secs_f64();
             let breakdown: HashMap<SymbolKind, usize> = graph.symbols_by_kind();
@@ -569,6 +603,7 @@ async fn main() -> Result<()> {
                 ts_file_count,
                 js_file_count,
                 rust_file_count,
+                python_file_count,
                 rust_fns: rust_symbol_counts.fns,
                 rust_structs: rust_symbol_counts.structs,
                 rust_enums: rust_symbol_counts.enums,
@@ -590,6 +625,109 @@ async fn main() -> Result<()> {
                 && verbose
             {
                 eprintln!("  Cache save failed: {}", e);
+            }
+
+            // 11. Build vector embeddings (only when rag feature is compiled in).
+            //
+            // Iterates all Symbol nodes in the graph and embeds each one using
+            // fastembed BAAI/bge-small-en-v1.5 (384 dimensions). Embeddings are
+            // persisted to .code-graph/vectors.usearch + .code-graph/vectors_meta.bin
+            // so the RAG agent can load them without re-embedding on each query.
+            //
+            // Skip when --no-embeddings is passed (faster indexing, no model download).
+            #[cfg(feature = "rag")]
+            {
+                use graph::node::GraphNode;
+                use rag::embedding::EmbeddingEngine;
+                use rag::vector_store::{SymbolMeta, VectorStore};
+
+                if !no_embeddings {
+                    eprintln!("Building vector embeddings...");
+                    let engine = EmbeddingEngine::try_new()?;
+
+                    // Collect all symbols (name, file_path, line_start) from the graph.
+                    // Symbol file_path is resolved via the Contains edge from File → Symbol.
+                    let symbols: Vec<(String, String, usize)> = graph
+                        .graph
+                        .node_indices()
+                        .filter_map(|idx| {
+                            if let GraphNode::Symbol(ref info) = graph.graph[idx] {
+                                // Find the file that Contains this symbol via incoming edges.
+                                let file_path = graph
+                                    .graph
+                                    .edges_directed(idx, petgraph::Direction::Incoming)
+                                    .find_map(|e| {
+                                        if let graph::edge::EdgeKind::Contains = e.weight()
+                                            && let GraphNode::File(ref fi) = graph.graph[e.source()]
+                                        {
+                                            return Some(fi.path.to_string_lossy().into_owned());
+                                        }
+                                        None
+                                    })
+                                    .unwrap_or_default();
+                                Some((info.name.clone(), file_path, info.line))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    let total = symbols.len();
+                    if total > 0 {
+                        let mut store = VectorStore::new(384)?;
+                        store.reserve(total)?;
+
+                        // Embed in batches of 256 (fastembed default batch size).
+                        let batch_size = 256;
+                        for (batch_idx, chunk) in symbols.chunks(batch_size).enumerate() {
+                            let start = batch_idx * batch_size;
+                            let end = (start + chunk.len()).min(total);
+                            eprint!("\rEmbedding [{}/{}] ...", end, total);
+
+                            let embeddings = rag::embedding::embed_symbols(&engine, chunk).await?;
+
+                            for (i, emb) in embeddings.iter().enumerate() {
+                                let (name, file_path, line) = &chunk[i];
+                                // Determine symbol kind from graph node (re-lookup by position).
+                                let kind = {
+                                    let sym_idx = graph
+                                        .symbol_index
+                                        .get(name)
+                                        .and_then(|v| v.first().copied());
+                                    sym_idx
+                                        .and_then(|si| {
+                                            if let GraphNode::Symbol(ref s) = graph.graph[si] {
+                                                Some(format!("{:?}", s.kind).to_lowercase())
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .unwrap_or_else(|| "symbol".to_string())
+                                };
+                                store.add(
+                                    emb,
+                                    SymbolMeta {
+                                        file_path: file_path.clone(),
+                                        symbol_name: name.clone(),
+                                        line_start: *line,
+                                        kind,
+                                    },
+                                )?;
+                            }
+                        }
+                        eprintln!(); // newline after progress bar
+
+                        let cache_dir = path.join(".code-graph");
+                        store.save(&cache_dir)?;
+                        eprintln!(
+                            "Vector index: {} symbols embedded, saved to {}",
+                            total,
+                            cache_dir.display()
+                        );
+                    } else {
+                        eprintln!("Vector index: no symbols to embed");
+                    }
+                }
             }
         }
 
@@ -824,6 +962,19 @@ async fn main() -> Result<()> {
             mcp::run(project_root, watch).await?;
         }
 
+        Commands::Setup {
+            path,
+            yes,
+            skills,
+            hooks,
+            no_skills,
+            no_hooks,
+        } => {
+            let project_root = std::fs::canonicalize(&path)
+                .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+            setup::run_setup(&project_root, yes, skills, hooks, no_skills, no_hooks)?;
+        }
+
         Commands::Snapshot { action } => {
             match action {
                 cli::SnapshotAction::Create { name, path } => {
@@ -900,6 +1051,22 @@ async fn main() -> Result<()> {
             for warning in &result.warnings {
                 eprintln!("Warning: {}", warning);
             }
+        }
+
+        #[cfg(feature = "web")]
+        Commands::Serve {
+            ref path,
+            port,
+            #[cfg(feature = "rag")]
+            ollama,
+            ..
+        } => {
+            let root = std::fs::canonicalize(path)?;
+            #[cfg(feature = "rag")]
+            let use_ollama = ollama;
+            #[cfg(not(feature = "rag"))]
+            let use_ollama = false;
+            web::serve(root, port, use_ollama).await?;
         }
 
         Commands::Watch { path } => {

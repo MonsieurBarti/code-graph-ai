@@ -2,7 +2,7 @@ use std::sync::OnceLock;
 
 use tree_sitter::{Language, Node, Query, QueryCursor, StreamingIterator, Tree};
 
-use crate::graph::node::{SymbolInfo, SymbolKind, SymbolVisibility};
+use crate::graph::node::{DecoratorInfo, SymbolInfo, SymbolKind, SymbolVisibility};
 
 // ---------------------------------------------------------------------------
 // Rust query string
@@ -404,10 +404,8 @@ fn extract_interface_children(iface_node: Node, source: &[u8]) -> Vec<SymbolInfo
                         kind: SymbolKind::Property,
                         line: pos.row + 1,
                         col: pos.column,
-                        is_exported: false,
-                        is_default: false,
-                        visibility: SymbolVisibility::Private,
-                        trait_impl: None,
+                        line_end: child.end_position().row + 1,
+                        ..Default::default()
                     });
                 }
             }
@@ -443,19 +441,211 @@ fn extract_class_children(class_node: Node, source: &[u8]) -> Vec<SymbolInfo> {
         {
             let name = node_text(name_node, source).to_owned();
             let pos = name_node.start_position();
+            let decorators = extract_ts_decorators(child, source);
             children.push(SymbolInfo {
                 name,
                 kind: SymbolKind::Method,
                 line: pos.row + 1,
                 col: pos.column,
-                is_exported: false,
-                is_default: false,
-                visibility: SymbolVisibility::Private,
-                trait_impl: None,
+                line_end: child.end_position().row + 1,
+                decorators,
+                ..Default::default()
             });
         }
     }
     children
+}
+
+// ---------------------------------------------------------------------------
+// Decorator / attribute extraction helpers
+// ---------------------------------------------------------------------------
+
+/// Extract decorators from a TS/JS node.
+///
+/// In tree-sitter-typescript 0.23+, decorators are children with field name "decorator"
+/// within the decorated declaration node (class_declaration, function_declaration, etc.).
+/// We also check previous siblings in the parent for decorator nodes (older grammar or
+/// cases where the decorated node is inside an export_statement).
+fn extract_ts_decorators(node: tree_sitter::Node, source: &[u8]) -> Vec<DecoratorInfo> {
+    let mut decorators = Vec::new();
+
+    // Strategy 1: look for decorator-typed children of node itself (e.g. class_declaration).
+    for i in 0..node.child_count() {
+        let child = node.child(i as u32).unwrap();
+        if child.kind() == "decorator" {
+            decorators.push(parse_decorator_node(child, source));
+        }
+    }
+    if !decorators.is_empty() {
+        return decorators;
+    }
+
+    // Strategy 2: check children of the inner declaration (for export_statement wrapping).
+    // Find the actual declaration child and look at ITS decorator children.
+    for i in 0..node.child_count() {
+        let child = node.child(i as u32).unwrap();
+        match child.kind() {
+            "class_declaration"
+            | "function_declaration"
+            | "interface_declaration"
+            | "type_alias_declaration"
+            | "enum_declaration" => {
+                for j in 0..child.child_count() {
+                    let grandchild = child.child(j as u32).unwrap();
+                    if grandchild.kind() == "decorator" {
+                        decorators.push(parse_decorator_node(grandchild, source));
+                    }
+                }
+                if !decorators.is_empty() {
+                    return decorators;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Strategy 3: walk previous siblings in the parent (fallback for older grammars).
+    let parent = match node.parent() {
+        Some(p) => p,
+        None => return decorators,
+    };
+    for i in 0..parent.child_count() {
+        let child = parent.child(i as u32).unwrap();
+        if child.id() == node.id() {
+            break; // stop at current node
+        }
+        if child.kind() == "decorator" {
+            decorators.push(parse_decorator_node(child, source));
+        }
+    }
+    decorators
+}
+
+/// Parse a single `decorator` node into a `DecoratorInfo`.
+/// Shared between TS/JS (and later Python).
+fn parse_decorator_node(decorator_node: tree_sitter::Node, source: &[u8]) -> DecoratorInfo {
+    let inner = decorator_node.named_child(0);
+    match inner.map(|n| n.kind()) {
+        Some("identifier") => {
+            let name = node_text(inner.unwrap(), source).to_owned();
+            DecoratorInfo {
+                name,
+                object: None,
+                attribute: None,
+                args_raw: None,
+                framework: None,
+            }
+        }
+        Some("member_expression") | Some("attribute") => {
+            let attr_node = inner.unwrap();
+            let obj = attr_node
+                .child_by_field_name("object")
+                .map(|n| node_text(n, source).to_owned());
+            let attr = attr_node
+                .child_by_field_name("property")
+                .or_else(|| attr_node.child_by_field_name("attribute"))
+                .map(|n| node_text(n, source).to_owned());
+            let name = format!(
+                "{}.{}",
+                obj.as_deref().unwrap_or(""),
+                attr.as_deref().unwrap_or("")
+            );
+            DecoratorInfo {
+                name,
+                object: obj,
+                attribute: attr,
+                args_raw: None,
+                framework: None,
+            }
+        }
+        Some("call_expression") => {
+            let call = inner.unwrap();
+            let func = call.child_by_field_name("function");
+            let args = call
+                .child_by_field_name("arguments")
+                .map(|n| node_text(n, source).to_owned());
+            let (name, obj, attr) = match func.map(|f| f.kind()) {
+                Some("identifier") => {
+                    let n = node_text(func.unwrap(), source).to_owned();
+                    (n, None, None)
+                }
+                Some("member_expression") => {
+                    let f = func.unwrap();
+                    let o = f
+                        .child_by_field_name("object")
+                        .map(|n| node_text(n, source).to_owned());
+                    let a = f
+                        .child_by_field_name("property")
+                        .map(|n| node_text(n, source).to_owned());
+                    let n = format!(
+                        "{}.{}",
+                        o.as_deref().unwrap_or(""),
+                        a.as_deref().unwrap_or("")
+                    );
+                    (n, o, a)
+                }
+                _ => (node_text(call, source).to_owned(), None, None),
+            };
+            DecoratorInfo {
+                name,
+                object: obj,
+                attribute: attr,
+                args_raw: args,
+                framework: None,
+            }
+        }
+        _ => DecoratorInfo {
+            name: node_text(decorator_node, source).to_owned(),
+            object: None,
+            attribute: None,
+            args_raw: None,
+            framework: None,
+        },
+    }
+}
+
+/// Walk previous siblings of `item_node` in its parent to find `attribute_item` nodes (Rust).
+fn extract_rust_attributes(item_node: tree_sitter::Node, source: &[u8]) -> Vec<DecoratorInfo> {
+    let mut attrs = Vec::new();
+    let parent = match item_node.parent() {
+        Some(p) => p,
+        None => return attrs,
+    };
+    for i in 0..parent.child_count() {
+        let child = parent.child(i as u32).unwrap();
+        if child.id() == item_node.id() {
+            break;
+        }
+        if child.kind() == "attribute_item" {
+            attrs.push(parse_rust_attribute(child, source));
+        }
+    }
+    attrs
+}
+
+/// Parse a Rust `attribute_item` node (e.g. `#[derive(Clone, Debug)]`) into a `DecoratorInfo`.
+fn parse_rust_attribute(attr_item: tree_sitter::Node, source: &[u8]) -> DecoratorInfo {
+    let full_text = node_text(attr_item, source);
+    // Strip outer #[ and ]
+    let inner = full_text
+        .trim_start_matches("#[")
+        .trim_start_matches("#![")
+        .trim_end_matches(']');
+    // Split name from args at first '('
+    let (name, args) = match inner.find('(') {
+        Some(idx) => (
+            inner[..idx].trim().to_owned(),
+            Some(inner[idx..].to_owned()),
+        ),
+        None => (inner.trim().to_owned(), None),
+    };
+    DecoratorInfo {
+        name,
+        object: None,
+        attribute: None,
+        args_raw: args,
+        framework: None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -563,16 +753,18 @@ pub fn extract_symbols(
         }
 
         let (is_exported, is_default) = detect_export(sym_node, source);
+        let decorators = extract_ts_decorators(sym_node, source);
 
         let info = SymbolInfo {
             name,
             kind: kind.clone(),
             line: pos.row + 1,
             col: pos.column,
+            line_end: sym_node.end_position().row + 1,
             is_exported,
             is_default,
-            visibility: SymbolVisibility::Private,
-            trait_impl: None,
+            decorators,
+            ..Default::default()
         };
 
         // Extract child symbols
@@ -692,15 +884,16 @@ fn extract_trait_methods(trait_node: Node, trait_name: &str, source: &[u8]) -> V
                     let qualified_name = format!("{}::{}", trait_name, method_name);
                     let pos = name_node.start_position();
                     let visibility = extract_visibility(child, source);
+                    let decorators = extract_rust_attributes(child, source);
                     methods.push(SymbolInfo {
                         name: qualified_name,
                         kind: SymbolKind::ImplMethod,
                         line: pos.row + 1,
                         col: pos.column,
-                        is_exported: false,
-                        is_default: false,
+                        line_end: child.end_position().row + 1,
                         visibility,
-                        trait_impl: None,
+                        decorators,
+                        ..Default::default()
                     });
                 }
             }
@@ -779,16 +972,17 @@ pub fn extract_rust_symbols(
         };
 
         let visibility = extract_visibility(sym_node, source);
+        let decorators = extract_rust_attributes(sym_node, source);
 
         let info = SymbolInfo {
             name: name.clone(),
             kind: kind.clone(),
             line: pos.row + 1,
             col: pos.column,
-            is_exported: false,
-            is_default: false,
+            line_end: sym_node.end_position().row + 1,
             visibility,
-            trait_impl: None,
+            decorators,
+            ..Default::default()
         };
 
         // For trait items: extract child methods from the declaration_list.
@@ -862,6 +1056,7 @@ pub fn extract_impl_methods(tree: &Tree, source: &[u8]) -> Vec<(SymbolInfo, Vec<
             let pos = name_node.start_position();
             let qualified_name = format!("{}::{}", type_name, method_name);
             let visibility = extract_visibility(method_node, source);
+            let decorators = extract_rust_attributes(method_node, source);
 
             results.push((
                 SymbolInfo {
@@ -869,10 +1064,11 @@ pub fn extract_impl_methods(tree: &Tree, source: &[u8]) -> Vec<(SymbolInfo, Vec<
                     kind: SymbolKind::ImplMethod,
                     line: pos.row + 1,
                     col: pos.column,
-                    is_exported: false,
-                    is_default: false,
+                    line_end: method_node.end_position().row + 1,
                     visibility,
                     trait_impl: trait_name.clone(),
+                    decorators,
+                    ..Default::default()
                 },
                 vec![],
             ));
@@ -1024,5 +1220,163 @@ mod tests {
         assert_eq!(sym.kind, SymbolKind::Class);
         assert_eq!(children.len(), 2, "expected 2 methods");
         assert!(children.iter().all(|c| c.kind == SymbolKind::Method));
+    }
+
+    fn parse_rs(source: &str) -> (tree_sitter::Tree, Language) {
+        let lang = language_for_extension("rs").unwrap();
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&lang).unwrap();
+        let tree = parser.parse(source.as_bytes(), None).unwrap();
+        (tree, lang)
+    }
+
+    // Test: TS decorator extraction
+    #[test]
+    fn test_ts_decorator_extraction() {
+        // @Controller applied to a class
+        let src = "@Controller\nclass AppController {}";
+        let (tree, lang) = parse_ts(src);
+        let results = extract_symbols(&tree, src.as_bytes(), &lang, false);
+        let sym = first_symbol(&results);
+        assert_eq!(sym.name, "AppController");
+        assert_eq!(
+            sym.decorators.len(),
+            1,
+            "expected 1 decorator, got {:?}",
+            sym.decorators
+        );
+        let dec = &sym.decorators[0];
+        assert_eq!(dec.name, "Controller");
+        assert!(dec.object.is_none());
+        assert!(dec.attribute.is_none());
+        assert!(dec.args_raw.is_none());
+    }
+
+    // Test: TS attribute-style decorator with arguments (@Injectable())
+    #[test]
+    fn test_ts_attribute_decorator() {
+        // Decorator with call arguments on a class
+        let src = "@Injectable()\nclass MyService {}";
+        let (tree, lang) = parse_ts(src);
+        let results = extract_symbols(&tree, src.as_bytes(), &lang, false);
+        let sym = first_symbol(&results);
+        assert_eq!(sym.name, "MyService");
+        assert_eq!(
+            sym.decorators.len(),
+            1,
+            "expected 1 decorator, got {:?}",
+            sym.decorators
+        );
+        let dec = &sym.decorators[0];
+        assert_eq!(dec.name, "Injectable");
+        // args_raw should contain the argument string "()"
+        assert!(
+            dec.args_raw.is_some(),
+            "expected args_raw to be Some for call decorator"
+        );
+    }
+
+    // Test: Rust #[derive(Clone, Debug)] attribute extraction
+    #[test]
+    fn test_rust_derive_decorator() {
+        let src = "#[derive(Clone, Debug)]\npub struct MyStruct {}";
+        let (tree, lang) = parse_rs(src);
+        let results = extract_rust_symbols(&tree, src.as_bytes(), &lang);
+        let sym = first_symbol(&results);
+        assert_eq!(sym.name, "MyStruct");
+        assert_eq!(
+            sym.decorators.len(),
+            1,
+            "expected 1 attribute, got {:?}",
+            sym.decorators
+        );
+        let attr = &sym.decorators[0];
+        assert_eq!(attr.name, "derive");
+        assert!(
+            attr.args_raw.is_some(),
+            "expected args_raw for derive attribute"
+        );
+        let args = attr.args_raw.as_deref().unwrap();
+        assert!(
+            args.contains("Clone"),
+            "args_raw should contain 'Clone', got '{}'",
+            args
+        );
+        assert!(
+            args.contains("Debug"),
+            "args_raw should contain 'Debug', got '{}'",
+            args
+        );
+    }
+
+    // Test: Rust #[get("/path")] attribute extraction
+    #[test]
+    fn test_rust_route_decorator() {
+        let src = "#[get(\"/path\")]\npub fn get_path() {}";
+        let (tree, lang) = parse_rs(src);
+        let results = extract_rust_symbols(&tree, src.as_bytes(), &lang);
+        let sym = first_symbol(&results);
+        assert_eq!(
+            sym.decorators.len(),
+            1,
+            "expected 1 attribute, got {:?}",
+            sym.decorators
+        );
+        let attr = &sym.decorators[0];
+        assert_eq!(attr.name, "get");
+        assert!(
+            attr.args_raw.is_some(),
+            "expected args_raw for get attribute"
+        );
+    }
+
+    // Test: line_end > line for multi-line TS function
+    #[test]
+    fn test_line_end_ts() {
+        let src = "export function hello() {\n  return 42;\n}";
+        let (tree, lang) = parse_ts(src);
+        let results = extract_symbols(&tree, src.as_bytes(), &lang, false);
+        let sym = first_symbol(&results);
+        assert_eq!(sym.name, "hello");
+        assert!(
+            sym.line_end > sym.line,
+            "line_end ({}) should be > line ({}) for multi-line function",
+            sym.line_end,
+            sym.line
+        );
+    }
+
+    // Test: line_end > line for multi-line Rust function
+    #[test]
+    fn test_line_end_rust() {
+        let src = "pub fn hello() {\n    let x = 1;\n    x\n}";
+        let (tree, lang) = parse_rs(src);
+        let results = extract_rust_symbols(&tree, src.as_bytes(), &lang);
+        let sym = first_symbol(&results);
+        assert_eq!(sym.name, "hello");
+        assert!(
+            sym.line_end > sym.line,
+            "line_end ({}) should be > line ({}) for multi-line function",
+            sym.line_end,
+            sym.line
+        );
+    }
+
+    // Test: stacked decorators preserved in source order
+    #[test]
+    fn test_stacked_decorators() {
+        let src = "@Controller\n@Injectable\nclass AppService {}";
+        let (tree, lang) = parse_ts(src);
+        let results = extract_symbols(&tree, src.as_bytes(), &lang, false);
+        let sym = first_symbol(&results);
+        assert_eq!(
+            sym.decorators.len(),
+            2,
+            "expected 2 decorators, got {:?}",
+            sym.decorators
+        );
+        // Source order: @Controller first, @Injectable second
+        assert_eq!(sym.decorators[0].name, "Controller");
+        assert_eq!(sym.decorators[1].name, "Injectable");
     }
 }

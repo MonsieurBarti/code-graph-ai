@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* 5-tier purple-tinted background hierarchy */
+  --color-bg-void:     #0d0b12;
+  --color-bg-deep:     #110f19;
+  --color-bg-surface:  #16132a;
+  --color-bg-elevated: #1d1830;
+  --color-bg-hover:    #251f3a;
+
+  /* Backward-compatible aliases — existing components use these names */
+  --color-bg-primary:   var(--color-bg-void);
+  --color-bg-secondary: var(--color-bg-deep);
+  --color-bg-panel:     var(--color-bg-surface);
+
+  /* Borders */
+  --color-border:        #2a2240;
+  --color-border-subtle: #1e1830;
+
+  /* Violet accent (replaces blue) */
+  --color-accent:       #7c5cfc;
+  --color-accent-hover: #6946f0;
+
+  /* Text hierarchy */
+  --color-text-primary:   #f0eeff;
+  --color-text-secondary: #a098c7;
+  --color-text-muted:     #6b6090;
+
+  /* Node colors (keep existing names, update values in Plan 03) */
+  --color-node-function: #8B5CF6;
+  --color-node-class: #3B82F6;
+  --color-node-interface: #10B981;
+  --color-node-enum: #F59E0B;
+  --color-node-component: #EC4899;
+  --color-node-file: #6B7280;
+
+  /* Edge colors (keep existing names) */
+  --color-edge-imports: #3B82F6;
+  --color-edge-calls: #8B5CF6;
+  --color-edge-extends: #F97316;
+  --color-edge-contains: #10B981;
+  --color-edge-implements: #EC4899;
+  --color-edge-circular: #EF4444;
+
+  /* Font families */
+  --font-sans: 'Outfit', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
