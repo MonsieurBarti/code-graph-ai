@@ -5,7 +5,6 @@
 # Web frontend build artifacts
 web/dist/
 web/node_modules/
-web/package-lock.json
 node_modules
 
 # IDE / Editor
