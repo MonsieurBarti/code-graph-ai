@@ -31,3 +31,4 @@ test-results/
 .code-graph/
 .mcp.json
 .cache
+.fastembed_cache

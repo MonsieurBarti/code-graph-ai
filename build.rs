@@ -104,7 +104,57 @@ fn build_ort_compat() {
     println!("cargo:rerun-if-changed=compat/ort_compat.cpp");
 }
 
+/// Ensure `web/dist/` exists when the `web` feature is active.
+///
+/// RustEmbed's `#[derive(RustEmbed)]` proc-macro expands at compile time and hard-errors
+/// if the folder path does not exist on disk.  `web/dist/` is a generated build artifact
+/// (gitignored) that is produced by running `npm run build` inside `web/`.  In CI — and
+/// for any developer who hasn't built the frontend yet — the directory will be absent,
+/// causing a confusing macro error instead of a clear "no assets" runtime behaviour.
+///
+/// This stub creates the directory (and a minimal `index.html` placeholder) when it is
+/// missing, so that `cargo build --features web` always compiles.  At runtime the
+/// placeholder serves a 404-like page; a proper build replaces the placeholder with real
+/// assets via `npm run build`.
+#[cfg(feature = "web")]
+fn ensure_web_dist() {
+    use std::fs;
+    use std::path::Path;
+
+    let dist = Path::new("web/dist");
+    if !dist.exists() {
+        fs::create_dir_all(dist)
+            .expect("build.rs: failed to create web/dist/ placeholder directory");
+
+        // Write a minimal index.html so RustEmbed has at least one file to embed.
+        // This keeps the binary functional (it serves a human-readable message)
+        // even when the frontend was never built.
+        let placeholder = r#"<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>code-graph</title></head>
+<body>
+<h1>Frontend not built</h1>
+<p>Run <code>npm run build</code> inside the <code>web/</code> directory to generate the frontend assets.</p>
+</body>
+</html>
+"#;
+        fs::write(dist.join("index.html"), placeholder)
+            .expect("build.rs: failed to write web/dist/index.html placeholder");
+
+        println!(
+            "cargo:warning=web/dist/ was missing — created a placeholder. \
+             Run `cd web && npm run build` for a real frontend."
+        );
+    }
+
+    // Re-run this script whenever web/dist changes so incremental builds stay correct.
+    println!("cargo:rerun-if-changed=web/dist");
+}
+
 fn main() {
+    #[cfg(feature = "web")]
+    ensure_web_dist();
+
     #[cfg(feature = "rag")]
     build_ort_compat();
 }
