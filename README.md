@@ -1,16 +1,24 @@
 # code-graph
 
-High-performance code intelligence engine that indexes TypeScript/JavaScript and Rust codebases into a queryable dependency graph. Built in Rust, designed for AI agents.
+High-performance code intelligence engine that indexes TypeScript, JavaScript, Rust, Python, and Go codebases into a queryable dependency graph. Built in Rust, designed for AI agents.
 
-Gives [Claude Code](https://docs.anthropic.com/en/docs/claude-code) direct access to your codebase's structure via [MCP](https://modelcontextprotocol.io/) -- no source file reading needed. Fifteen MCP tools cover symbol search, reference tracing, blast radius analysis, circular dependency detection, dead code detection, graph export, batch queries, snapshot/diff, and multi-project management.
+Gives [Claude Code](https://docs.anthropic.com/en/docs/claude-code) direct access to your codebase's structure via [MCP](https://modelcontextprotocol.io/) -- no source file reading needed. Twenty MCP tools cover symbol search, reference tracing, blast radius analysis, circular dependency detection, dead code detection, decorator search, clustering, call chain tracing, rename planning, diff impact, graph export, batch queries, snapshot/diff, and multi-project management.
 
 ## Features
 
-- **Multi-language parsing** -- TypeScript, TSX, JavaScript, JSX, and Rust via tree-sitter with full symbol extraction (functions, classes, interfaces, types, enums, components, methods, properties, structs, traits, impl blocks, macros, pub visibility)
-- **Dependency graph** -- file-level and symbol-level edges: imports, calls, extends, implements, type references
-- **Import resolution** -- TypeScript path aliases (tsconfig.json), barrel files (index.ts re-exports), monorepo workspaces, Rust crate-root module resolution with Cargo workspace discovery
-- **Fifteen query types** -- find definitions, trace references, blast radius analysis, circular dependency detection, 360-degree symbol context, project statistics, graph export, file structure, file summaries, import analysis, batch queries, dead code detection, graph diff, project registration, project listing
+- **Multi-language parsing** -- TypeScript, TSX, JavaScript, JSX, Rust, Python, and Go via tree-sitter with full symbol extraction (functions, classes, interfaces, types, enums, components, methods, properties, structs, traits, impl blocks, macros, pub visibility, async/sync functions, decorators, type aliases, struct tags)
+- **Python parsing** -- functions (sync/async), classes, variables, type aliases (PEP 695), decorators with framework detection (Flask, FastAPI, Django)
+- **Go parsing** -- functions, methods, type specs, struct tags, `//go:` directives as decorators, visibility by export convention, go.mod resolution
+- **Decorator/attribute extraction** -- unified across all 5 languages with framework inference (NestJS, Flask, FastAPI, Actix, Angular)
+- **Dependency graph** -- file-level and symbol-level edges: imports, calls, extends, implements, type references, has-decorator, child-of, embeds
+- **Import resolution** -- TypeScript path aliases (tsconfig.json), barrel files (index.ts re-exports), monorepo workspaces, Rust crate-root module resolution with Cargo workspace discovery, Python package resolution, Go module resolution
+- **Twenty query types** -- find definitions, trace references, blast radius analysis, circular dependency detection, 360-degree symbol context, project statistics, graph export, file structure, file summaries, import analysis, batch queries, dead code detection, graph diff, project registration, project listing, decorator search, clustering, call chain tracing, rename planning, diff impact
+- **Interactive web UI** -- `code-graph serve` launches an Axum backend + Svelte frontend with WebGL graph visualization, file tree, code panel, search, and real-time WebSocket updates
+- **RAG conversational agent** -- hybrid retrieval (structural graph + vector embeddings), multi-provider LLM support (Claude, OpenAI, Ollama), session memory, source citations
+- **BM25 hybrid search** -- tiered pipeline: exact match → trigram fuzzy → BM25 → Reciprocal Rank Fusion
+- **Confidence scoring** -- High/Medium/Low confidence tiers on impact analysis based on graph distance
 - **MCP server** -- zero-config (defaults to cwd), exposes all queries as tools for Claude Code over stdio, optional `--watch` flag for auto-reindex
+- **Editor auto-setup** -- `code-graph setup` configures MCP for Claude Code, Cursor, and Windsurf
 - **Trigram fuzzy matching** -- Jaccard similarity for typo-tolerant symbol search with score-ranked suggestions
 - **Batch queries** -- `batch_query` runs up to 10 queries in a single MCP call with single graph resolution
 - **Dead code detection** -- `find_dead_code` identifies unreferenced symbols with entry-point exclusions
@@ -23,6 +31,7 @@ Gives [Claude Code](https://docs.anthropic.com/en/docs/claude-code) direct acces
 - **Disk cache** -- bincode serialization for instant cold starts
 - **Token-optimized output** -- compact prefix-free format with context-aware next-step hints, designed for AI agent consumption (60-90% savings per session)
 - **[mcp] config section** -- persistent project-level MCP defaults in `code-graph.toml`
+- **Feature flags** -- `--features web` for web UI, `--features rag` for RAG agent
 
 ## Install
 
@@ -31,6 +40,13 @@ cargo install code-graph-cli
 ```
 
 This installs the `code-graph` binary to `~/.cargo/bin/`.
+
+To include the web UI or RAG agent, enable feature flags:
+
+```bash
+cargo install code-graph-cli --features web    # Web UI
+cargo install code-graph-cli --features rag    # RAG agent (includes web)
+```
 
 ### From source
 
@@ -60,6 +76,12 @@ code-graph index /path/to/ts-project
 # Index a Rust project
 code-graph index /path/to/rust-project
 
+# Index a Python project
+code-graph index /path/to/python-project
+
+# Index a Go project
+code-graph index /path/to/go-project
+
 # Find a symbol
 code-graph find "UserService" /path/to/project
 
@@ -72,11 +94,17 @@ code-graph mcp
 # Start MCP server with auto-reindex on file changes
 code-graph mcp /path/to/project --watch
 
+# Launch the interactive web UI
+code-graph serve
+
 # Export dependency graph as Mermaid at package granularity
 code-graph export . --format mermaid --granularity package
 
 # Create a named graph snapshot for later comparison
 code-graph snapshot create baseline .
+
+# Auto-configure MCP for your editor
+code-graph setup
 ```
 
 ## CLI reference
@@ -96,11 +124,13 @@ Commands:
   watch     Start a file watcher for incremental re-indexing
   export    Export dependency graph to DOT or Mermaid format
   snapshot  Create, list, or delete named graph snapshots
+  setup     Auto-configure MCP for Claude Code, Cursor, or Windsurf
+  serve     Launch the interactive web UI (requires --features web)
 ```
 
 ### index
 
-Index a project, discovering and parsing all TypeScript/JavaScript and Rust files.
+Index a project, discovering and parsing all TypeScript/JavaScript, Rust, Python, and Go files.
 
 ```bash
 code-graph index . --verbose    # Print each discovered file
@@ -204,6 +234,26 @@ code-graph snapshot list .               # List all snapshots
 code-graph snapshot delete baseline .    # Delete the "baseline" snapshot
 ```
 
+### setup
+
+Auto-configure MCP integration for your editor.
+
+```bash
+code-graph setup              # Interactive: detects available editors
+```
+
+### serve
+
+Launch the interactive web UI with graph visualization.
+
+```bash
+code-graph serve                        # Default port 3000
+code-graph serve --port 8080            # Custom port
+code-graph serve --ollama               # Enable Ollama for local RAG
+```
+
+> Requires building with `--features web`. Add `--features rag` for the conversational agent.
+
 ### Output formats
 
 All query commands support `--format`:
@@ -222,11 +272,17 @@ All query commands support `--format`:
 claude mcp add --scope user code-graph -- code-graph mcp --watch
 ```
 
+Or use the auto-setup command:
+
+```bash
+code-graph setup
+```
+
 This registers `code-graph` as a user-scoped MCP server available in all your projects. The `--watch` flag enables auto-reindex on file changes.
 
 ### Available tools
 
-Once connected, Claude Code gets access to fifteen tools:
+Once connected, Claude Code gets access to twenty tools:
 
 | Tool | Description |
 |------|-------------|
@@ -245,6 +301,11 @@ Once connected, Claude Code gets access to fifteen tools:
 | `get_diff` | Compare current graph against a named snapshot |
 | `register_project` | Register an additional project for multi-project queries |
 | `list_projects` | List all registered projects |
+| `find_by_decorator` | Find symbols by decorator/attribute pattern |
+| `find_clusters` | Hierarchical clustering by coupling/cohesion |
+| `trace_flow` | Find call chains between two symbols |
+| `plan_rename` | Plan symbol renames with impact analysis |
+| `get_diff_impact` | Git-diff-based impact analysis |
 
 The MCP server loads from disk cache on startup for near-instant cold starts, runs an embedded file watcher for live updates (with `--watch`), and suggests similar symbol names via trigram fuzzy matching when a search yields no results.
 
@@ -295,7 +356,12 @@ By default, Claude Code asks for confirmation on every MCP tool call. To auto-ap
       "mcp__code-graph__find_dead_code",
       "mcp__code-graph__get_diff",
       "mcp__code-graph__register_project",
-      "mcp__code-graph__list_projects"
+      "mcp__code-graph__list_projects",
+      "mcp__code-graph__find_by_decorator",
+      "mcp__code-graph__find_clusters",
+      "mcp__code-graph__trace_flow",
+      "mcp__code-graph__plan_rename",
+      "mcp__code-graph__get_diff_impact"
     ]
   }
 }
@@ -318,10 +384,10 @@ By default, code-graph respects `.gitignore` patterns and always excludes `node_
 
 ## How it works
 
-1. **Walk** -- discovers TS/JS and Rust files respecting `.gitignore` and exclusion rules
-2. **Parse** -- tree-sitter extracts symbols, imports, exports, and relationships from each file. TypeScript/JavaScript parsing covers functions, classes, interfaces, type aliases, enums, and components. Rust parsing covers functions, structs, enums, traits, impl blocks, type aliases, constants, statics, and macro definitions with visibility tracking.
-3. **Resolve** -- maps import specifiers to actual files. For TypeScript/JavaScript: oxc_resolver handles path aliases, barrel files, and workspaces. For Rust: crate-root module tree walk with use-path classification (crate/super/self/external/builtin) and Cargo workspace discovery.
-4. **Build graph** -- constructs a petgraph with file nodes, symbol nodes, and typed edges (imports, calls, extends, implements, type references)
+1. **Walk** -- discovers TS/JS, Rust, Python, and Go files respecting `.gitignore` and exclusion rules
+2. **Parse** -- tree-sitter extracts symbols, imports, exports, and relationships from each file. TypeScript/JavaScript parsing covers functions, classes, interfaces, type aliases, enums, and components. Rust parsing covers functions, structs, enums, traits, impl blocks, type aliases, constants, statics, and macro definitions with visibility tracking. Python parsing covers functions (sync/async), classes, variables, type aliases (PEP 695), and decorators. Go parsing covers functions, methods, type specs, struct tags, and `//go:` directives.
+3. **Resolve** -- maps import specifiers to actual files. For TypeScript/JavaScript: oxc_resolver handles path aliases, barrel files, and workspaces. For Rust: crate-root module tree walk with use-path classification (crate/super/self/external/builtin) and Cargo workspace discovery. For Python: package resolution with `__init__.py` detection and relative imports. For Go: go.mod module resolution with package path mapping.
+4. **Build graph** -- constructs a petgraph with file nodes, symbol nodes, and typed edges (imports, calls, extends, implements, type references, has-decorator, child-of, embeds)
 5. **Cache** -- serializes the graph to disk with bincode for fast reloads
 6. **Query** -- traverses the graph to answer structural questions without reading source files
 7. **Watch** -- monitors filesystem events and incrementally updates the graph (re-parses only changed files)
@@ -330,11 +396,11 @@ By default, code-graph respects `.gitignore` patterns and always excludes `node_
 
 | Metric | Value |
 |--------|-------|
-| Languages supported | TypeScript, JavaScript, Rust |
-| Lines of Rust code | ~21,000 |
-| Tests | 285 (264 unit + 21 integration) |
-| CLI commands | 11 |
-| MCP tools | 15 |
+| Languages supported | TypeScript, JavaScript, Rust, Python, Go |
+| Lines of Rust code | ~38,000 |
+| Tests | 492 |
+| CLI commands | 13 |
+| MCP tools | 20 |
 | Rust edition | 2024 |
 | Binary size | ~12 MB (static, zero runtime deps) |
 
