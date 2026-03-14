@@ -12,7 +12,7 @@ use crate::graph::{CodeGraph, edge::EdgeKind, node::GraphNode};
 // ---------------------------------------------------------------------------
 
 /// A community cluster of symbols detected via label propagation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct ClusterResult {
     /// The cluster label (typically the directory prefix of member symbols).
     pub label: String,

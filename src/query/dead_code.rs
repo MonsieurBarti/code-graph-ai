@@ -15,7 +15,7 @@ use crate::graph::{
 // ---------------------------------------------------------------------------
 
 /// A single unreferenced symbol within a file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct DeadSymbol {
     pub name: String,
     pub kind: String,
@@ -23,7 +23,7 @@ pub struct DeadSymbol {
 }
 
 /// Result of dead code analysis.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct DeadCodeResult {
     /// Files with zero incoming import edges that are not entry points.
     pub unreachable_files: Vec<PathBuf>,

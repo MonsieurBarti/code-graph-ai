@@ -55,6 +55,7 @@ pub struct SnapshotSymbol {
 // ---------------------------------------------------------------------------
 
 /// The result of comparing two graph snapshots.
+#[derive(serde::Serialize)]
 pub struct GraphDiff {
     pub added_files: Vec<String>,
     pub removed_files: Vec<String>,
@@ -66,6 +67,7 @@ pub struct GraphDiff {
 }
 
 /// A symbol that changed between two snapshots.
+#[derive(serde::Serialize)]
 pub struct SymbolChange {
     pub file: String,
     pub name: String,

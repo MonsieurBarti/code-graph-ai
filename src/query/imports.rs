@@ -9,7 +9,7 @@ use crate::graph::{CodeGraph, edge::EdgeKind, node::GraphNode};
 // ---------------------------------------------------------------------------
 
 /// Classification category of an import.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum ImportCategory {
     Internal,  // Same package/crate
     Workspace, // Sibling crate in same workspace (Rust only)
@@ -18,7 +18,7 @@ pub enum ImportCategory {
 }
 
 /// A single import entry.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ImportEntry {
     pub specifier: String,
     pub category: ImportCategory,

@@ -13,7 +13,7 @@ use crate::graph::node::SymbolKind;
 // ---------------------------------------------------------------------------
 
 /// A symbol that has a decorator matching the query pattern.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct DecoratorMatch {
     pub symbol_name: String,
     pub kind: SymbolKind,

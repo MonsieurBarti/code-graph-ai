@@ -22,7 +22,7 @@ use crate::query::refs::find_refs;
 ///
 /// `plan_rename` returns one item per definition site and one per reference site.
 /// No files on disk are modified — this is a planning-only function.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct RenameItem {
     /// Absolute path of the file containing this occurrence.
     pub file_path: PathBuf,

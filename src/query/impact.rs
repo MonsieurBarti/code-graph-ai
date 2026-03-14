@@ -8,7 +8,7 @@ use petgraph::visit::EdgeRef;
 use crate::graph::{CodeGraph, edge::EdgeKind, node::GraphNode};
 
 /// Confidence tier for impact analysis results.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum ConfidenceTier {
     High,
     Medium,
@@ -30,7 +30,7 @@ impl std::fmt::Display for ConfidenceTier {
 }
 
 /// Risk tier for diff-impact classification based on downstream file count.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum RiskTier {
     High,
     Medium,
@@ -48,7 +48,7 @@ impl std::fmt::Display for RiskTier {
 }
 
 /// A single file in the blast-radius (impact) result set.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ImpactResult {
     /// Absolute path to the affected file.
     pub file_path: PathBuf,
@@ -61,7 +61,7 @@ pub struct ImpactResult {
 }
 
 /// Result of diff-based impact analysis: a changed file and its downstream blast radius.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct DiffImpactResult {
     /// The file that changed (from git diff).
     pub changed_file: PathBuf,

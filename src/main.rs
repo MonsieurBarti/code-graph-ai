@@ -1143,23 +1143,37 @@ async fn main() -> Result<()> {
 
         Commands::Structure {
             path,
-            scope,
             depth,
+            format,
         } => {
-            let graph = build_graph(&path, false)?;
+            let project_root = project::resolve_project_root(None);
+            let graph = cache::load_or_build(&project_root, false)?;
             let tree =
-                query::structure::file_structure(&graph, &path, scope.as_deref(), depth);
-            let output = query::output::format_structure_to_string(&tree, &path);
-            println!("{}", output);
+                query::structure::file_structure(&graph, &project_root, path.as_deref(), depth);
+            match format {
+                cli::OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&tree)?);
+                }
+                _ => {
+                    let output = query::output::format_structure_to_string(&tree, &project_root);
+                    println!("{}", output);
+                }
+            }
         }
 
-        Commands::FileSummary { file, path } => {
-            let graph = build_graph(&path, false)?;
+        Commands::FileSummary { file, path, format } => {
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
             match query::file_summary::file_summary(&graph, &path, &file) {
-                Ok(summary) => {
-                    let output = query::output::format_file_summary_to_string(&summary);
-                    println!("{}", output);
-                }
+                Ok(summary) => match format {
+                    cli::OutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&summary)?);
+                    }
+                    _ => {
+                        let output = query::output::format_file_summary_to_string(&summary);
+                        println!("{}", output);
+                    }
+                },
                 Err(e) => {
                     eprintln!("{}", e);
                     std::process::exit(1);
@@ -1167,16 +1181,22 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Imports { file, path } => {
-            let graph = build_graph(&path, false)?;
+        Commands::Imports { file, path, format } => {
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
             match query::imports::file_imports(&graph, &path, &file) {
-                Ok(entries) => {
-                    let output = query::output::format_imports_to_string(
-                        &entries,
-                        &file.to_string_lossy(),
-                    );
-                    println!("{}", output);
-                }
+                Ok(entries) => match format {
+                    cli::OutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&entries)?);
+                    }
+                    _ => {
+                        let output = query::output::format_imports_to_string(
+                            &entries,
+                            &file.to_string_lossy(),
+                        );
+                        println!("{}", output);
+                    }
+                },
                 Err(e) => {
                     eprintln!("{}", e);
                     std::process::exit(1);
@@ -1184,21 +1204,35 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::DeadCode { path, scope } => {
-            let graph = build_graph(&path, false)?;
+        Commands::DeadCode { path, scope, format } => {
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
             let result =
                 query::dead_code::find_dead_code(&graph, &path, scope.as_deref());
-            let output = query::output::format_dead_code_to_string(&result, &path);
-            println!("{}", output);
-        }
-
-        Commands::Diff { path, from, to } => {
-            let graph = build_graph(&path, false)?;
-            match query::diff::compute_diff(&path, &from, to.as_deref(), &graph) {
-                Ok(diff) => {
-                    let output = query::output::format_diff_to_string(&diff);
+            match format {
+                cli::OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                }
+                _ => {
+                    let output = query::output::format_dead_code_to_string(&result, &path);
                     println!("{}", output);
                 }
+            }
+        }
+
+        Commands::Diff { path, from, to, format } => {
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
+            match query::diff::compute_diff(&path, &from, to.as_deref(), &graph) {
+                Ok(diff) => match format {
+                    cli::OutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&diff)?);
+                    }
+                    _ => {
+                        let output = query::output::format_diff_to_string(&diff);
+                        println!("{}", output);
+                    }
+                },
                 Err(e) => {
                     eprintln!("{}", e);
                     std::process::exit(1);
@@ -1206,9 +1240,8 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::DiffImpact { base_ref, path } => {
-            let path = std::fs::canonicalize(&path)
-                .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        Commands::DiffImpact { base_ref, path, format } => {
+            let path = project::resolve_project_root(path);
 
             // Shell out to git diff --name-only
             let output = std::process::Command::new("git")
@@ -1231,7 +1264,7 @@ async fn main() -> Result<()> {
             if changed_files.is_empty() {
                 println!("No changed files found relative to '{}'.", base_ref);
             } else {
-                let graph = build_graph(&path, false)?;
+                let graph = cache::load_or_build(&path, false)?;
                 let config = CodeGraphConfig::load(&path);
                 let results = query::impact::diff_impact(
                     &graph,
@@ -1240,8 +1273,15 @@ async fn main() -> Result<()> {
                     config.impact.high_threshold,
                     config.impact.medium_threshold,
                 );
-                let formatted = query::output::format_diff_impact_to_string(&results, &path);
-                print!("{}", formatted);
+                match format {
+                    cli::OutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&results)?);
+                    }
+                    _ => {
+                        let formatted = query::output::format_diff_impact_to_string(&results, &path);
+                        print!("{}", formatted);
+                    }
+                }
             }
         }
 
@@ -1250,8 +1290,10 @@ async fn main() -> Result<()> {
             path,
             language,
             framework,
+            format,
         } => {
-            let graph = build_graph(&path, false)?;
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
             let results = query::decorators::find_by_decorator(
                 &graph,
                 &pattern,
@@ -1259,21 +1301,36 @@ async fn main() -> Result<()> {
                 framework.as_deref(),
                 100, // default limit
             )?;
-            let output =
-                query::output::format_decorator_to_string(&results, &path, 100);
-            println!("{}", output);
+            match format {
+                cli::OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&results)?);
+                }
+                _ => {
+                    let output =
+                        query::output::format_decorator_to_string(&results, &path, 100);
+                    println!("{}", output);
+                }
+            }
         }
 
-        Commands::Clusters { path, scope } => {
-            let graph = build_graph(&path, false)?;
+        Commands::Clusters { path, scope, format } => {
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
             let results = query::clusters::find_clusters(
                 &graph,
                 &path,
                 scope.as_deref(),
                 100, // default max_iterations for Louvain
             );
-            let output = query::output::format_clusters_to_string(&results);
-            println!("{}", output);
+            match format {
+                cli::OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&results)?);
+                }
+                _ => {
+                    let output = query::output::format_clusters_to_string(&results);
+                    println!("{}", output);
+                }
+            }
         }
 
         Commands::Flow {
@@ -1282,24 +1339,42 @@ async fn main() -> Result<()> {
             path,
             max_paths,
             max_depth,
+            format,
         } => {
-            let graph = build_graph(&path, false)?;
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
             let result =
                 query::flow::trace_flow(&graph, &entry, &target, max_paths, max_depth);
-            let output =
-                query::output::format_flow_to_string(&result, &entry, &target);
-            println!("{}", output);
+            match format {
+                cli::OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                }
+                _ => {
+                    let output =
+                        query::output::format_flow_to_string(&result, &entry, &target);
+                    println!("{}", output);
+                }
+            }
         }
 
         Commands::Rename {
             symbol,
             new_name,
             path,
+            format,
         } => {
-            let graph = build_graph(&path, false)?;
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
             let items = query::rename::plan_rename(&graph, &symbol, &new_name, &path);
-            let output = query::output::format_rename_to_string(&items, &path);
-            println!("{}", output);
+            match format {
+                cli::OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&items)?);
+                }
+                _ => {
+                    let output = query::output::format_rename_to_string(&items, &path);
+                    println!("{}", output);
+                }
+            }
         }
     }
 

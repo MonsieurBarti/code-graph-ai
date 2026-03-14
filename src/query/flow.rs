@@ -11,7 +11,7 @@ use crate::graph::{CodeGraph, edge::EdgeKind, node::GraphNode};
 // ---------------------------------------------------------------------------
 
 /// A single call-chain path from entry to target symbol.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct FlowPath {
     /// Ordered list of symbol names from entry to target (inclusive).
     pub hops: Vec<String>,
@@ -20,7 +20,7 @@ pub struct FlowPath {
 }
 
 /// Result of a flow trace query.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct FlowResult {
     /// All discovered paths from entry to target, up to `max_paths`.
     pub paths: Vec<FlowPath>,
