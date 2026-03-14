@@ -21,6 +21,11 @@ if [ -z "$CMD" ]; then
   exit 0
 fi
 
+# Guard: reject compound commands that chain after code-graph
+if echo "$CMD" | grep -qE '(;|&&|\|\||`|\$\(|\$\{)'; then
+  exit 0
+fi
+
 # Check if the command starts with 'code-graph' (with or without path prefix)
 # Matches: "code-graph ...", "/path/to/code-graph ...", "~/.cargo/bin/code-graph ..."
 case "$CMD" in

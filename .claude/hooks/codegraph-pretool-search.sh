@@ -19,7 +19,6 @@ export CLAUDE_HOOK_ACTIVE=1
 
 INPUT=$(cat)
 
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
 PATTERN=$(echo "$INPUT" | jq -r '.tool_input.pattern // .tool_input.glob // empty' 2>/dev/null)
 
 # Must have a pattern to work with
@@ -27,44 +26,34 @@ if [ -z "$PATTERN" ]; then
   exit 0
 fi
 
+# Guard: patterns longer than 256 chars are not real symbols
+if [ ${#PATTERN} -gt 256 ]; then
+  exit 0
+fi
+
 # --- Non-symbol classification (passthrough) ---
 # These patterns are clearly NOT code symbols and should use native Grep/Glob.
 
 # 1. File glob patterns (contain *, ?, **, or file extensions like .rs, .ts)
-if echo "$PATTERN" | grep -qE '(\*\*|[*?]|\.[a-z]{1,5}$)'; then
-  exit 0
-fi
+[[ "$PATTERN" =~ (\*\*|[*?]|\.[a-z]{1,5}$) ]] && exit 0
 
-# 2. String literals (quoted strings)
-if echo "$PATTERN" | grep -qE '^["\x27]|["\x27]$'; then
-  exit 0
-fi
+# 2. String literals (quoted)
+[[ "$PATTERN" == \"* ]] || [[ "$PATTERN" == *\" ]] || [[ "$PATTERN" == \'* ]] || [[ "$PATTERN" == *\' ]] && exit 0
 
-# 3. TODO/FIXME/HACK/NOTE markers
-if echo "$PATTERN" | grep -qiE '^(TODO|FIXME|HACK|NOTE|XXX|WARN|BUG)\b'; then
-  exit 0
-fi
+# 3. TODO/FIXME markers
+[[ "$PATTERN" =~ ^(TODO|FIXME|HACK|NOTE|XXX|WARN|BUG) ]] && exit 0
 
-# 4. Error messages / natural language (contains spaces + lowercase words)
-if echo "$PATTERN" | grep -qE '^[a-z].*[[:space:]].*[[:space:]]'; then
-  exit 0
-fi
+# 4. Error messages / natural language (lowercase words with spaces)
+[[ "$PATTERN" =~ ^[a-z].*[[:space:]].*[[:space:]] ]] && exit 0
 
-# 5. File paths (contain / or \)
-if echo "$PATTERN" | grep -qE '[/\\]'; then
-  exit 0
-fi
+# 5. File paths
+[[ "$PATTERN" =~ [/\\] ]] && exit 0
 
-# 6. Regex metacharacters that indicate a complex regex pattern
-# (lookbehind, lookahead, alternation with pipes, quantifiers on groups, etc.)
-if echo "$PATTERN" | grep -qE '(\(\?[=!<]|\|.*\||[+*?]\{|\\\w)'; then
-  exit 0
-fi
+# 6. Complex regex metacharacters
+[[ "$PATTERN" =~ (\(\?[=!\<]|\|.*\||[+*?]\{|\\[a-zA-Z]) ]] && exit 0
 
-# 7. Patterns that are just short lowercase words (likely keywords, not symbols)
-if echo "$PATTERN" | grep -qE '^[a-z]{1,6}$'; then
-  exit 0
-fi
+# 7. Short lowercase words (likely keywords)
+[[ "$PATTERN" =~ ^[a-z]{1,6}$ ]] && exit 0
 
 # --- Symbol classification (intercept) ---
 # A pattern is a symbol if it matches one of these:
@@ -73,32 +62,22 @@ IS_SYMBOL=0
 
 # PascalCase: starts with uppercase, has at least one more uppercase letter
 # e.g., UserService, CodeGraph, AstNode, HashMap
-if echo "$PATTERN" | grep -qE '^[A-Z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*$'; then
-  IS_SYMBOL=1
-fi
+[[ "$PATTERN" =~ ^[A-Z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*$ ]] && IS_SYMBOL=1
 
 # snake_case: lowercase with underscores, at least one underscore
 # e.g., build_graph, find_symbol, parse_file
-if echo "$PATTERN" | grep -qE '^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$'; then
-  IS_SYMBOL=1
-fi
+[[ "$PATTERN" =~ ^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$ ]] && IS_SYMBOL=1
 
 # SCREAMING_SNAKE_CASE: all uppercase with underscores (constants)
 # e.g., MAX_DEPTH, DEFAULT_CONFIG
-if echo "$PATTERN" | grep -qE '^[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)+$'; then
-  IS_SYMBOL=1
-fi
+[[ "$PATTERN" =~ ^[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)+$ ]] && IS_SYMBOL=1
 
 # camelCase: starts lowercase, has at least one uppercase letter
 # e.g., buildGraph, findSymbol, parseFile
-if echo "$PATTERN" | grep -qE '^[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*$'; then
-  IS_SYMBOL=1
-fi
+[[ "$PATTERN" =~ ^[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*$ ]] && IS_SYMBOL=1
 
 # Single PascalCase word (e.g., Parser, Graph, Node) — at least 3 chars
-if echo "$PATTERN" | grep -qE '^[A-Z][a-z][a-zA-Z0-9]{1,}$'; then
-  IS_SYMBOL=1
-fi
+[[ "$PATTERN" =~ ^[A-Z][a-z][a-zA-Z0-9]{1,}$ ]] && IS_SYMBOL=1
 
 # Longer snake_case-like identifiers (single word, 7+ chars, lowercase)
 # e.g., petgraph, graphology, treesitter
@@ -109,7 +88,7 @@ if [ "$IS_SYMBOL" -ne 1 ]; then
 fi
 
 # --- Run code-graph and return enrichment context ---
-GRAPH_CONTEXT=$(code-graph find "$PATTERN" . 2>/dev/null | head -30)
+GRAPH_CONTEXT=$(code-graph find -- "$PATTERN" . 2>/dev/null | head -30)
 
 if [ -z "$GRAPH_CONTEXT" ]; then
   # No results from code-graph, let native search proceed without context
