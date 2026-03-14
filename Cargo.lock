@@ -572,6 +572,7 @@ dependencies = [
  "genai",
  "glob",
  "ignore",
+ "libc",
  "mime_guess",
  "notify",
  "notify-debouncer-mini",
