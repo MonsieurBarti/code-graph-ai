@@ -108,6 +108,6 @@ mod tests {
         // When None is passed, it tries detect_project_root() then cwd.
         // This test just verifies it doesn't panic and returns something.
         let result = resolve_project_root(None);
-        assert!(result.as_os_str().len() > 0);
+        assert!(!result.as_os_str().is_empty());
     }
 }

@@ -14,6 +14,7 @@ use crate::graph::{
 };
 
 /// Indicates how a search result was matched. Used in BM25/hybrid search (plan 20-01).
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatchMethod {
     Exact,
@@ -21,6 +22,7 @@ pub enum MatchMethod {
     Bm25,
 }
 
+#[cfg(test)]
 impl std::fmt::Display for MatchMethod {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -43,6 +45,7 @@ pub struct FindResult {
     pub is_exported: bool,
     pub is_default: bool,
     pub visibility: SymbolVisibility,
+    #[allow(dead_code)]
     pub decorators: Vec<DecoratorInfo>,
 }
 

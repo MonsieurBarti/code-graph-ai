@@ -207,10 +207,10 @@ pub fn load_or_build(project_root: &Path, verbose: bool) -> anyhow::Result<CodeG
     };
 
     // Save cache after building.
-    if let Err(e) = super::save_cache(project_root, &graph) {
-        if verbose {
-            eprintln!("[cache] save failed: {}", e);
-        }
+    if let Err(e) = super::save_cache(project_root, &graph)
+        && verbose
+    {
+        eprintln!("[cache] save failed: {}", e);
     }
 
     Ok(graph)

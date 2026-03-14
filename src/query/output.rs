@@ -1452,6 +1452,7 @@ pub fn format_context_results(
 /// No summary line. No "def " prefix. Line format: `{rel_path}:{line} {symbol_name} {kind}`
 /// (with optional visibility suffix for Rust). In mixed-language results, groups by language
 /// with `--- {Language} ---` section headers.
+#[cfg(test)]
 pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> String {
     use std::fmt::Write;
     let show_vis = any_non_private(results);
@@ -1514,21 +1515,6 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
     buf
 }
 
-/// Format find results with a match method tag prepended.
-///
-/// Produces: `"[exact]\nsrc/foo.rs:L10 authHandler function\n..."`
-///
-/// Used by the tiered find_symbol pipeline in the CLI to annotate
-/// results with how they were found.
-pub fn format_find_to_string_tagged(
-    results: &[FindResult],
-    project_root: &Path,
-    method: crate::query::find::MatchMethod,
-) -> String {
-    let base = format_find_to_string(results, project_root);
-    format!("{}\n{}", method, base)
-}
-
 /// Format find_by_decorator results to a String for CLI output.
 ///
 /// Each result is formatted as:
@@ -1577,149 +1563,12 @@ pub fn format_decorator_to_string(
     out
 }
 
-/// Format project stats to a String in compact format for CLI output.
-///
-/// Summary header (file + symbol counts) is written FIRST.
-/// `language_filter`: if Some, only show the matching language section.
-pub fn format_stats_to_string(stats: &ProjectStats, language_filter: Option<&str>) -> String {
-    use std::fmt::Write;
-    let mut buf = String::new();
-
-    let show_rust = language_filter.is_none() || language_filter == Some("rust");
-    let show_ts = language_filter.is_none()
-        || language_filter == Some("typescript")
-        || language_filter == Some("javascript");
-    let show_totals = language_filter.is_none();
-
-    let has_rust = stats_has_rust(stats);
-    let has_ts = stats_has_ts_js(stats);
-
-    writeln!(
-        buf,
-        "{} files ({} source, {} non-parsed), {} symbols",
-        stats.file_count, stats.source_files, stats.non_parsed_files, stats.symbol_count
-    )
-    .unwrap();
-    if stats.non_parsed_files > 0 {
-        writeln!(
-            buf,
-            "non-parsed: doc {} config {} ci {} asset {} other {}",
-            stats.doc_files,
-            stats.config_files,
-            stats.ci_files,
-            stats.asset_files,
-            stats.other_files,
-        )
-        .unwrap();
-    }
-
-    if show_rust && has_rust {
-        let rust_symbol_total = stats.rust_fns
-            + stats.rust_structs
-            + stats.rust_enums
-            + stats.rust_traits
-            + stats.rust_impl_methods
-            + stats.rust_type_aliases
-            + stats.rust_consts
-            + stats.rust_statics
-            + stats.rust_macros;
-        writeln!(buf, "Rust: {} symbols (fn: {} struct: {} enum: {} trait: {} impl_method: {} type: {} const: {} static: {} macro: {})",
-            rust_symbol_total,
-            stats.rust_fns, stats.rust_structs, stats.rust_enums,
-            stats.rust_traits, stats.rust_impl_methods, stats.rust_type_aliases,
-            stats.rust_consts, stats.rust_statics, stats.rust_macros,
-        ).unwrap();
-        writeln!(
-            buf,
-            "rust_use {} rust_pub_use {}",
-            stats.rust_imports, stats.rust_reexports,
-        )
-        .unwrap();
-        // Dependencies section (Phase 9)
-        let has_deps = stats.external_packages > 0 || stats.builtin_count > 0;
-        if has_deps {
-            writeln!(
-                buf,
-                "dependencies external_crates {} (usages {}) builtins {} (usages {})",
-                stats.external_packages,
-                stats.external_usage_count,
-                stats.builtin_count,
-                stats.builtin_usage_count,
-            )
-            .unwrap();
-        }
-        // Per-crate breakdown (Phase 9, only for workspaces with multiple crates)
-        if !stats.rust_crate_stats.is_empty() {
-            for cs in &stats.rust_crate_stats {
-                writeln!(
-                    buf,
-                    "crate {} files {} symbols {}",
-                    cs.crate_name, cs.file_count, cs.symbol_count
-                )
-                .unwrap();
-            }
-        }
-    }
-
-    if show_ts && has_ts {
-        let ts_fns = stats.functions.saturating_sub(stats.rust_fns);
-        let ts_enums = stats.enums.saturating_sub(stats.rust_enums);
-        let ts_type_aliases = stats.type_aliases.saturating_sub(stats.rust_type_aliases);
-        writeln!(
-            buf,
-            "TypeScript: functions {} classes {} interfaces {} types {} enums {} variables {} components {} methods {} properties {}",
-            ts_fns, stats.classes, stats.interfaces,
-            ts_type_aliases, ts_enums,
-            stats.variables, stats.components, stats.methods, stats.properties,
-        ).unwrap();
-        writeln!(
-            buf,
-            "imports {} external {} unresolved {}",
-            stats.import_edges, stats.external_packages, stats.unresolved_imports,
-        )
-        .unwrap();
-    }
-
-    if show_totals && has_rust && has_ts {
-        writeln!(buf, "---").unwrap();
-        writeln!(
-            buf,
-            "Total: {} files, {} symbols",
-            stats.file_count, stats.symbol_count
-        )
-        .unwrap();
-    } else if show_totals && !has_rust {
-        writeln!(buf, "files {}", stats.file_count).unwrap();
-        writeln!(buf, "symbols {}", stats.symbol_count).unwrap();
-        writeln!(
-            buf,
-            "functions {} classes {} interfaces {} types {} enums {} variables {} components {} methods {} properties {}",
-            stats.functions,
-            stats.classes,
-            stats.interfaces,
-            stats.type_aliases,
-            stats.enums,
-            stats.variables,
-            stats.components,
-            stats.methods,
-            stats.properties,
-        ).unwrap();
-        writeln!(
-            buf,
-            "imports {} external {} unresolved {}",
-            stats.import_edges, stats.external_packages, stats.unresolved_imports,
-        )
-        .unwrap();
-    }
-
-    buf
-}
-
 /// Format reference results to a String in compact prefix-free format for CLI output.
 ///
 /// No summary line. No "ref " prefix. Line formats:
 /// - Import: `{rel_path} import`
 /// - Call:   `{rel_path}:{line} call {caller_name}`
+#[cfg(test)]
 pub fn format_refs_to_string(results: &[RefResult], project_root: &Path) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
@@ -1746,6 +1595,7 @@ pub fn format_refs_to_string(results: &[RefResult], project_root: &Path) -> Stri
 ///
 /// No summary line. No "impact " prefix. Line format: `{rel_path} (depth N) [TIER: basis]`.
 /// Uses flat (non-tree) format — flat format is more token-efficient.
+#[cfg(test)]
 pub fn format_impact_to_string(results: &[ImpactResult], project_root: &Path) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
@@ -1770,6 +1620,7 @@ pub fn format_impact_to_string(results: &[ImpactResult], project_root: &Path) ->
 /// Format circular dependency results to a String in compact prefix-free format for CLI output.
 ///
 /// No summary line. No "cycle " prefix. Line format: `{file1} -> {file2} -> {file3}`.
+#[cfg(test)]
 pub fn format_circular_to_string(cycles: &[CircularDep], project_root: &Path) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
@@ -1797,6 +1648,7 @@ pub fn format_circular_to_string(cycles: &[CircularDep], project_root: &Path) ->
 /// - Commas and whitespace are separators (silently ignored)
 /// - Unknown characters are silently ignored
 /// - Returns `Some(HashSet)` with the matched section names
+#[cfg(test)]
 pub fn parse_sections(sections: Option<&str>) -> Option<std::collections::HashSet<&'static str>> {
     let s = sections?;
     let mut set = std::collections::HashSet::new();
@@ -1848,6 +1700,7 @@ pub fn parse_sections(sections: Option<&str>) -> Option<std::collections::HashSe
 ///
 /// `sections`: optional filter string (e.g. `"r,c"`). Definitions are always included.
 /// Non-empty sections that were filtered out are listed on an `omitted: ...` line.
+#[cfg(test)]
 pub fn format_context_to_string(
     contexts: &[SymbolContext],
     project_root: &Path,

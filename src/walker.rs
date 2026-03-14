@@ -1,34 +1,8 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
-
 use crate::config::CodeGraphConfig;
 use crate::language::LanguageKind;
-
-/// Workspace field from package.json — can be either a flat list of glob patterns
-/// or an object with a `packages` key.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum WorkspacesField {
-    Patterns(Vec<String>),
-    Config { packages: Vec<String> },
-}
-
-impl WorkspacesField {
-    fn patterns(&self) -> &[String] {
-        match self {
-            Self::Patterns(p) => p,
-            Self::Config { packages } => packages,
-        }
-    }
-}
-
-/// Minimal package.json representation for monorepo workspace detection.
-#[derive(Debug, Deserialize)]
-struct PackageJson {
-    workspaces: Option<WorkspacesField>,
-}
 
 /// Source file extensions that code-graph discovers.
 /// .rs files are discovered and counted but not parsed until Phase 8.
@@ -116,45 +90,6 @@ pub fn walk_non_parsed_files(
     }
 
     Ok(files)
-}
-
-/// Resolve workspace glob patterns from package.json to concrete directory paths.
-fn detect_workspace_roots(root: &Path) -> Vec<PathBuf> {
-    let mut roots = vec![root.to_path_buf()];
-
-    let pkg_path = root.join("package.json");
-    if !pkg_path.exists() {
-        return roots;
-    }
-
-    let contents = match std::fs::read_to_string(&pkg_path) {
-        Ok(c) => c,
-        Err(_) => return roots,
-    };
-
-    let pkg: PackageJson = match serde_json::from_str(&contents) {
-        Ok(p) => p,
-        Err(_) => return roots,
-    };
-
-    let workspaces = match pkg.workspaces {
-        Some(w) => w,
-        None => return roots,
-    };
-
-    // Expand each workspace glob pattern to concrete directories.
-    for pattern in workspaces.patterns() {
-        let glob_pattern = root.join(pattern).to_string_lossy().into_owned();
-        if let Ok(entries) = glob::glob(&glob_pattern) {
-            for entry in entries.flatten() {
-                if entry.is_dir() && !roots.contains(&entry) {
-                    roots.push(entry);
-                }
-            }
-        }
-    }
-
-    roots
 }
 
 /// Collect source files from a single directory tree using the `ignore` crate.
@@ -269,15 +204,6 @@ fn is_excluded_by_patterns(path: &Path, compiled: &[glob::Pattern]) -> bool {
     }
 
     false
-}
-
-/// Returns true if `path` matches any exclusion pattern from config.
-///
-/// Convenience wrapper that compiles patterns on each call.
-/// For hot loops, prefer `compile_exclude_patterns` + `is_excluded_by_patterns`.
-fn is_excluded_by_config(path: &Path, config: &CodeGraphConfig) -> bool {
-    let compiled = compile_exclude_patterns(config);
-    is_excluded_by_patterns(path, &compiled)
 }
 
 #[cfg(test)]

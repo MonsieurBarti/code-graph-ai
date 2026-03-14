@@ -24,6 +24,7 @@ pub struct AppState {
     /// Broadcast sender for WebSocket push messages (e.g. "graph_updated").
     pub ws_tx: broadcast::Sender<String>,
     /// Single-use auth token required for API access. Generated at startup.
+    #[allow(dead_code)]
     pub auth_token: String,
 
     // ── RAG fields (only available when compiled with the `rag` feature) ──────
