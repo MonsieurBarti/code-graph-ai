@@ -1,0 +1,48 @@
+{
+  "hooks": {
+    "PostToolUse": [],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/block-ignored-files-commit.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/enforce-commit-author.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/codegraph-pretool-bash.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/codegraph-pretool-search.sh"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [],
+    "SessionStart": [],
+    "Stop": [],
+    "UserPromptSubmit": []
+  },
+  "permissions": {
+    "allow": [
+      "mcp__code-graph__find_symbol",
+      "mcp__code-graph__find_references",
+      "mcp__code-graph__get_impact",
+      "mcp__code-graph__detect_circular",
+      "mcp__code-graph__get_context",
+      "mcp__code-graph__get_stats"
+    ],
+    "deny": []
+  }
+}
