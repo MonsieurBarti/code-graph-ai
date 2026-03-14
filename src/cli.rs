@@ -233,19 +233,7 @@ pub enum Commands {
         language: Option<String>,
     },
 
-    /// Start an MCP stdio server exposing graph queries as tools for Claude Code.
-    Mcp {
-        /// Path to the project root (defaults to current directory if omitted).
-        path: Option<PathBuf>,
-        /// Start a file watcher that auto-reindexes on changes.
-        #[arg(long)]
-        watch: bool,
-    },
-
     /// Start a file watcher that monitors for changes and re-indexes incrementally.
-    ///
-    /// Useful for debugging watcher behavior. The MCP server starts its own
-    /// embedded watcher automatically — this command runs standalone.
     Watch {
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
@@ -255,38 +243,6 @@ pub enum Commands {
     Snapshot {
         #[command(subcommand)]
         action: SnapshotAction,
-    },
-
-    /// Set up MCP server configuration for supported editors (Claude Code, Cursor, Windsurf).
-    ///
-    /// Auto-detects editors, writes config files, and verifies the server starts.
-    /// Shows a confirmation prompt before writing. Use --yes to skip the prompt.
-    Setup {
-        /// Path to the project root (defaults to current directory).
-        #[arg(default_value = ".")]
-        path: PathBuf,
-
-        /// Skip confirmation prompt and write immediately (for non-interactive/CI usage).
-        #[arg(long, short = 'y')]
-        yes: bool,
-
-        /// Install Claude Code skills (explore-codebase, debug-impact, refactor-symbol) into .claude/skills/.
-        /// Enabled by default for Claude Code — use --no-skills to skip.
-        #[arg(long)]
-        skills: bool,
-
-        /// Install PreToolUse hook that enriches Grep/Glob results with graph context.
-        /// Enabled by default for Claude Code — use --no-hooks to skip.
-        #[arg(long)]
-        hooks: bool,
-
-        /// Skip skill installation even when Claude Code is detected.
-        #[arg(long)]
-        no_skills: bool,
-
-        /// Skip hook installation even when Claude Code is detected.
-        #[arg(long)]
-        no_hooks: bool,
     },
 
     /// Start a web server with interactive graph visualization UI.
@@ -481,42 +437,6 @@ mod tests {
     use clap::Parser;
 
     #[test]
-    fn test_mcp_accepts_watch_flag() {
-        let cli = Cli::parse_from(["code-graph", "mcp", "--watch"]);
-        match cli.command {
-            Commands::Mcp { path, watch } => {
-                assert!(watch, "--watch flag should be true");
-                assert!(path.is_none(), "path should be None when not specified");
-            }
-            _ => panic!("expected Mcp command"),
-        }
-    }
-
-    #[test]
-    fn test_mcp_without_watch_flag() {
-        let cli = Cli::parse_from(["code-graph", "mcp"]);
-        match cli.command {
-            Commands::Mcp { path, watch } => {
-                assert!(!watch, "--watch flag should default to false");
-                assert!(path.is_none(), "path should be None when not specified");
-            }
-            _ => panic!("expected Mcp command"),
-        }
-    }
-
-    #[test]
-    fn test_mcp_with_path_and_watch() {
-        let cli = Cli::parse_from(["code-graph", "mcp", "--watch", "/some/path"]);
-        match cli.command {
-            Commands::Mcp { path, watch } => {
-                assert!(watch, "--watch flag should be true");
-                assert_eq!(path, Some(PathBuf::from("/some/path")));
-            }
-            _ => panic!("expected Mcp command"),
-        }
-    }
-
-    #[test]
     fn test_snapshot_create_parses() {
         let cli = Cli::parse_from(["code-graph", "snapshot", "create", "my-snap"]);
         match cli.command {
@@ -557,50 +477,6 @@ mod tests {
                 _ => panic!("expected Delete action"),
             },
             _ => panic!("expected Snapshot command"),
-        }
-    }
-
-    #[test]
-    fn test_setup_skills_flag() {
-        let cli = Cli::parse_from(["code-graph", "setup", "--skills"]);
-        match cli.command {
-            Commands::Setup { skills, .. } => {
-                assert!(skills, "--skills flag should be true");
-            }
-            _ => panic!("expected Setup command"),
-        }
-    }
-
-    #[test]
-    fn test_setup_hooks_flag() {
-        let cli = Cli::parse_from(["code-graph", "setup", "--hooks"]);
-        match cli.command {
-            Commands::Setup { hooks, .. } => {
-                assert!(hooks, "--hooks flag should be true");
-            }
-            _ => panic!("expected Setup command"),
-        }
-    }
-
-    #[test]
-    fn test_setup_no_skills_flag() {
-        let cli = Cli::parse_from(["code-graph", "setup", "--no-skills"]);
-        match cli.command {
-            Commands::Setup { no_skills, .. } => {
-                assert!(no_skills, "--no-skills flag should be true");
-            }
-            _ => panic!("expected Setup command"),
-        }
-    }
-
-    #[test]
-    fn test_setup_no_hooks_flag() {
-        let cli = Cli::parse_from(["code-graph", "setup", "--no-hooks"]);
-        match cli.command {
-            Commands::Setup { no_hooks, .. } => {
-                assert!(no_hooks, "--no-hooks flag should be true");
-            }
-            _ => panic!("expected Setup command"),
         }
     }
 

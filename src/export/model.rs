@@ -50,7 +50,7 @@ pub struct ExportParams {
     /// Absolute path to the project root (used for relative path labels and workspace discovery).
     pub project_root: PathBuf,
     /// Write output to stdout instead of a file (read by caller, not export_graph).
-    /// Callers (`main.rs`, `mcp/server.rs`) check this flag themselves on ExportResult;
+    /// Callers (`main.rs`) check this flag themselves on ExportResult;
     /// export_graph itself does not read it — hence the suppression.
     #[allow(dead_code)]
     pub stdout: bool,

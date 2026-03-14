@@ -20,7 +20,7 @@ pub struct DecoratorMatch {
     pub file_path: PathBuf,
     pub line: usize,
     /// End line of the decorated symbol — populated for API completeness; not yet
-    /// consumed by the current text formatter but available for rich MCP clients.
+    /// consumed by the current text formatter but available for rich output formats.
     #[allow(dead_code)]
     pub line_end: usize,
     pub decorator_name: String,

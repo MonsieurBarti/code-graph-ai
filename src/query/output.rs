@@ -1444,10 +1444,10 @@ pub fn format_context_results(
 }
 
 // ---------------------------------------------------------------------------
-// MCP String-returning formatters (siblings of the println!-based CLI formatters)
+// String-returning formatters (siblings of the println!-based CLI formatters)
 // ---------------------------------------------------------------------------
 
-/// Format find results to a String in compact prefix-free format for MCP tool responses.
+/// Format find results to a String in compact prefix-free format for CLI output.
 ///
 /// No summary line. No "def " prefix. Line format: `{rel_path}:{line} {symbol_name} {kind}`
 /// (with optional visibility suffix for Rust). In mixed-language results, groups by language
@@ -1518,7 +1518,7 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
 ///
 /// Produces: `"[exact]\nsrc/foo.rs:L10 authHandler function\n..."`
 ///
-/// Used by the tiered find_symbol pipeline in the MCP server to annotate
+/// Used by the tiered find_symbol pipeline in the CLI to annotate
 /// results with how they were found.
 pub fn format_find_to_string_tagged(
     results: &[FindResult],
@@ -1529,7 +1529,7 @@ pub fn format_find_to_string_tagged(
     format!("{}\n{}", method, base)
 }
 
-/// Format find_by_decorator results to a String for MCP tool responses.
+/// Format find_by_decorator results to a String for CLI output.
 ///
 /// Each result is formatted as:
 /// `@decorator_name[args] symbol_name (kind) file:line`
@@ -1577,7 +1577,7 @@ pub fn format_decorator_to_string(
     out
 }
 
-/// Format project stats to a String in compact format for MCP tool responses.
+/// Format project stats to a String in compact format for CLI output.
 ///
 /// Summary header (file + symbol counts) is written FIRST.
 /// `language_filter`: if Some, only show the matching language section.
@@ -1715,7 +1715,7 @@ pub fn format_stats_to_string(stats: &ProjectStats, language_filter: Option<&str
     buf
 }
 
-/// Format reference results to a String in compact prefix-free format for MCP tool responses.
+/// Format reference results to a String in compact prefix-free format for CLI output.
 ///
 /// No summary line. No "ref " prefix. Line formats:
 /// - Import: `{rel_path} import`
@@ -1742,10 +1742,10 @@ pub fn format_refs_to_string(results: &[RefResult], project_root: &Path) -> Stri
     buf
 }
 
-/// Format impact (blast radius) results to a String in compact prefix-free flat format for MCP tool responses.
+/// Format impact (blast radius) results to a String in compact prefix-free flat format for CLI output.
 ///
 /// No summary line. No "impact " prefix. Line format: `{rel_path} (depth N) [TIER: basis]`.
-/// Uses flat (non-tree) format — MCP responses do not benefit from indentation.
+/// Uses flat (non-tree) format — flat format is more token-efficient.
 pub fn format_impact_to_string(results: &[ImpactResult], project_root: &Path) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
@@ -1767,7 +1767,7 @@ pub fn format_impact_to_string(results: &[ImpactResult], project_root: &Path) ->
     buf
 }
 
-/// Format circular dependency results to a String in compact prefix-free format for MCP tool responses.
+/// Format circular dependency results to a String in compact prefix-free format for CLI output.
 ///
 /// No summary line. No "cycle " prefix. Line format: `{file1} -> {file2} -> {file3}`.
 pub fn format_circular_to_string(cycles: &[CircularDep], project_root: &Path) -> String {
@@ -1829,7 +1829,7 @@ pub fn parse_sections(sections: Option<&str>) -> Option<std::collections::HashSe
     Some(set)
 }
 
-/// Format symbol context results to a String in compact prefix-free format for MCP tool responses.
+/// Format symbol context results to a String in compact prefix-free format for CLI output.
 ///
 /// No "N symbols" summary. No "symbol " prefix (bare symbol name on its own line).
 /// No "--- section ---" delimiter lines. No "def ", "ref ", "called-by ", "calls ",
@@ -2106,9 +2106,9 @@ pub fn format_circular_results(cycles: &[CircularDep], format: &OutputFormat, pr
 /// Format:
 /// ```text
 /// src/
-///   mcp/
-///     server.rs
-///       pub get_structure (fn)
+///   cache/
+///     loader.rs
+///       pub load_or_build (fn)
 ///   query/
 ///     structure.rs
 ///       pub file_structure (fn)
@@ -2167,15 +2167,15 @@ fn format_nodes(nodes: &[StructureNode], depth: usize, lines: &mut Vec<String>) 
 // FileSummary formatter
 // ---------------------------------------------------------------------------
 
-/// Render a `FileSummary` to a compact string (MCP format, no trailing newline).
+/// Render a `FileSummary` to a compact string (compact format, no trailing newline).
 ///
 /// Format:
 /// ```text
-/// src/mcp/server.rs
+/// src/cache/loader.rs
 /// role: utility
-/// lines: 729
-/// symbols: 7 (3 fn, 1 struct, 3 function)
-/// exports: get_structure (fn), get_file_summary (fn)
+/// lines: 200
+/// symbols: 3 (2 fn, 1 struct)
+/// exports: load_or_build (fn), apply_staleness_diff (fn)
 /// imports: 12
 /// importers: 0
 /// graph: leaf
@@ -2257,15 +2257,15 @@ pub fn format_file_summary_to_string(summary: &crate::query::file_summary::FileS
 // Imports formatter
 // ---------------------------------------------------------------------------
 
-/// Render a list of `ImportEntry` items to a compact string (MCP format, no trailing newline).
+/// Render a list of `ImportEntry` items to a compact string (compact format, no trailing newline).
 ///
 /// Format:
 /// ```text
-/// src/mcp/server.rs imports:
-/// ./params (internal)
+/// src/cache/loader.rs imports:
+/// ./envelope (internal)
 /// ../graph (internal)
-/// rmcp (external)
-/// tokio (external)
+/// ../parser (internal)
+/// rayon (external)
 /// std::sync (builtin)
 /// crate::query::structure [re-export] (internal)
 /// ```
@@ -2306,7 +2306,7 @@ pub fn format_imports_to_string(
     lines.join("\n")
 }
 
-/// Format dead code analysis results to a compact MCP string.
+/// Format dead code analysis results to a compact string.
 ///
 /// Output format:
 /// ```text
@@ -2375,7 +2375,7 @@ pub fn format_dead_code_to_string(
 // Diff output
 // ---------------------------------------------------------------------------
 
-/// Format a GraphDiff as a compact string for MCP output.
+/// Format a GraphDiff as a compact string for CLI output.
 ///
 /// Example:
 /// ```text
@@ -2430,7 +2430,7 @@ pub fn format_diff_to_string(diff: &crate::query::diff::GraphDiff) -> String {
     lines.join("\n")
 }
 // ---------------------------------------------------------------------------
-// Unit tests for MCP formatters
+// Unit tests for compact formatters
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -2916,14 +2916,14 @@ mod tests {
 }
 
 // ---------------------------------------------------------------------------
-// Cluster / Flow / Rename string formatters (for MCP tool responses)
+// Cluster / Flow / Rename string formatters (for CLI output)
 // ---------------------------------------------------------------------------
 
 use crate::query::clusters::ClusterResult;
 use crate::query::flow::FlowResult;
 use crate::query::rename::RenameItem;
 
-/// Format cluster results as a human-readable string for MCP responses.
+/// Format cluster results as a human-readable string for CLI output.
 ///
 /// Output format:
 /// ```text
@@ -2951,7 +2951,7 @@ pub fn format_clusters_to_string(clusters: &[ClusterResult]) -> String {
     lines.join("\n")
 }
 
-/// Format flow trace results as a human-readable string for MCP responses.
+/// Format flow trace results as a human-readable string for CLI output.
 ///
 /// Output format (paths found):
 /// ```text
@@ -2988,7 +2988,7 @@ pub fn format_flow_to_string(result: &FlowResult, entry: &str, target: &str) -> 
     lines.join("\n")
 }
 
-/// Format rename plan items as a human-readable string for MCP responses.
+/// Format rename plan items as a human-readable string for CLI output.
 ///
 /// Output format:
 /// ```text
@@ -3041,7 +3041,7 @@ pub fn format_rename_to_string(items: &[RenameItem], root: &Path) -> String {
 
 /// Format diff-impact results as a human-readable string.
 ///
-/// Extracted from mcp/server.rs for reuse in CLI subcommands.
+/// Used by the diff-impact CLI subcommand.
 ///
 /// Output format:
 /// ```text

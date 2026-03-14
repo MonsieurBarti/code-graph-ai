@@ -4,7 +4,6 @@ mod config;
 mod export;
 mod graph;
 mod language;
-mod mcp;
 mod output;
 mod parser;
 mod project;
@@ -12,7 +11,6 @@ mod query;
 #[cfg(feature = "rag")]
 mod rag;
 mod resolver;
-mod setup;
 mod walker;
 mod watcher;
 #[cfg(feature = "web")]
@@ -964,24 +962,6 @@ async fn main() -> Result<()> {
             }
 
             query::output::format_context_results(&results, &format, &path, &symbol);
-        }
-
-        Commands::Mcp { path, watch } => {
-            let project_root = project::resolve_project_root(path);
-            mcp::run(project_root, watch).await?;
-        }
-
-        Commands::Setup {
-            path,
-            yes,
-            skills,
-            hooks,
-            no_skills,
-            no_hooks,
-        } => {
-            let project_root = std::fs::canonicalize(&path)
-                .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-            setup::run_setup(&project_root, yes, skills, hooks, no_skills, no_hooks)?;
         }
 
         Commands::Snapshot { action } => {

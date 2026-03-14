@@ -78,7 +78,7 @@ pub fn apply_staleness_diff(
 
     // Re-parse changed/new files in parallel.
     // "rs" => "rust" is included so Rust files are not silently dropped on cold-start cache diff.
-    // Without this, Rust symbols would be missing from the MCP graph after a cache hit.
+    // Without this, Rust symbols would be missing from the graph after a cache hit.
     let reparsed: Vec<(PathBuf, &'static str, crate::parser::ParseResult)> = files_to_reparse
         .par_iter()
         .filter_map(|path| {
@@ -193,7 +193,7 @@ pub fn load_or_build(project_root: &Path, verbose: bool) -> anyhow::Result<CodeG
         }
     };
 
-    // Save cache after building (same as current MCP server behavior).
+    // Save cache after building.
     if let Err(e) = super::save_cache(project_root, &graph) {
         if verbose {
             eprintln!("[cache] save failed: {}", e);

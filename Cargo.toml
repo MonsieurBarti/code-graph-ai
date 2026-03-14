@@ -7,7 +7,7 @@ license = "MIT"
 repository = "https://github.com/MonsieurBarti/code-graph-ai"
 homepage = "https://github.com/MonsieurBarti/code-graph-ai"
 readme = "README.md"
-keywords = ["typescript", "rust", "go", "code-graph", "mcp"]
+keywords = ["typescript", "rust", "go", "code-graph", "cli"]
 categories = ["development-tools", "command-line-utilities"]
 exclude = [".planning/", ".github/", ".claude/", ".devcontainer/", "target/"]
 
@@ -43,9 +43,7 @@ glob = "0.3"
 oxc_resolver = "3"
 regex = "1"
 rayon = "1"
-rmcp = { version = "0.16", features = ["server", "transport-io", "macros"] }
 tokio = { version = "1", features = ["full"] }
-schemars = "1"
 notify = "8"
 notify-debouncer-mini = "0.7"
 bm25 = "2.3.2"

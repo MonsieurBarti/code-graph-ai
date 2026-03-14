@@ -1,6 +1,6 @@
 // QUERY-03 NOTE: The requirement "git diff files mapped to affected symbols with risk tier
-// classification" is already fully satisfied by the existing `get_diff_impact` MCP tool,
-// backed by `diff_impact()` in impact.rs (see also get_diff_impact in mcp/handlers).
+// classification" is already fully satisfied by the existing `diff-impact` CLI subcommand,
+// backed by `diff_impact()` in impact.rs.
 // The existing IMPACT-03 implementation covers the identical requirement.
 // No additional implementation is needed for QUERY-03.
 

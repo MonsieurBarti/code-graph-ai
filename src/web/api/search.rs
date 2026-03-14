@@ -48,7 +48,7 @@ impl From<FindResult> for SearchResult {
 ///
 /// Returns matching symbol definitions as a JSON array.
 ///
-/// Uses a tiered pipeline mirroring the MCP find_symbol tool:
+/// Uses a tiered pipeline mirroring the CLI find subcommand:
 /// - Tier 1: exact/regex find_symbol (case-insensitive) — returned immediately on hit
 /// - Tier 2+3: trigram + BM25 fuzzy search when Tier 1 misses
 /// - If both trigram and BM25 hit: merge via reciprocal rank fusion (RRF)

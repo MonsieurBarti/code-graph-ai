@@ -319,7 +319,6 @@ mod tests {
         // Create a code-graph.toml with exclude patterns
         let config = CodeGraphConfig {
             exclude: Some(vec!["*.toml".to_string()]),
-            mcp: Default::default(),
             impact: Default::default(),
         };
 
