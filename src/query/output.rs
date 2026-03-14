@@ -67,27 +67,40 @@ fn any_non_private(results: &[FindResult]) -> bool {
 ///
 /// In compact and table modes, if results span multiple languages, groups them under
 /// `--- {Language} ---` section headers. JSON mode adds a "language" field per result.
-pub fn format_find_results(results: &[FindResult], format: &OutputFormat, project_root: &Path) {
+pub fn format_find_results(
+    results: &[FindResult],
+    format: &OutputFormat,
+    project_root: &Path,
+    symbol_name: &str,
+) {
     let show_vis = any_non_private(results);
     let mixed = is_mixed_language(results, |r: &FindResult| r.file_path.as_path());
 
     // Sort results: by language first (for grouping), then file path, then line.
-    let mut sorted = results.to_vec();
-    if mixed {
-        sorted.sort_by(|a, b| {
-            let la = language_of_file(&a.file_path);
-            let lb = language_of_file(&b.file_path);
-            language_sort_key(la)
-                .cmp(&language_sort_key(lb))
-                .then(a.file_path.cmp(&b.file_path))
-                .then(a.line.cmp(&b.line))
-        });
-    }
+    // Only clone when sorting is needed to avoid unnecessary allocation.
+    let sorted;
+    let results_ref = if mixed {
+        sorted = {
+            let mut v = results.to_vec();
+            v.sort_by(|a, b| {
+                let la = language_of_file(&a.file_path);
+                let lb = language_of_file(&b.file_path);
+                language_sort_key(la)
+                    .cmp(&language_sort_key(lb))
+                    .then(a.file_path.cmp(&b.file_path))
+                    .then(a.line.cmp(&b.line))
+            });
+            v
+        };
+        &sorted[..]
+    } else {
+        results
+    };
 
     match format {
         OutputFormat::Compact => {
             let mut last_lang: Option<&'static str> = None;
-            for r in &sorted {
+            for r in results_ref {
                 if mixed {
                     let lang = language_of_file(&r.file_path);
                     if last_lang != Some(lang) {
@@ -119,30 +132,26 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
                 }
             }
             println!("{} definitions found", results.len());
+            if results.is_empty() {
+                println!("hint: no results found -- try a broader pattern or check spelling");
+            } else {
+                println!("hint: use refs {} to find all references", symbol_name);
+            }
         }
 
         OutputFormat::Table => {
             let use_color = std::io::stdout().is_terminal();
 
-            // Column widths: auto-sized to data.
-            let name_w = sorted
-                .iter()
-                .map(|r| r.symbol_name.len())
-                .max()
-                .unwrap_or(6)
-                .max(6);
-            let file_w = sorted
-                .iter()
-                .map(|r| {
-                    r.file_path
-                        .strip_prefix(project_root)
-                        .unwrap_or(&r.file_path)
-                        .to_string_lossy()
-                        .len()
-                })
-                .max()
-                .unwrap_or(4)
-                .max(4);
+            // Column widths: auto-sized to data (single pass).
+            let (name_w, file_w) = results_ref.iter().fold((6usize, 4usize), |(nw, fw), r| {
+                let file_len = r
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&r.file_path)
+                    .to_string_lossy()
+                    .len();
+                (nw.max(r.symbol_name.len()), fw.max(file_len))
+            });
 
             if show_vis {
                 if use_color {
@@ -168,7 +177,7 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
                 }
                 println!("{}", "-".repeat(name_w + file_w + 26));
                 let mut last_lang: Option<&'static str> = None;
-                for r in &sorted {
+                for r in results_ref {
                     if mixed {
                         let lang = language_of_file(&r.file_path);
                         if last_lang != Some(lang) {
@@ -213,7 +222,7 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
                 }
                 println!("{}", "-".repeat(name_w + file_w + 14));
                 let mut last_lang: Option<&'static str> = None;
-                for r in &sorted {
+                for r in results_ref {
                     if mixed {
                         let lang = language_of_file(&r.file_path);
                         if last_lang != Some(lang) {
@@ -239,7 +248,7 @@ pub fn format_find_results(results: &[FindResult], format: &OutputFormat, projec
         }
 
         OutputFormat::Json => {
-            let json_results: Vec<serde_json::Value> = sorted
+            let json_results: Vec<serde_json::Value> = results_ref
                 .iter()
                 .map(|r| {
                     let rel = r
@@ -503,6 +512,7 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
                     stats.import_edges, stats.external_packages, stats.unresolved_imports
                 );
             }
+            println!("hint: use dead-code to find unreferenced symbols");
         }
 
         OutputFormat::Table => {
@@ -733,7 +743,12 @@ pub fn format_stats(stats: &ProjectStats, format: &OutputFormat, language_filter
 // ---------------------------------------------------------------------------
 
 /// Format and print reference results to stdout.
-pub fn format_refs_results(results: &[RefResult], format: &OutputFormat, project_root: &Path) {
+pub fn format_refs_results(
+    results: &[RefResult],
+    format: &OutputFormat,
+    project_root: &Path,
+    symbol_name: &str,
+) {
     match format {
         OutputFormat::Compact => {
             for r in results {
@@ -753,6 +768,11 @@ pub fn format_refs_results(results: &[RefResult], format: &OutputFormat, project
                 }
             }
             println!("{} references found", results.len());
+            if results.is_empty() {
+                println!("hint: no results found -- try a broader pattern or check spelling");
+            } else {
+                println!("hint: use impact {} to see blast radius", symbol_name);
+            }
         }
 
         OutputFormat::Table => {
@@ -863,6 +883,7 @@ pub fn format_impact_results(
     format: &OutputFormat,
     project_root: &Path,
     tree_mode: bool,
+    symbol_name: &str,
 ) {
     match format {
         OutputFormat::Compact => {
@@ -891,6 +912,14 @@ pub fn format_impact_results(
                 }
             }
             println!("{} files affected", results.len());
+            if results.is_empty() {
+                println!("hint: no results found -- try a broader pattern or check spelling");
+            } else {
+                println!(
+                    "hint: use context {} for full dependency picture",
+                    symbol_name
+                );
+            }
         }
 
         OutputFormat::Table => {
@@ -984,7 +1013,7 @@ pub fn format_context_results(
     contexts: &[SymbolContext],
     format: &OutputFormat,
     project_root: &Path,
-    _symbol_name: &str,
+    symbol_name: &str,
 ) {
     match format {
         OutputFormat::Compact => {
@@ -1100,6 +1129,14 @@ pub fn format_context_results(
                     ctx.references.len(),
                     ctx.callers.len(),
                     ctx.callees.len()
+                );
+            }
+            if contexts.is_empty() {
+                println!("hint: no results found -- try a broader pattern or check spelling");
+            } else {
+                println!(
+                    "hint: use flow {} <target> to trace data paths",
+                    symbol_name
                 );
             }
         }
@@ -1453,26 +1490,38 @@ pub fn format_context_results(
 /// (with optional visibility suffix for Rust). In mixed-language results, groups by language
 /// with `--- {Language} ---` section headers.
 #[cfg(test)]
-pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> String {
+pub fn format_find_to_string(
+    results: &[FindResult],
+    project_root: &Path,
+    symbol_name: &str,
+) -> String {
     use std::fmt::Write;
     let show_vis = any_non_private(results);
     let mixed = is_mixed_language(results, |r: &FindResult| r.file_path.as_path());
 
-    let mut sorted = results.to_vec();
-    if mixed {
-        sorted.sort_by(|a, b| {
-            let la = language_of_file(&a.file_path);
-            let lb = language_of_file(&b.file_path);
-            language_sort_key(la)
-                .cmp(&language_sort_key(lb))
-                .then(a.file_path.cmp(&b.file_path))
-                .then(a.line.cmp(&b.line))
-        });
-    }
+    // Only clone when sorting is needed to avoid unnecessary allocation.
+    let sorted;
+    let results_ref = if mixed {
+        sorted = {
+            let mut v = results.to_vec();
+            v.sort_by(|a, b| {
+                let la = language_of_file(&a.file_path);
+                let lb = language_of_file(&b.file_path);
+                language_sort_key(la)
+                    .cmp(&language_sort_key(lb))
+                    .then(a.file_path.cmp(&b.file_path))
+                    .then(a.line.cmp(&b.line))
+            });
+            v
+        };
+        &sorted[..]
+    } else {
+        results
+    };
 
     let mut buf = String::new();
     let mut last_lang: Option<&'static str> = None;
-    for r in &sorted {
+    for r in results_ref {
         if mixed {
             let lang = language_of_file(&r.file_path);
             if last_lang != Some(lang) {
@@ -1511,6 +1560,15 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
             )
             .unwrap();
         }
+    }
+    if results.is_empty() {
+        writeln!(
+            buf,
+            "hint: no results found -- try a broader pattern or check spelling"
+        )
+        .unwrap();
+    } else {
+        writeln!(buf, "hint: use refs {} to find all references", symbol_name).unwrap();
     }
     buf
 }
@@ -1569,7 +1627,11 @@ pub fn format_decorator_to_string(
 /// - Import: `{rel_path} import`
 /// - Call:   `{rel_path}:{line} call {caller_name}`
 #[cfg(test)]
-pub fn format_refs_to_string(results: &[RefResult], project_root: &Path) -> String {
+pub fn format_refs_to_string(
+    results: &[RefResult],
+    project_root: &Path,
+    symbol_name: &str,
+) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
     for r in results {
@@ -1588,6 +1650,15 @@ pub fn format_refs_to_string(results: &[RefResult], project_root: &Path) -> Stri
             }
         }
     }
+    if results.is_empty() {
+        writeln!(
+            buf,
+            "hint: no results found -- try a broader pattern or check spelling"
+        )
+        .unwrap();
+    } else {
+        writeln!(buf, "hint: use impact {} to see blast radius", symbol_name).unwrap();
+    }
     buf
 }
 
@@ -1596,7 +1667,11 @@ pub fn format_refs_to_string(results: &[RefResult], project_root: &Path) -> Stri
 /// No summary line. No "impact " prefix. Line format: `{rel_path} (depth N) [TIER: basis]`.
 /// Uses flat (non-tree) format — flat format is more token-efficient.
 #[cfg(test)]
-pub fn format_impact_to_string(results: &[ImpactResult], project_root: &Path) -> String {
+pub fn format_impact_to_string(
+    results: &[ImpactResult],
+    project_root: &Path,
+    symbol_name: &str,
+) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
     for r in results {
@@ -1611,6 +1686,20 @@ pub fn format_impact_to_string(results: &[ImpactResult], project_root: &Path) ->
             r.depth,
             r.confidence,
             r.basis
+        )
+        .unwrap();
+    }
+    if results.is_empty() {
+        writeln!(
+            buf,
+            "hint: no results found -- try a broader pattern or check spelling"
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            buf,
+            "hint: use context {} for full dependency picture",
+            symbol_name
         )
         .unwrap();
     }
@@ -1636,6 +1725,30 @@ pub fn format_circular_to_string(cycles: &[CircularDep], project_root: &Path) ->
             })
             .collect();
         writeln!(buf, "{}", parts.join(" -> ")).unwrap();
+    }
+    if cycles.is_empty() {
+        writeln!(
+            buf,
+            "hint: no results found -- try a broader pattern or check spelling"
+        )
+        .unwrap();
+    } else {
+        let first_file = cycles[0]
+            .files
+            .first()
+            .map(|p| {
+                p.strip_prefix(project_root)
+                    .unwrap_or(p)
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .unwrap_or_default();
+        writeln!(
+            buf,
+            "hint: use file-summary {} to understand the circular dependency",
+            first_file
+        )
+        .unwrap();
     }
     buf
 }
@@ -1879,6 +1992,20 @@ pub fn format_context_to_string(
             writeln!(buf, "omitted: {}", omitted.join(", ")).unwrap();
         }
     }
+    if contexts.is_empty() {
+        writeln!(
+            buf,
+            "hint: no results found -- try a broader pattern or check spelling"
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            buf,
+            "hint: use flow {} <target> to trace data paths",
+            &contexts[0].symbol_name
+        )
+        .unwrap();
+    }
     buf
 }
 
@@ -1900,6 +2027,25 @@ pub fn format_circular_results(cycles: &[CircularDep], format: &OutputFormat, pr
                 println!("cycle {}", parts.join(" -> "));
             }
             println!("{} cycles found", cycles.len());
+            if cycles.is_empty() {
+                println!("hint: no results found -- try a broader pattern or check spelling");
+            } else {
+                // Suggest investigating the first file in the first cycle.
+                let first_file = cycles[0]
+                    .files
+                    .first()
+                    .map(|p| {
+                        p.strip_prefix(project_root)
+                            .unwrap_or(p)
+                            .to_string_lossy()
+                            .to_string()
+                    })
+                    .unwrap_or_default();
+                println!(
+                    "hint: use file-summary {} to understand the circular dependency",
+                    first_file
+                );
+            }
         }
 
         OutputFormat::Table => {
@@ -2322,7 +2468,7 @@ mod tests {
             10,
             SymbolKind::Function,
         )];
-        let output = format_find_to_string(&results, &root);
+        let output = format_find_to_string(&results, &root, "MyFunc");
 
         // Must NOT contain old prefix
         assert!(
@@ -2358,7 +2504,7 @@ mod tests {
                 line: Some(42),
             },
         ];
-        let output = format_refs_to_string(&results, &root);
+        let output = format_refs_to_string(&results, &root, "MySymbol");
 
         // Must NOT contain old prefix
         assert!(
@@ -2392,7 +2538,7 @@ mod tests {
             confidence: ConfidenceTier::High,
             basis: "direct caller at depth 1".to_string(),
         }];
-        let output = format_impact_to_string(&results, &root);
+        let output = format_impact_to_string(&results, &root, "MySymbol");
 
         // Must NOT contain old prefix
         assert!(
@@ -2427,7 +2573,7 @@ mod tests {
             confidence: ConfidenceTier::High,
             basis: "direct caller at depth 1".to_string(),
         }];
-        let output = format_impact_to_string(&results, &root);
+        let output = format_impact_to_string(&results, &root, "MySymbol");
 
         assert!(
             output.contains("[HIGH: direct caller at depth 1]"),

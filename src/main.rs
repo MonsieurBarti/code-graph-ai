@@ -11,6 +11,7 @@ mod query;
 #[cfg(feature = "rag")]
 mod rag;
 mod resolver;
+mod setup;
 mod walker;
 mod watcher;
 #[cfg(feature = "web")]
@@ -742,7 +743,7 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
 
-            query::output::format_find_results(&results, &format, &path);
+            query::output::format_find_results(&results, &format, &path, &symbol);
         }
 
         Commands::Stats {
@@ -807,7 +808,7 @@ fn main() -> Result<()> {
                     eprintln!("no references to '{}' found", symbol);
                 }
             } else {
-                query::output::format_refs_results(&results, &format, &path);
+                query::output::format_refs_results(&results, &format, &path, &symbol);
             }
         }
 
@@ -849,7 +850,7 @@ fn main() -> Result<()> {
                 results.retain(|r| file_language_matches(&r.file_path, lang));
             }
 
-            query::output::format_impact_results(&results, &format, &path, tree);
+            query::output::format_impact_results(&results, &format, &path, tree, &symbol);
         }
 
         Commands::Circular {
@@ -1339,6 +1340,10 @@ fn main() -> Result<()> {
                     println!("{}", output);
                 }
             }
+        }
+
+        Commands::Setup { global, uninstall } => {
+            setup::run(global, uninstall)?;
         }
 
         Commands::Rename {

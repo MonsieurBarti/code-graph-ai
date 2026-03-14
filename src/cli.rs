@@ -445,6 +445,20 @@ pub enum Commands {
         format: OutputFormat,
     },
 
+    /// Install Claude Code hooks for transparent code-graph integration.
+    ///
+    /// Installs PreToolUse hooks into .claude/hooks/ and merges hook configuration
+    /// into .claude/settings.json. Cleans up stale MCP configuration automatically.
+    Setup {
+        /// Install hooks globally (~/.claude/) instead of project-level (.claude/).
+        #[arg(long)]
+        global: bool,
+
+        /// Remove code-graph hooks and permissions (reverse of setup).
+        #[arg(long)]
+        uninstall: bool,
+    },
+
     /// Plan a symbol rename: list all files and lines that reference the symbol.
     Rename {
         /// Current symbol name to rename.
