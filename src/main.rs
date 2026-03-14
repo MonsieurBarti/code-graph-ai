@@ -1146,6 +1146,167 @@ async fn main() -> Result<()> {
                 }
             }
         }
+
+        Commands::Structure {
+            path,
+            scope,
+            depth,
+        } => {
+            let graph = build_graph(&path, false)?;
+            let tree =
+                query::structure::file_structure(&graph, &path, scope.as_deref(), depth);
+            let output = query::output::format_structure_to_string(&tree, &path);
+            println!("{}", output);
+        }
+
+        Commands::FileSummary { file, path } => {
+            let graph = build_graph(&path, false)?;
+            match query::file_summary::file_summary(&graph, &path, &file) {
+                Ok(summary) => {
+                    let output = query::output::format_file_summary_to_string(&summary);
+                    println!("{}", output);
+                }
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Imports { file, path } => {
+            let graph = build_graph(&path, false)?;
+            match query::imports::file_imports(&graph, &path, &file) {
+                Ok(entries) => {
+                    let output = query::output::format_imports_to_string(
+                        &entries,
+                        &file.to_string_lossy(),
+                    );
+                    println!("{}", output);
+                }
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::DeadCode { path, scope } => {
+            let graph = build_graph(&path, false)?;
+            let result =
+                query::dead_code::find_dead_code(&graph, &path, scope.as_deref());
+            let output = query::output::format_dead_code_to_string(&result, &path);
+            println!("{}", output);
+        }
+
+        Commands::Diff { path, from, to } => {
+            let graph = build_graph(&path, false)?;
+            match query::diff::compute_diff(&path, &from, to.as_deref(), &graph) {
+                Ok(diff) => {
+                    let output = query::output::format_diff_to_string(&diff);
+                    println!("{}", output);
+                }
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::DiffImpact { base_ref, path } => {
+            let path = std::fs::canonicalize(&path)
+                .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+            // Shell out to git diff --name-only
+            let output = std::process::Command::new("git")
+                .args(["diff", "--name-only", &base_ref])
+                .current_dir(&path)
+                .output()
+                .map_err(|e| anyhow::anyhow!("failed to run git: {}. Ensure git is in PATH.", e))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                anyhow::bail!("git diff failed: {}", stderr);
+            }
+
+            let changed_files: Vec<PathBuf> = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|l| !l.is_empty())
+                .map(|l| path.join(l))
+                .collect();
+
+            if changed_files.is_empty() {
+                println!("No changed files found relative to '{}'.", base_ref);
+            } else {
+                let graph = build_graph(&path, false)?;
+                let config = CodeGraphConfig::load(&path);
+                let results = query::impact::diff_impact(
+                    &graph,
+                    &changed_files,
+                    &path,
+                    config.impact.high_threshold,
+                    config.impact.medium_threshold,
+                );
+                let formatted = query::output::format_diff_impact_to_string(&results, &path);
+                print!("{}", formatted);
+            }
+        }
+
+        Commands::Decorators {
+            pattern,
+            path,
+            language,
+            framework,
+        } => {
+            let graph = build_graph(&path, false)?;
+            let results = query::decorators::find_by_decorator(
+                &graph,
+                &pattern,
+                language.as_deref(),
+                framework.as_deref(),
+                100, // default limit
+            )?;
+            let output =
+                query::output::format_decorator_to_string(&results, &path, 100);
+            println!("{}", output);
+        }
+
+        Commands::Clusters { path, scope } => {
+            let graph = build_graph(&path, false)?;
+            let results = query::clusters::find_clusters(
+                &graph,
+                &path,
+                scope.as_deref(),
+                100, // default max_iterations for Louvain
+            );
+            let output = query::output::format_clusters_to_string(&results);
+            println!("{}", output);
+        }
+
+        Commands::Flow {
+            entry,
+            target,
+            path,
+            max_paths,
+            max_depth,
+        } => {
+            let graph = build_graph(&path, false)?;
+            let result =
+                query::flow::trace_flow(&graph, &entry, &target, max_paths, max_depth);
+            let output =
+                query::output::format_flow_to_string(&result, &entry, &target);
+            println!("{}", output);
+        }
+
+        Commands::Rename {
+            symbol,
+            new_name,
+            path,
+        } => {
+            let graph = build_graph(&path, false)?;
+            let items = query::rename::plan_rename(&graph, &symbol, &new_name, &path);
+            let output = query::output::format_rename_to_string(&items, &path);
+            println!("{}", output);
+        }
     }
 
     Ok(())

@@ -343,6 +343,139 @@ pub enum Commands {
         #[arg(long, value_delimiter = ',')]
         exclude: Vec<String>,
     },
+
+    /// Show file/directory tree structure with symbol outlines.
+    Structure {
+        /// Path to the project root to index and query.
+        path: PathBuf,
+
+        /// Scope output to a specific directory (relative to project root).
+        #[arg(long)]
+        scope: Option<PathBuf>,
+
+        /// Maximum directory depth to display (default: 3).
+        #[arg(long, default_value_t = 3)]
+        depth: usize,
+    },
+
+    /// Summarize a single file: role, symbols, imports, dependents.
+    #[command(name = "file-summary")]
+    FileSummary {
+        /// Path to the file to summarize (relative to project root).
+        file: PathBuf,
+
+        /// Path to the project root to index and query.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// List all imports of a file, categorized by type.
+    Imports {
+        /// Path to the file to inspect (relative to project root).
+        file: PathBuf,
+
+        /// Path to the project root to index and query.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Detect dead code: unreachable files and unreferenced symbols.
+    #[command(name = "dead-code")]
+    DeadCode {
+        /// Path to the project root to index and query.
+        path: PathBuf,
+
+        /// Scope analysis to a specific directory (relative to project root).
+        #[arg(long)]
+        scope: Option<PathBuf>,
+    },
+
+    /// Compare two graph snapshots and show structural differences.
+    Diff {
+        /// Path to the project root.
+        path: PathBuf,
+
+        /// Name of the base snapshot.
+        #[arg(long)]
+        from: String,
+
+        /// Name of the target snapshot (defaults to current graph state).
+        #[arg(long)]
+        to: Option<String>,
+    },
+
+    /// Analyze impact of git-changed files on the dependency graph.
+    #[command(name = "diff-impact")]
+    DiffImpact {
+        /// Git ref to diff against (e.g. HEAD~1, main, origin/main).
+        base_ref: String,
+
+        /// Path to the project root to index and query.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Find symbols decorated with a specific decorator/attribute pattern.
+    Decorators {
+        /// Decorator/attribute name or regex pattern (e.g. "@Component", "derive(Debug)").
+        pattern: String,
+
+        /// Path to the project root to index and query.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+
+        /// Filter by language (rust/rs, typescript/ts, javascript/js, python/py).
+        #[arg(long = "language", alias = "lang")]
+        language: Option<String>,
+
+        /// Filter by framework (e.g. nestjs, angular, fastapi).
+        #[arg(long)]
+        framework: Option<String>,
+    },
+
+    /// Discover functional clusters (groups of related symbols) via graph analysis.
+    Clusters {
+        /// Path to the project root to index and query.
+        path: PathBuf,
+
+        /// Scope analysis to a specific directory (relative to project root).
+        #[arg(long)]
+        scope: Option<PathBuf>,
+    },
+
+    /// Trace data/call flow paths between two symbols.
+    Flow {
+        /// Entry (source) symbol name.
+        entry: String,
+
+        /// Target (destination) symbol name.
+        target: String,
+
+        /// Path to the project root to index and query.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+
+        /// Maximum number of paths to return (default: 3).
+        #[arg(long, default_value_t = 3)]
+        max_paths: usize,
+
+        /// Maximum search depth in hops (default: 20).
+        #[arg(long, default_value_t = 20)]
+        max_depth: usize,
+    },
+
+    /// Plan a symbol rename: list all files and lines that reference the symbol.
+    Rename {
+        /// Current symbol name to rename.
+        symbol: String,
+
+        /// New name for the symbol.
+        new_name: String,
+
+        /// Path to the project root to index and query.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
 }
 
 #[cfg(test)]
