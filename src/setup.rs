@@ -49,9 +49,15 @@ fn run_install(base_dir: &Path, global: bool) -> Result<()> {
     for &hook_file in HOOK_FILES {
         let dest = hooks_dir.join(hook_file);
         let source = find_hook_source(hook_file)?;
-        fs::copy(&source, &dest).with_context(|| {
-            format!("Failed to copy {} to {}", source.display(), dest.display())
-        })?;
+        // Skip copy if source and destination are the same file — fs::copy
+        // would truncate the file before reading it.
+        let same_file =
+            source.canonicalize().ok() == dest.canonicalize().ok() && source.canonicalize().is_ok();
+        if !same_file {
+            fs::copy(&source, &dest).with_context(|| {
+                format!("Failed to copy {} to {}", source.display(), dest.display())
+            })?;
+        }
         set_executable(&dest)?;
         hooks_installed.push(hook_file);
     }
