@@ -550,6 +550,10 @@ fn dispatch_query(
             dispatch_dead_code(graph, project_root, scope.as_deref())
         }
 
+        DaemonRequest::Clones { scope, min_group } => {
+            dispatch_clones(graph, project_root, scope.as_deref(), *min_group)
+        }
+
         DaemonRequest::Export {
             format,
             granularity,
@@ -831,6 +835,19 @@ fn dispatch_dead_code(
     scope: Option<&Path>,
 ) -> DaemonResponse {
     let result = crate::query::dead_code::find_dead_code(graph, project_root, scope);
+    match serde_json::to_value(&result) {
+        Ok(data) => DaemonResponse::success(data),
+        Err(e) => DaemonResponse::error(format!("serialization error: {}", e)),
+    }
+}
+
+fn dispatch_clones(
+    graph: &CodeGraph,
+    project_root: &Path,
+    scope: Option<&Path>,
+    min_group: usize,
+) -> DaemonResponse {
+    let result = crate::query::clones::find_clones(graph, project_root, scope, min_group);
     match serde_json::to_value(&result) {
         Ok(data) => DaemonResponse::success(data),
         Err(e) => DaemonResponse::error(format!("serialization error: {}", e)),

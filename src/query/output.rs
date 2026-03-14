@@ -2371,6 +2371,170 @@ pub fn format_dead_code_to_string(
 }
 
 // ---------------------------------------------------------------------------
+// Clone detection output
+// ---------------------------------------------------------------------------
+
+/// Format clone detection results as a compact string for CLI output (token-optimized).
+///
+/// Example:
+/// ```text
+/// Clone Groups (3 groups, 8 symbols analyzed):
+/// group#1 (3 members): kind=function body=10 out=0 in=1 decorators=0
+///   function process_data src/utils.rs:1 body=10
+///   function transform_data src/helpers.rs:5 body=10
+///   function convert_data src/convert.rs:1 body=10
+/// ```
+pub fn format_clones_to_string(
+    result: &crate::query::clones::CloneGroupResult,
+    root: &Path,
+) -> String {
+    let mut lines: Vec<String> = Vec::new();
+
+    lines.push(format!(
+        "Clone Groups ({} groups, {} symbols analyzed):",
+        result.groups.len(),
+        result.total_symbols_analyzed
+    ));
+
+    if result.groups.is_empty() {
+        lines.push("  none detected".to_string());
+    } else {
+        for (i, group) in result.groups.iter().enumerate() {
+            lines.push(format!(
+                "group#{} ({} members): {}",
+                i + 1,
+                group.members.len(),
+                group.signature
+            ));
+            for m in &group.members {
+                let rel = m.file.strip_prefix(root).unwrap_or(&m.file);
+                lines.push(format!(
+                    "  {} {} {}:{} body={}",
+                    m.kind,
+                    m.name,
+                    rel.display(),
+                    m.line,
+                    m.body_size,
+                ));
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// Format clone detection results as a human-readable table for CLI output.
+///
+/// Example:
+/// ```text
+/// Clone Groups (2 groups, 10 symbols analyzed)
+///
+/// Group #1 (3 members) -- kind=function body=10 out=0 in=1 decorators=0
+///   KIND       NAME             FILE                LINE  BODY
+///   function   process_data     src/utils.rs          1    10
+///   function   transform_data   src/helpers.rs        5    10
+/// ```
+pub fn format_clones_table(result: &crate::query::clones::CloneGroupResult, root: &Path) -> String {
+    let mut lines: Vec<String> = Vec::new();
+
+    let use_color = std::io::IsTerminal::is_terminal(&std::io::stdout());
+
+    if use_color {
+        lines.push(format!(
+            "\x1b[1mClone Groups ({} groups, {} symbols analyzed)\x1b[0m",
+            result.groups.len(),
+            result.total_symbols_analyzed
+        ));
+    } else {
+        lines.push(format!(
+            "Clone Groups ({} groups, {} symbols analyzed)",
+            result.groups.len(),
+            result.total_symbols_analyzed
+        ));
+    }
+
+    if result.groups.is_empty() {
+        lines.push(String::new());
+        lines.push("  No structural clones detected.".to_string());
+    } else {
+        for (i, group) in result.groups.iter().enumerate() {
+            lines.push(String::new());
+            if use_color {
+                lines.push(format!(
+                    "\x1b[1mGroup #{} ({} members)\x1b[0m -- {}",
+                    i + 1,
+                    group.members.len(),
+                    group.signature
+                ));
+            } else {
+                lines.push(format!(
+                    "Group #{} ({} members) -- {}",
+                    i + 1,
+                    group.members.len(),
+                    group.signature
+                ));
+            }
+
+            // Compute column widths
+            let (name_w, file_w) = group.members.iter().fold((4usize, 4usize), |(nw, fw), m| {
+                let file_len = m
+                    .file
+                    .strip_prefix(root)
+                    .unwrap_or(&m.file)
+                    .to_string_lossy()
+                    .len();
+                (nw.max(m.name.len()), fw.max(file_len))
+            });
+
+            if use_color {
+                lines.push(format!(
+                    "  \x1b[1m{:<12}  {:<name_w$}  {:<file_w$}  {:>4}  {:>4}\x1b[0m",
+                    "KIND",
+                    "NAME",
+                    "FILE",
+                    "LINE",
+                    "BODY",
+                    name_w = name_w,
+                    file_w = file_w,
+                ));
+            } else {
+                lines.push(format!(
+                    "  {:<12}  {:<name_w$}  {:<file_w$}  {:>4}  {:>4}",
+                    "KIND",
+                    "NAME",
+                    "FILE",
+                    "LINE",
+                    "BODY",
+                    name_w = name_w,
+                    file_w = file_w,
+                ));
+            }
+
+            lines.push(format!(
+                "  {}",
+                "-".repeat(12 + 2 + name_w + 2 + file_w + 2 + 4 + 2 + 4)
+            ));
+
+            for m in &group.members {
+                let rel = m.file.strip_prefix(root).unwrap_or(&m.file);
+                lines.push(format!(
+                    "  {:<12}  {:<name_w$}  {:<file_w$}  {:>4}  {:>4}",
+                    m.kind,
+                    m.name,
+                    rel.display(),
+                    m.line,
+                    m.body_size,
+                    name_w = name_w,
+                    file_w = file_w,
+                ));
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+
+// ---------------------------------------------------------------------------
 // Diff output
 // ---------------------------------------------------------------------------
 

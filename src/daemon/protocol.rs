@@ -56,6 +56,11 @@ pub enum DaemonRequest {
     DeadCode {
         scope: Option<PathBuf>,
     },
+    Clones {
+        scope: Option<PathBuf>,
+        #[serde(default = "default_min_group")]
+        min_group: usize,
+    },
     Export {
         format: String,
         granularity: String,
@@ -115,6 +120,9 @@ pub enum DaemonRequest {
     },
 }
 
+fn default_min_group() -> usize {
+    2
+}
 fn default_depth() -> usize {
     1
 }
@@ -277,6 +285,10 @@ mod tests {
             DaemonRequest::Stats { language: None },
             DaemonRequest::Circular { language: None },
             DaemonRequest::DeadCode { scope: None },
+            DaemonRequest::Clones {
+                scope: None,
+                min_group: 2,
+            },
             DaemonRequest::Export {
                 format: "dot".into(),
                 granularity: "file".into(),
@@ -332,7 +344,7 @@ mod tests {
             let json = serde_json::to_string(variant).unwrap();
             let _parsed: DaemonRequest = serde_json::from_str(&json).unwrap();
         }
-        // 22 variants total (Ping + Shutdown + 20 query types)
-        assert_eq!(variants.len(), 22);
+        // 23 variants total (Ping + Shutdown + 21 query types)
+        assert_eq!(variants.len(), 23);
     }
 }
