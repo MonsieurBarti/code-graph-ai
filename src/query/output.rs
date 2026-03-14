@@ -3039,6 +3039,53 @@ pub fn format_rename_to_string(items: &[RenameItem], root: &Path) -> String {
     lines.join("\n")
 }
 
+/// Format diff-impact results as a human-readable string.
+///
+/// Extracted from mcp/server.rs for reuse in CLI subcommands.
+///
+/// Output format:
+/// ```text
+/// ## src/foo.rs [HIGH] (5 affected files)
+///   src/bar.rs (depth 1) [high: direct import]
+///   src/baz.rs (depth 2) [medium: transitive]
+/// ```
+pub fn format_diff_impact_to_string(
+    results: &[crate::query::impact::DiffImpactResult],
+    root: &Path,
+) -> String {
+    use std::fmt::Write;
+    let mut buf = String::new();
+
+    for r in results {
+        let rel = r.changed_file.strip_prefix(root).unwrap_or(&r.changed_file);
+        writeln!(
+            buf,
+            "## {} [{}] ({} affected files)",
+            rel.display(),
+            r.risk,
+            r.affected.len()
+        )
+        .unwrap();
+        for a in &r.affected {
+            let arel = a.file_path.strip_prefix(root).unwrap_or(&a.file_path);
+            writeln!(
+                buf,
+                "  {} (depth {}) [{}: {}]",
+                arel.display(),
+                a.depth,
+                a.confidence,
+                a.basis
+            )
+            .unwrap();
+        }
+    }
+
+    if buf.is_empty() {
+        buf.push_str("No impact detected from changed files.");
+    }
+    buf
+}
+
 #[cfg(test)]
 mod formatter_tests {
     use super::*;
