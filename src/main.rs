@@ -11,6 +11,7 @@ mod query;
 #[cfg(feature = "rag")]
 mod rag;
 mod resolver;
+mod setup;
 mod walker;
 mod watcher;
 #[cfg(feature = "web")]
@@ -1339,6 +1340,10 @@ fn main() -> Result<()> {
                     println!("{}", output);
                 }
             }
+        }
+
+        Commands::Setup { global, uninstall } => {
+            setup::run(global, uninstall)?;
         }
 
         Commands::Rename {
