@@ -2461,7 +2461,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mcp_find_format_no_prefix() {
+    fn test_find_compact_format_no_prefix() {
         let root = PathBuf::from("/project");
         let results = vec![make_find_result(
             "MyFunc",
@@ -2489,7 +2489,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mcp_refs_format_no_prefix() {
+    fn test_refs_compact_format_no_prefix() {
         let root = PathBuf::from("/project");
         let results = vec![
             RefResult {
@@ -2529,7 +2529,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mcp_impact_format_no_prefix() {
+    fn test_impact_compact_format_no_prefix() {
         use crate::query::impact::ConfidenceTier;
 
         let root = PathBuf::from("/project");
@@ -2591,7 +2591,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mcp_circular_format_no_prefix() {
+    fn test_circular_compact_format_no_prefix() {
         let root = PathBuf::from("/project");
         let cycles = vec![CircularDep {
             files: vec![
@@ -2620,7 +2620,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mcp_context_format_no_delimiters() {
+    fn test_context_compact_format_no_delimiters() {
         let root = PathBuf::from("/project");
         let def = make_find_result("MyStruct", "/project/src/lib.rs", 5, SymbolKind::Struct);
         let caller = CallInfo {

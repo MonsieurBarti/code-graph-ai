@@ -372,8 +372,7 @@ pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
     Ok(graph)
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -1059,7 +1058,7 @@ async fn main() -> Result<()> {
             let use_ollama = ollama;
             #[cfg(not(feature = "rag"))]
             let use_ollama = false;
-            web::serve(root, port, use_ollama).await?;
+            tokio::runtime::Runtime::new()?.block_on(web::serve(root, port, use_ollama))?;
         }
 
         Commands::Watch { path } => {
@@ -1078,7 +1077,7 @@ async fn main() -> Result<()> {
             }
 
             // Start watcher
-            let (handle, mut rx) = watcher::start_watcher(&path)
+            let (handle, rx) = watcher::start_watcher(&path)
                 .map_err(|e| anyhow::anyhow!("failed to start watcher: {}", e))?;
 
             // Keep handle alive — dropping it stops the watcher
@@ -1087,7 +1086,7 @@ async fn main() -> Result<()> {
             eprintln!("Watching for changes... (press Ctrl+C to stop)");
 
             // Process events — terminal status output goes to stderr (Phase 1 convention)
-            while let Some(event) = rx.recv().await {
+            while let Ok(event) = rx.recv() {
                 match &event {
                     watcher::event::WatchEvent::Modified(p) => {
                         let start = std::time::Instant::now();

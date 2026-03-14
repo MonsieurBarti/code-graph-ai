@@ -251,11 +251,26 @@ pub async fn serve(root: PathBuf, port: u16, ollama: bool) -> anyhow::Result<()>
     #[cfg(feature = "rag")]
     let watcher_embedding_engine = Arc::clone(&state.embedding_engine);
 
-    tokio::spawn(async move {
-        let result = crate::watcher::start_watcher(&watcher_root);
-        match result {
-            Ok((_handle, mut rx)) => {
-                while let Some(event) = rx.recv().await {
+    // Start the file watcher, bridging from std channel to tokio channel
+    match crate::watcher::start_watcher(&watcher_root) {
+        Ok((_handle, std_rx)) => {
+            // Bridge: spawn_blocking thread reads from std channel, forwards to tokio channel
+            let (bridge_tx, mut bridge_rx) =
+                tokio::sync::mpsc::channel::<crate::watcher::event::WatchEvent>(256);
+            tokio::task::spawn_blocking(move || {
+                while let Ok(event) = std_rx.recv() {
+                    if bridge_tx.blocking_send(event).is_err() {
+                        return; // receiver dropped
+                    }
+                }
+            });
+
+            // Keep watcher handle alive for the duration of the server
+            let _watcher_handle = _handle;
+
+            // Process events from tokio channel (async-safe)
+            tokio::spawn(async move {
+                while let Some(event) = bridge_rx.recv().await {
                     // Get the file path from the event before the graph write lock takes it.
                     #[cfg(feature = "rag")]
                     let event_file_path: Option<String> = match &event {
@@ -307,12 +322,12 @@ pub async fn serve(root: PathBuf, port: u16, ollama: bool) -> anyhow::Result<()>
                     // Ignore send errors — no clients connected is fine.
                     let _ = watcher_tx.send(msg);
                 }
-            }
-            Err(e) => {
-                eprintln!("[watcher] failed to start: {}", e);
-            }
+            });
         }
-    });
+        Err(e) => {
+            eprintln!("[watcher] failed to start: {}", e);
+        }
+    }
 
     let router = build_router(state);
     let addr = format!("0.0.0.0:{port}");

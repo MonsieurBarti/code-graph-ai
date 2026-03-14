@@ -2,13 +2,12 @@ pub mod event;
 pub mod incremental;
 
 use std::path::Path;
+use std::sync::mpsc as std_mpsc;
 use std::time::Duration;
 
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use notify::RecursiveMode;
 use notify_debouncer_mini::{DebounceEventResult, new_debouncer};
-use tokio::sync::mpsc as tokio_mpsc;
-use tokio::task::JoinHandle;
 
 use event::WatchEvent;
 
@@ -16,8 +15,8 @@ use event::WatchEvent;
 pub struct WatcherHandle {
     /// Keep alive: dropping the debouncer stops the OS watcher.
     _debouncer: notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>,
-    /// The bridge task forwarding events from std channel to tokio channel.
-    _bridge_task: JoinHandle<()>,
+    /// The bridge thread forwarding events from notify channel to classified events.
+    _bridge_thread: std::thread::JoinHandle<()>,
 }
 
 /// File extensions we care about for incremental re-index.
@@ -62,7 +61,7 @@ fn build_gitignore_matcher(project_root: &Path) -> Gitignore {
 
 /// Start a debounced file watcher on `watch_root`.
 ///
-/// Returns a `WatcherHandle` (must be kept alive) and a tokio mpsc receiver
+/// Returns a `WatcherHandle` (must be kept alive) and a std mpsc receiver
 /// that yields classified `WatchEvent`s.
 ///
 /// The watcher:
@@ -72,12 +71,12 @@ fn build_gitignore_matcher(project_root: &Path) -> Gitignore {
 /// - Classifies events into Modified/Deleted/ConfigChanged/CrateRootChanged
 pub fn start_watcher(
     watch_root: &Path,
-) -> anyhow::Result<(WatcherHandle, tokio_mpsc::Receiver<WatchEvent>)> {
-    let (std_tx, std_rx) = std::sync::mpsc::channel::<DebounceEventResult>();
+) -> anyhow::Result<(WatcherHandle, std_mpsc::Receiver<WatchEvent>)> {
+    let (notify_tx, notify_rx) = std::sync::mpsc::channel::<DebounceEventResult>();
 
     // Create debounced watcher with 75ms debounce
     let mut debouncer = new_debouncer(Duration::from_millis(75), move |res| {
-        let _ = std_tx.send(res);
+        let _ = notify_tx.send(res);
     })?;
     debouncer
         .watcher()
@@ -86,19 +85,19 @@ pub fn start_watcher(
     // Build gitignore matcher — same rules as walker::walk_project
     let gitignore = build_gitignore_matcher(watch_root);
 
-    // Tokio channel for classified events
-    let (tokio_tx, tokio_rx) = tokio_mpsc::channel::<WatchEvent>(256);
+    // Channel for classified events
+    let (event_tx, event_rx) = std_mpsc::channel::<WatchEvent>();
 
-    // Bridge: spawn_blocking to receive from std channel, classify, forward to tokio
+    // Bridge thread: receive from notify channel, classify, forward as WatchEvent
     let root = watch_root.to_path_buf();
-    let bridge_task = tokio::task::spawn_blocking(move || {
-        while let Ok(result) = std_rx.recv() {
+    let bridge_thread = std::thread::spawn(move || {
+        while let Ok(result) = notify_rx.recv() {
             match result {
                 Ok(events) => {
                     for debounced_event in events {
                         let path = debounced_event.path;
                         if let Some(watch_event) = classify_event(&path, &root, &gitignore)
-                            && tokio_tx.blocking_send(watch_event).is_err()
+                            && event_tx.send(watch_event).is_err()
                         {
                             return; // receiver dropped, shutdown
                         }
@@ -114,9 +113,9 @@ pub fn start_watcher(
     Ok((
         WatcherHandle {
             _debouncer: debouncer,
-            _bridge_task: bridge_task,
+            _bridge_thread: bridge_thread,
         },
-        tokio_rx,
+        event_rx,
     ))
 }
 
