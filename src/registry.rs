@@ -520,4 +520,35 @@ mod tests {
         assert_eq!(entries[0].alias, "alpha");
         assert_eq!(entries[1].alias, "beta");
     }
+
+    // ── integration: add, list, show, remove round-trip ─────────────────
+
+    #[test]
+    fn integration_add_list_show_remove() {
+        let tmp = TempDir::new().unwrap();
+        let reg = test_registry(&tmp);
+        let dir = create_project_dir(&tmp, "my-app");
+
+        // Add
+        let entry = reg.add("my-app", &dir).unwrap();
+        assert_eq!(entry.alias, "my-app");
+
+        // List includes it
+        let entries = reg.list();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].alias, "my-app");
+
+        // Show returns it
+        let found = reg.get("my-app").unwrap();
+        assert_eq!(found.path, dir);
+
+        // Remove
+        reg.remove("my-app").unwrap();
+
+        // List is empty
+        assert!(reg.list().is_empty());
+
+        // Get returns None
+        assert!(reg.get("my-app").is_none());
+    }
 }
