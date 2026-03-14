@@ -7,11 +7,11 @@ use anyhow::{Context, Result};
 const EMBEDDED_HOOKS: &[(&str, &str)] = &[
     (
         "codegraph-pretool-bash.sh",
-        include_str!("../.claude/hooks/codegraph-pretool-bash.sh"),
+        include_str!("hooks/codegraph-pretool-bash.sh"),
     ),
     (
         "codegraph-pretool-search.sh",
-        include_str!("../.claude/hooks/codegraph-pretool-search.sh"),
+        include_str!("hooks/codegraph-pretool-search.sh"),
     ),
 ];
 
