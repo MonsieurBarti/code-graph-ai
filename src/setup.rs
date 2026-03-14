@@ -3,8 +3,17 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-/// Hook script filenames that code-graph manages.
-const HOOK_FILES: &[&str] = &["codegraph-pretool-bash.sh", "codegraph-pretool-search.sh"];
+/// Hook scripts embedded at compile time so `code-graph setup` works after `cargo install`.
+const EMBEDDED_HOOKS: &[(&str, &str)] = &[
+    (
+        "codegraph-pretool-bash.sh",
+        include_str!("hooks/codegraph-pretool-bash.sh"),
+    ),
+    (
+        "codegraph-pretool-search.sh",
+        include_str!("hooks/codegraph-pretool-search.sh"),
+    ),
+];
 
 /// The hook matcher entries that code-graph adds to settings.json.
 const BASH_HOOK_PATH: &str = ".claude/hooks/codegraph-pretool-bash.sh";
@@ -44,20 +53,12 @@ fn run_install(base_dir: &Path, global: bool) -> Result<()> {
     fs::create_dir_all(&hooks_dir)
         .with_context(|| format!("Failed to create hooks directory: {}", hooks_dir.display()))?;
 
-    // 1. Copy hook scripts
+    // 1. Write embedded hook scripts to disk
     let mut hooks_installed = Vec::new();
-    for &hook_file in HOOK_FILES {
+    for &(hook_file, content) in EMBEDDED_HOOKS {
         let dest = hooks_dir.join(hook_file);
-        let source = find_hook_source(hook_file)?;
-        // Skip copy if source and destination are the same file — fs::copy
-        // would truncate the file before reading it.
-        let same_file =
-            source.canonicalize().ok() == dest.canonicalize().ok() && source.canonicalize().is_ok();
-        if !same_file {
-            fs::copy(&source, &dest).with_context(|| {
-                format!("Failed to copy {} to {}", source.display(), dest.display())
-            })?;
-        }
+        fs::write(&dest, content)
+            .with_context(|| format!("Failed to write hook script: {}", dest.display()))?;
         set_executable(&dest)?;
         hooks_installed.push(hook_file);
     }
@@ -106,7 +107,7 @@ fn run_uninstall(base_dir: &Path) -> Result<()> {
 
     // 1. Remove hook scripts
     let mut removed = Vec::new();
-    for &hook_file in HOOK_FILES {
+    for &(hook_file, _) in EMBEDDED_HOOKS {
         let path = hooks_dir.join(hook_file);
         if path.exists() {
             fs::remove_file(&path)
@@ -132,34 +133,6 @@ fn run_uninstall(base_dir: &Path) -> Result<()> {
     }
 
     Ok(())
-}
-
-/// Find the source path for a hook script.
-///
-/// When running from the project repo, the scripts are in `.claude/hooks/`.
-/// When running as an installed binary, we embed them or look relative to the binary.
-fn find_hook_source(hook_file: &str) -> Result<PathBuf> {
-    // Try project-local first (running from the code-graph repo itself)
-    let local = PathBuf::from(".claude/hooks").join(hook_file);
-    if local.exists() {
-        return Ok(local);
-    }
-
-    // Try next to the binary
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(exe_dir) = exe.parent()
-    {
-        let beside_binary = exe_dir.join("hooks").join(hook_file);
-        if beside_binary.exists() {
-            return Ok(beside_binary);
-        }
-    }
-
-    anyhow::bail!(
-        "Hook script '{}' not found. Run setup from the code-graph project directory, \
-         or ensure hook scripts are installed alongside the binary.",
-        hook_file
-    );
 }
 
 /// Set the executable bit on a file (Unix).

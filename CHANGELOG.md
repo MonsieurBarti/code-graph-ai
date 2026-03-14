@@ -2,6 +2,11 @@
 
 All notable changes to code-graph are documented in this file.
 
+## v3.0.1 (2026-03-14)
+
+**Fixed:**
+- `code-graph setup` now works after `cargo install` — hook scripts are embedded in the binary via `include_str!()` instead of being read from the filesystem
+
 ## v3.0.0 (2026-03-14)
 
 **Added:**
