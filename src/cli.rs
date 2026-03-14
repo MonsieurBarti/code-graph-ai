@@ -866,7 +866,12 @@ mod tests {
     fn test_find_with_project_flag() {
         let cli = Cli::parse_from(["code-graph", "find", "MySymbol", "--project", "myproj"]);
         match cli.command {
-            Commands::Find { symbol, project, path, .. } => {
+            Commands::Find {
+                symbol,
+                project,
+                path,
+                ..
+            } => {
                 assert_eq!(symbol, "MySymbol");
                 assert_eq!(project, Some("myproj".to_string()));
                 assert!(path.is_none());

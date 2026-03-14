@@ -453,10 +453,7 @@ mod tests {
         // depending on missing query params, but never 404).
         let routes = ["/api/graph", "/api/file", "/api/search", "/api/stats"];
         for path in routes {
-            let req = Request::builder()
-                .uri(path)
-                .body(Body::empty())
-                .unwrap();
+            let req = Request::builder().uri(path).body(Body::empty()).unwrap();
             let resp = app.clone().oneshot(req).await.unwrap();
             assert_ne!(
                 resp.status(),
@@ -467,10 +464,7 @@ mod tests {
 
         // /ws requires a WebSocket upgrade — sending a plain GET should return
         // a non-404 status (axum returns 400 or 405 for non-upgrade requests).
-        let req = Request::builder()
-            .uri("/ws")
-            .body(Body::empty())
-            .unwrap();
+        let req = Request::builder().uri("/ws").body(Body::empty()).unwrap();
         let resp = app.clone().oneshot(req).await.unwrap();
         assert_ne!(
             resp.status(),
@@ -575,9 +569,9 @@ mod tests {
         // Build forbidden strings at runtime so they don't appear as literals in
         // this source file (which would cause the check to flag itself).
         let forbidden: Vec<String> = vec![
-            format!("r{}cp", "m"),       // "rmcp"
-            format!("{}Server", "Mcp"),   // "McpServer"
-            ["m", "c", "p"].join(""),     // "mcp"
+            format!("r{}cp", "m"),      // "rmcp"
+            format!("{}Server", "Mcp"), // "McpServer"
+            ["m", "c", "p"].join(""),   // "mcp"
         ];
         for entry in walkdir(&web_dir) {
             // Skip test modules — only production code matters.

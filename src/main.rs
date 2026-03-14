@@ -1352,7 +1352,12 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::FileSummary { file, path, project, format } => {
+        Commands::FileSummary {
+            file,
+            path,
+            project,
+            format,
+        } => {
             let path = resolve_project_or_path(project, path)?;
 
             if let Some(resp) = try_daemon_query(
@@ -1388,7 +1393,12 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::Imports { file, path, project, format } => {
+        Commands::Imports {
+            file,
+            path,
+            project,
+            format,
+        } => {
             let path = resolve_project_or_path(project, path)?;
 
             if let Some(resp) = try_daemon_query(
@@ -1713,44 +1723,42 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::Project { action } => {
-            match action {
-                cli::ProjectAction::Add { alias, path } => {
-                    let reg = registry::ProjectRegistry::new();
-                    let entry = reg.add(&alias, &path)?;
-                    println!("Registered {} -> {}", entry.alias, entry.path.display());
-                }
-                cli::ProjectAction::Remove { alias } => {
-                    let reg = registry::ProjectRegistry::new();
-                    reg.remove(&alias)?;
-                    println!("Removed {}", alias);
-                }
-                cli::ProjectAction::List => {
-                    let reg = registry::ProjectRegistry::new();
-                    let entries = reg.list();
-                    if entries.is_empty() {
-                        println!("No projects registered");
-                    } else {
-                        for entry in &entries {
-                            println!("  {:<20} {}", entry.alias, entry.path.display());
-                        }
-                    }
-                }
-                cli::ProjectAction::Show { alias } => {
-                    let reg = registry::ProjectRegistry::new();
-                    match reg.get(&alias) {
-                        Some(entry) => {
-                            println!("Alias:    {}", entry.alias);
-                            println!("Path:     {}", entry.path.display());
-                            println!("Added at: {}", format_epoch_secs(entry.added_at));
-                        }
-                        None => {
-                            anyhow::bail!("project alias '{}' not found", alias);
-                        }
+        Commands::Project { action } => match action {
+            cli::ProjectAction::Add { alias, path } => {
+                let reg = registry::ProjectRegistry::new();
+                let entry = reg.add(&alias, &path)?;
+                println!("Registered {} -> {}", entry.alias, entry.path.display());
+            }
+            cli::ProjectAction::Remove { alias } => {
+                let reg = registry::ProjectRegistry::new();
+                reg.remove(&alias)?;
+                println!("Removed {}", alias);
+            }
+            cli::ProjectAction::List => {
+                let reg = registry::ProjectRegistry::new();
+                let entries = reg.list();
+                if entries.is_empty() {
+                    println!("No projects registered");
+                } else {
+                    for entry in &entries {
+                        println!("  {:<20} {}", entry.alias, entry.path.display());
                     }
                 }
             }
-        }
+            cli::ProjectAction::Show { alias } => {
+                let reg = registry::ProjectRegistry::new();
+                match reg.get(&alias) {
+                    Some(entry) => {
+                        println!("Alias:    {}", entry.alias);
+                        println!("Path:     {}", entry.path.display());
+                        println!("Added at: {}", format_epoch_secs(entry.added_at));
+                    }
+                    None => {
+                        anyhow::bail!("project alias '{}' not found", alias);
+                    }
+                }
+            }
+        },
 
         Commands::Setup { global, uninstall } => {
             setup::run(global, uninstall)?;
