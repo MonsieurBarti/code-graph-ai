@@ -6,7 +6,7 @@
 
 High-performance code intelligence engine that indexes TypeScript, JavaScript, Rust, Python, and Go codebases into a queryable dependency graph. Built in Rust, designed for AI agents.
 
-Gives [Claude Code](https://docs.anthropic.com/en/docs/claude-code) direct access to your codebase's structure via [MCP](https://modelcontextprotocol.io/) -- no source file reading needed. Twenty MCP tools cover symbol search, reference tracing, blast radius analysis, circular dependency detection, dead code detection, decorator search, clustering, call chain tracing, rename planning, diff impact, graph export, batch queries, snapshot/diff, and multi-project management.
+Gives [Claude Code](https://docs.anthropic.com/en/docs/claude-code) direct access to your codebase's structure via hooks-based integration -- no source file reading needed. One `code-graph setup` command installs transparent PreToolUse hooks that auto-approve CLI calls and enrich search queries with structural graph data.
 
 ## Features
 
@@ -16,25 +16,24 @@ Gives [Claude Code](https://docs.anthropic.com/en/docs/claude-code) direct acces
 - **Decorator/attribute extraction** -- unified across all 5 languages with framework inference (NestJS, Flask, FastAPI, Actix, Angular)
 - **Dependency graph** -- file-level and symbol-level edges: imports, calls, extends, implements, type references, has-decorator, child-of, embeds
 - **Import resolution** -- TypeScript path aliases (tsconfig.json), barrel files (index.ts re-exports), monorepo workspaces, Rust crate-root module resolution with Cargo workspace discovery, Python package resolution, Go module resolution
-- **Twenty query types** -- find definitions, trace references, blast radius analysis, circular dependency detection, 360-degree symbol context, project statistics, graph export, file structure, file summaries, import analysis, batch queries, dead code detection, graph diff, project registration, project listing, decorator search, clustering, call chain tracing, rename planning, diff impact
+- **24 CLI commands** -- find definitions, trace references, blast radius analysis, circular dependency detection, 360-degree symbol context, project statistics, graph export, file structure, file summaries, import analysis, dead code detection, graph diff, decorator search, clustering, call chain tracing, rename planning, diff impact, project registry management, daemon control, hooks setup
+- **Hooks-based Claude Code integration** -- `code-graph setup` installs PreToolUse hooks that transparently intercept tool calls, auto-approve CLI invocations, and enrich Grep/Glob searches with structural graph data
+- **Background daemon** -- `code-graph daemon start` launches a persistent background process that watches for file changes and keeps the graph index up to date automatically
+- **Multi-project registry** -- `code-graph project add` registers project aliases for cross-project queries with `--project` flag on any query command
 - **Interactive web UI** -- `code-graph serve` launches an Axum backend + Svelte frontend with WebGL graph visualization, file tree, code panel, search, and real-time WebSocket updates
 - **RAG conversational agent** -- hybrid retrieval (structural graph + vector embeddings), multi-provider LLM support (Claude, OpenAI, Ollama), session memory, source citations
-- **BM25 hybrid search** -- tiered pipeline: exact match → trigram fuzzy → BM25 → Reciprocal Rank Fusion
+- **BM25 hybrid search** -- tiered pipeline: exact match, trigram fuzzy, BM25, Reciprocal Rank Fusion
 - **Confidence scoring** -- High/Medium/Low confidence tiers on impact analysis based on graph distance
-- **MCP server** -- zero-config (defaults to cwd), exposes all queries as tools for Claude Code over stdio, optional `--watch` flag for auto-reindex
-- **Editor auto-setup** -- `code-graph setup` configures MCP for Claude Code, Cursor, and Windsurf
+- **Token-optimized output** -- compact prefix-free format with context-aware next-step hints, designed for AI agent consumption (60-90% savings per session)
 - **Trigram fuzzy matching** -- Jaccard similarity for typo-tolerant symbol search with score-ranked suggestions
-- **Batch queries** -- `batch_query` runs up to 10 queries in a single MCP call with single graph resolution
-- **Dead code detection** -- `find_dead_code` identifies unreferenced symbols with entry-point exclusions
+- **Dead code detection** -- `dead-code` identifies unreferenced symbols with entry-point exclusions
 - **Graph snapshot/diff** -- create named snapshots and compare current graph state against baselines
-- **Multi-project support** -- `register_project` and `list_projects` for managing multiple codebases from a single MCP server
-- **Section-scoped context** -- `get_context` with targeted sections for 60-80% token savings per query
+- **Section-scoped context** -- `context` with targeted sections for 60-80% token savings per query
 - **Graph export** -- DOT and Mermaid formats at symbol, file, or package granularity
 - **Non-parsed file awareness** -- config files, docs, and assets visible in the graph
+- **Project auto-detection** -- most commands auto-detect the project root from the current working directory when no path is given
 - **File watcher** -- incremental re-indexing on file changes with 75ms debounce
 - **Disk cache** -- bincode serialization for instant cold starts
-- **Token-optimized output** -- compact prefix-free format with context-aware next-step hints, designed for AI agent consumption (60-90% savings per session)
-- **[mcp] config section** -- persistent project-level MCP defaults in `code-graph.toml`
 - **Feature flags** -- `--features web` for web UI, `--features rag` for RAG agent
 
 ## Install
@@ -74,29 +73,20 @@ Requires Rust 1.85+ (edition 2024). No runtime dependencies -- tree-sitter gramm
 ## Quick start
 
 ```bash
-# Index a TypeScript/JavaScript project
-code-graph index /path/to/ts-project
+# Set up Claude Code integration (installs hooks)
+code-graph setup
 
-# Index a Rust project
-code-graph index /path/to/rust-project
-
-# Index a Python project
-code-graph index /path/to/python-project
-
-# Index a Go project
-code-graph index /path/to/go-project
+# Index a project
+code-graph index .
 
 # Find a symbol
-code-graph find "UserService" /path/to/project
+code-graph find "UserService" .
 
 # What breaks if I change this?
-code-graph impact "DatabaseConfig" /path/to/project
+code-graph impact "DatabaseConfig" .
 
-# Start MCP server for Claude Code (zero-config, defaults to cwd)
-code-graph mcp
-
-# Start MCP server with auto-reindex on file changes
-code-graph mcp /path/to/project --watch
+# Start the background daemon for live re-indexing
+code-graph daemon start
 
 # Launch the interactive web UI
 code-graph serve
@@ -106,9 +96,6 @@ code-graph export . --format mermaid --granularity package
 
 # Create a named graph snapshot for later comparison
 code-graph snapshot create baseline .
-
-# Auto-configure MCP for your editor
-code-graph setup
 ```
 
 ## CLI reference
@@ -117,19 +104,30 @@ code-graph setup
 Usage: code-graph <COMMAND>
 
 Commands:
-  index     Index a project directory
-  find      Find a symbol's definition (file:line location)
-  refs      Find all references to a symbol across the codebase
-  impact    Show the transitive blast radius of changing a symbol
-  circular  Detect circular dependencies in the import graph
-  stats     Project statistics overview
-  context   360-degree view of a symbol: definition, references, callers, callees
-  mcp       Start an MCP stdio server exposing graph queries as tools
-  watch     Start a file watcher for incremental re-indexing
-  export    Export dependency graph to DOT or Mermaid format
-  snapshot  Create, list, or delete named graph snapshots
-  setup     Auto-configure MCP for Claude Code, Cursor, or Windsurf
-  serve     Launch the interactive web UI (requires --features web)
+  index         Index a project directory
+  find          Find a symbol's definition (file:line location)
+  refs          Find all references to a symbol across the codebase
+  impact        Show the transitive blast radius of changing a symbol
+  circular      Detect circular dependencies in the import graph
+  stats         Project statistics overview
+  context       360-degree view of a symbol: definition, references, callers, callees
+  watch         Start a file watcher for incremental re-indexing
+  export        Export dependency graph to DOT or Mermaid format
+  snapshot      Create, list, or delete named graph snapshots
+  setup         Install Claude Code hooks for transparent integration
+  serve         Launch the interactive web UI (requires --features web)
+  structure     Show file/directory tree with symbol outlines
+  file-summary  Summarize a single file: role, symbols, imports, dependents
+  imports       List all imports of a file, categorized by type
+  dead-code     Detect dead code: unreachable files and unreferenced symbols
+  diff          Compare two graph snapshots and show structural differences
+  diff-impact   Analyze impact of git-changed files on the dependency graph
+  decorators    Find symbols by decorator/attribute pattern
+  clusters      Discover functional clusters via graph analysis
+  flow          Trace data/call flow paths between two symbols
+  project       Manage the project registry (add, remove, list, show)
+  daemon        Manage the background daemon (start, stop, status)
+  rename        Plan a symbol rename with impact analysis
 ```
 
 ### index
@@ -150,6 +148,7 @@ code-graph find "UserService" .
 code-graph find "User.*Service" . -i            # Case-insensitive regex
 code-graph find "authenticate" . --kind function # Filter by kind
 code-graph find "Button" . --file src/components # Scope to directory
+code-graph find "Config" --project my-api        # Query a registered project
 ```
 
 Symbol kinds: `function`, `class`, `interface`, `type`, `enum`, `variable`, `component`, `method`, `property`, `struct`, `trait`, `impl`, `macro`
@@ -198,16 +197,6 @@ code-graph stats . --format json
 code-graph context "Logger" .
 ```
 
-### mcp
-
-Start an MCP stdio server exposing graph queries as tools for Claude Code.
-
-```bash
-code-graph mcp                          # Zero-config: defaults to cwd
-code-graph mcp /path/to/project         # Specify project path
-code-graph mcp /path/to/project --watch # Auto-reindex on file changes
-```
-
 ### watch
 
 Start a standalone file watcher that re-indexes incrementally on changes.
@@ -215,8 +204,6 @@ Start a standalone file watcher that re-indexes incrementally on changes.
 ```bash
 code-graph watch .
 ```
-
-> The `mcp` command starts its own embedded watcher automatically when `--watch` is passed -- you don't need to run `watch` separately.
 
 ### export
 
@@ -240,23 +227,146 @@ code-graph snapshot delete baseline .    # Delete the "baseline" snapshot
 
 ### setup
 
-Auto-configure MCP integration for your editor.
+Install Claude Code hooks for transparent code-graph integration.
 
 ```bash
-code-graph setup              # Interactive: detects available editors
+code-graph setup              # Install hooks in .claude/ (project-level)
+code-graph setup --global     # Install hooks in ~/.claude/ (all projects)
+code-graph setup --uninstall  # Remove code-graph hooks and permissions
 ```
+
+See [Claude Code integration](#claude-code-integration) for details on what this configures.
 
 ### serve
 
 Launch the interactive web UI with graph visualization.
 
 ```bash
-code-graph serve                        # Default port 3000
+code-graph serve                        # Default port 7070
 code-graph serve --port 8080            # Custom port
 code-graph serve --ollama               # Enable Ollama for local RAG
 ```
 
 > Requires building with `--features web`. Add `--features rag` for the conversational agent.
+
+### structure
+
+Show the file/directory tree with symbol counts and outlines.
+
+```bash
+code-graph structure .                          # Full tree (depth 3)
+code-graph structure . --path src/query --depth 5
+```
+
+### file-summary
+
+Compact summary of a single file: role, symbols, imports, and dependents.
+
+```bash
+code-graph file-summary src/main.rs .
+```
+
+### imports
+
+List all imports of a file, categorized by type (internal, external, builtin).
+
+```bash
+code-graph imports src/lib.rs .
+```
+
+### dead-code
+
+Detect unreferenced symbols and unreachable files with entry-point exclusions.
+
+```bash
+code-graph dead-code .
+code-graph dead-code . --scope src/utils
+```
+
+### diff
+
+Compare two graph snapshots and show structural differences (added/removed symbols, changed edges).
+
+```bash
+code-graph diff . --from baseline
+code-graph diff . --from v1 --to v2
+```
+
+### diff-impact
+
+Analyze the dependency graph impact of git-changed files. Takes a git ref to diff against.
+
+```bash
+code-graph diff-impact HEAD~1 .
+code-graph diff-impact main .
+```
+
+### decorators
+
+Find symbols by decorator/attribute pattern across all languages.
+
+```bash
+code-graph decorators "@Component" .
+code-graph decorators "derive(Debug)" . --language rust
+code-graph decorators "@app.route" . --framework fastapi
+```
+
+### clusters
+
+Discover functional clusters (groups of highly-coupled symbols) via graph analysis.
+
+```bash
+code-graph clusters .
+code-graph clusters . --scope src/query
+```
+
+### flow
+
+Trace call/data flow paths between two symbols.
+
+```bash
+code-graph flow "parse_file" "build_graph" .
+code-graph flow "handleRequest" "sendResponse" . --max-paths 5
+```
+
+### project
+
+Manage the multi-project registry for cross-project queries.
+
+```bash
+code-graph project add my-api /path/to/api      # Register with alias
+code-graph project add frontend /path/to/web     # Register another
+code-graph project list                          # List all registered
+code-graph project show my-api                   # Show details
+code-graph project remove my-api                 # Unregister
+```
+
+Once registered, use `--project` on any query command:
+
+```bash
+code-graph find "UserService" --project my-api
+code-graph impact "Config" --project frontend
+```
+
+### daemon
+
+Manage the background daemon that watches for file changes and keeps the index up to date.
+
+```bash
+code-graph daemon start           # Start for current project
+code-graph daemon start /path     # Start for specific project
+code-graph daemon status          # Check if running
+code-graph daemon stop            # Stop the daemon
+```
+
+### rename
+
+Plan a symbol rename: lists all files and lines that reference the symbol, with the proposed changes.
+
+```bash
+code-graph rename "oldName" "newName" .
+code-graph rename "Config" "AppConfig" --project my-api
+```
 
 ### Output formats
 
@@ -268,69 +378,54 @@ All query commands support `--format`:
 | `table` | Human-readable columns with ANSI colors |
 | `json` | Structured JSON for programmatic use |
 
-## MCP integration
+## Claude Code integration
 
-### Claude Code setup
+code-graph integrates with Claude Code via **PreToolUse hooks** -- shell scripts that run before Claude executes tool calls. This approach is transparent, requires no background server, and works with any Claude Code version.
+
+### How it works
+
+1. **`code-graph setup`** installs two hook scripts into `.claude/hooks/`:
+   - `codegraph-pretool-bash.sh` -- intercepts `Bash` tool calls. When the command starts with `code-graph`, the hook auto-approves it (no permission prompt). All other commands pass through untouched.
+   - `codegraph-pretool-search.sh` -- intercepts `Grep` and `Glob` tool calls. When the search pattern looks like a code symbol (PascalCase, snake_case, camelCase), the hook enriches the response with `code-graph find` results as additional context. String literals, file paths, TODOs, and regex patterns pass through to native search.
+
+2. **Setup also configures** `.claude/settings.json`:
+   - Adds hook entries under `hooks.PreToolUse`
+   - Adds `Bash(code-graph *)` to `permissions.allow` for auto-approval
+   - Cleans up any stale configuration from previous versions
+
+3. **The result**: Claude Code transparently uses code-graph for structural queries while keeping native Grep/Glob for text searches. No manual tool selection needed.
+
+### Setup
 
 ```bash
-claude mcp add --scope user code-graph -- code-graph mcp --watch
-```
-
-Or use the auto-setup command:
-
-```bash
+# Project-level (recommended): hooks in .claude/hooks/
 code-graph setup
+
+# Global: hooks in ~/.claude/hooks/ (available in all projects)
+code-graph setup --global
+
+# Remove hooks and permissions
+code-graph setup --uninstall
 ```
-
-This registers `code-graph` as a user-scoped MCP server available in all your projects. The `--watch` flag enables auto-reindex on file changes.
-
-### Available tools
-
-Once connected, Claude Code gets access to twenty tools:
-
-| Tool | Description |
-|------|-------------|
-| `find_symbol` | Find symbol definitions by name or regex |
-| `find_references` | Find all files and call sites referencing a symbol |
-| `get_impact` | Get the transitive blast radius of changing a symbol |
-| `detect_circular` | Detect circular dependency cycles |
-| `get_context` | 360-degree view: definition + references + callers + callees |
-| `get_stats` | Project overview: files, symbols, imports |
-| `export_graph` | Export dependency graph to DOT or Mermaid format |
-| `get_structure` | File/directory tree with symbol counts |
-| `get_file_summary` | Compact summary of a file's symbols and imports |
-| `get_imports` | List imports for a file or across the project |
-| `batch_query` | Run up to 10 queries in a single call |
-| `find_dead_code` | Detect unreferenced symbols with entry-point exclusions |
-| `get_diff` | Compare current graph against a named snapshot |
-| `register_project` | Register an additional project for multi-project queries |
-| `list_projects` | List all registered projects |
-| `find_by_decorator` | Find symbols by decorator/attribute pattern |
-| `find_clusters` | Hierarchical clustering by coupling/cohesion |
-| `trace_flow` | Find call chains between two symbols |
-| `plan_rename` | Plan symbol renames with impact analysis |
-| `get_diff_impact` | Git-diff-based impact analysis |
-
-The MCP server loads from disk cache on startup for near-instant cold starts, runs an embedded file watcher for live updates (with `--watch`), and suggests similar symbol names via trigram fuzzy matching when a search yields no results.
 
 ### Recommended CLAUDE.md instructions
 
-Claude Code defaults to reading source files with its built-in glob/grep/read tools. Without explicit guidance, it won't use code-graph even when the MCP server is running. Add the following to your project's `CLAUDE.md` so Claude uses graph queries instead of file reading for codebase navigation:
+To maximize Claude Code's use of code-graph for navigation, add the following to your project's `CLAUDE.md`:
 
 ```markdown
 ## Code navigation -- MANDATORY
 
 NEVER use Grep or Glob to find symbol definitions, trace references, or analyze dependencies.
-ALWAYS use code-graph MCP tools instead -- they are faster, more accurate, and understand the full AST.
+ALWAYS use code-graph CLI commands instead -- they are faster, more accurate, and understand the full AST.
 
-| Task | Tool | NOT this |
-|------|------|----------|
-| Find where something is defined | `find_symbol` | ~~Grep for `class X`, `function X`, `fn X`~~ |
-| Find what uses/imports something | `find_references` | ~~Grep for `import`, `require`, identifier~~ |
-| Understand a symbol fully | `get_context` | ~~Multiple Grep + Read calls~~ |
-| Check what breaks if I change X | `get_impact` | ~~Manual file-by-file tracing~~ |
-| Detect circular deps | `detect_circular` | ~~Grep for import cycles~~ |
-| Project overview | `get_stats` | ~~Glob + count files~~ |
+| Task | Command | NOT this |
+|------|---------|----------|
+| Find where something is defined | `code-graph find <symbol>` | ~~Grep for `class X`, `function X`, `fn X`~~ |
+| Find what uses/imports something | `code-graph refs <symbol>` | ~~Grep for `import`, `require`, identifier~~ |
+| Understand a symbol fully | `code-graph context <symbol>` | ~~Multiple Grep + Read calls~~ |
+| Check what breaks if I change X | `code-graph impact <symbol>` | ~~Manual file-by-file tracing~~ |
+| Detect circular deps | `code-graph circular` | ~~Grep for import cycles~~ |
+| Project overview | `code-graph stats` | ~~Glob + count files~~ |
 
 Use Read/Grep/Glob ONLY for:
 - Reading full file contents before editing
@@ -338,50 +433,18 @@ Use Read/Grep/Glob ONLY for:
 - Non-structural text searches that have nothing to do with code navigation
 ```
 
-### Permission whitelisting
-
-By default, Claude Code asks for confirmation on every MCP tool call. To auto-approve code-graph tools (they are read-only and safe), add this to `.claude/settings.json` in your project root:
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "mcp__code-graph__find_symbol",
-      "mcp__code-graph__find_references",
-      "mcp__code-graph__get_impact",
-      "mcp__code-graph__detect_circular",
-      "mcp__code-graph__get_context",
-      "mcp__code-graph__get_stats",
-      "mcp__code-graph__export_graph",
-      "mcp__code-graph__get_structure",
-      "mcp__code-graph__get_file_summary",
-      "mcp__code-graph__get_imports",
-      "mcp__code-graph__batch_query",
-      "mcp__code-graph__find_dead_code",
-      "mcp__code-graph__get_diff",
-      "mcp__code-graph__register_project",
-      "mcp__code-graph__list_projects",
-      "mcp__code-graph__find_by_decorator",
-      "mcp__code-graph__find_clusters",
-      "mcp__code-graph__trace_flow",
-      "mcp__code-graph__plan_rename",
-      "mcp__code-graph__get_diff_impact"
-    ]
-  }
-}
-```
-
 ## Configuration
 
 Optional `code-graph.toml` in your project root:
 
 ```toml
-[exclude]
-paths = ["vendor/", "dist/", "build/"]
+# Additional path patterns to exclude from indexing (beyond .gitignore and node_modules).
+exclude = ["vendor/", "dist/", "build/"]
 
-[mcp]
-default_format = "compact"  # Output format: compact, table, json
-watch = true                # Auto-start file watcher
+# Impact analysis thresholds for risk tier classification.
+[impact]
+high_threshold = 20     # Files above this count are HIGH risk (default: 20)
+medium_threshold = 5    # Files above this count are MEDIUM risk (default: 5)
 ```
 
 By default, code-graph respects `.gitignore` patterns and always excludes `node_modules/` and `target/`.
@@ -401,10 +464,9 @@ By default, code-graph respects `.gitignore` patterns and always excludes `node_
 | Metric | Value |
 |--------|-------|
 | Languages supported | TypeScript, JavaScript, Rust, Python, Go |
-| Lines of Rust code | ~38,000 |
-| Tests | 492 |
-| CLI commands | 13 |
-| MCP tools | 20 |
+| Lines of Rust code | ~39,000 |
+| Tests | 545 |
+| CLI commands | 24 |
 | Rust edition | 2024 |
 | Binary size | ~12 MB (static, zero runtime deps) |
 
