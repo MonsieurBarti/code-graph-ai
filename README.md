@@ -16,7 +16,7 @@ Gives [Claude Code](https://docs.anthropic.com/en/docs/claude-code) direct acces
 - **Decorator/attribute extraction** -- unified across all 5 languages with framework inference (NestJS, Flask, FastAPI, Actix, Angular)
 - **Dependency graph** -- file-level and symbol-level edges: imports, calls, extends, implements, type references, has-decorator, child-of, embeds
 - **Import resolution** -- TypeScript path aliases (tsconfig.json), barrel files (index.ts re-exports), monorepo workspaces, Rust crate-root module resolution with Cargo workspace discovery, Python package resolution, Go module resolution
-- **24 CLI commands** -- find definitions, trace references, blast radius analysis, circular dependency detection, 360-degree symbol context, project statistics, graph export, file structure, file summaries, import analysis, dead code detection, graph diff, decorator search, clustering, call chain tracing, rename planning, diff impact, project registry management, daemon control, hooks setup
+- **25 CLI commands** -- find definitions, trace references, blast radius analysis, circular dependency detection, 360-degree symbol context, project statistics, graph export, file structure, file summaries, import analysis, dead code detection, clone detection, graph diff, decorator search, clustering, call chain tracing, rename planning, diff impact, project registry management, daemon control, hooks setup
 - **Hooks-based Claude Code integration** -- `code-graph setup` installs PreToolUse hooks that transparently intercept tool calls, auto-approve CLI invocations, and enrich Grep/Glob searches with structural graph data
 - **Background daemon** -- `code-graph daemon start` launches a persistent background process that watches for file changes and keeps the graph index up to date automatically
 - **Multi-project registry** -- `code-graph project add` registers project aliases for cross-project queries with `--project` flag on any query command
@@ -26,6 +26,7 @@ Gives [Claude Code](https://docs.anthropic.com/en/docs/claude-code) direct acces
 - **Confidence scoring** -- High/Medium/Low confidence tiers on impact analysis based on graph distance
 - **Token-optimized output** -- compact prefix-free format with context-aware next-step hints, designed for AI agent consumption (60-90% savings per session)
 - **Trigram fuzzy matching** -- Jaccard similarity for typo-tolerant symbol search with score-ranked suggestions
+- **Clone detection** -- `clones` finds structurally similar code via signature hashing (symbol kind, body size, edge counts, decorators)
 - **Dead code detection** -- `dead-code` identifies unreferenced symbols with entry-point exclusions
 - **Graph snapshot/diff** -- create named snapshots and compare current graph state against baselines
 - **Section-scoped context** -- `context` with targeted sections for 60-80% token savings per query
@@ -91,6 +92,9 @@ code-graph daemon start
 # Launch the interactive web UI
 code-graph serve
 
+# Find structurally similar code (clone detection)
+code-graph clones .
+
 # Export dependency graph as Mermaid at package granularity
 code-graph export . --format mermaid --granularity package
 
@@ -119,6 +123,7 @@ Commands:
   structure     Show file/directory tree with symbol outlines
   file-summary  Summarize a single file: role, symbols, imports, dependents
   imports       List all imports of a file, categorized by type
+  clones        Detect structurally similar code (clone detection)
   dead-code     Detect dead code: unreachable files and unreferenced symbols
   diff          Compare two graph snapshots and show structural differences
   diff-impact   Analyze impact of git-changed files on the dependency graph
@@ -272,6 +277,17 @@ List all imports of a file, categorized by type (internal, external, builtin).
 
 ```bash
 code-graph imports src/lib.rs .
+```
+
+### clones
+
+Detect structurally similar code via signature hashing. Groups symbols with identical structural fingerprints (kind, body size, edge counts, decorator count).
+
+```bash
+code-graph clones .
+code-graph clones . --min-group 3          # Only groups with 3+ clones
+code-graph clones . --scope src/query      # Scope to a directory
+code-graph clones --project my-api         # Query a registered project
 ```
 
 ### dead-code
@@ -465,8 +481,8 @@ By default, code-graph respects `.gitignore` patterns and always excludes `node_
 |--------|-------|
 | Languages supported | TypeScript, JavaScript, Rust, Python, Go |
 | Lines of Rust code | ~39,000 |
-| Tests | 545 |
-| CLI commands | 24 |
+| Tests | 551 |
+| CLI commands | 25 |
 | Rust edition | 2024 |
 | Binary size | ~12 MB (static, zero runtime deps) |
 
