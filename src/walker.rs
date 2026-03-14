@@ -53,10 +53,7 @@ pub fn walk_project(
 ) -> anyhow::Result<Vec<PathBuf>> {
     // Always walk from the project root — this covers all files including workspace packages
     // (since workspace dirs are sub-directories of the root).
-    //
-    // We detect workspaces primarily so future plans can scope per-package operations,
-    // but for file discovery the root walk is sufficient and avoids duplicates.
-    let _ = detect_workspace_roots(root);
+    // TODO: Use workspace roots for scoped per-package operations when implemented.
 
     let mut files = Vec::new();
     collect_files(root, config, verbose, allowed_languages, &mut files);
@@ -77,6 +74,9 @@ pub fn walk_non_parsed_files(
     config: &CodeGraphConfig,
 ) -> anyhow::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
+
+    // Pre-compile glob patterns once before the walk loop.
+    let compiled_excludes = compile_exclude_patterns(config);
 
     let walker = ignore::WalkBuilder::new(root)
         .standard_filters(true)
@@ -101,8 +101,8 @@ pub fn walk_non_parsed_files(
             continue;
         }
 
-        // Apply config exclusions (IDX-03: reuses same logic as source file walking)
-        if is_excluded_by_config(path, config) {
+        // Apply config exclusions (using pre-compiled patterns)
+        if is_excluded_by_patterns(path, &compiled_excludes) {
             continue;
         }
 
@@ -165,6 +165,9 @@ fn collect_files(
     allowed_languages: Option<&HashSet<LanguageKind>>,
     out: &mut Vec<PathBuf>,
 ) {
+    // Pre-compile glob patterns once before the walk loop.
+    let compiled_excludes = compile_exclude_patterns(config);
+
     let walker = ignore::WalkBuilder::new(root)
         .standard_filters(true)
         // Read .gitignore files even when the directory is not inside a git repository.
@@ -194,8 +197,8 @@ fn collect_files(
             continue;
         }
 
-        // Apply additional config exclusions.
-        if is_excluded_by_config(path, config) {
+        // Apply additional config exclusions (using pre-compiled patterns).
+        if is_excluded_by_patterns(path, &compiled_excludes) {
             continue;
         }
 
@@ -230,26 +233,35 @@ fn path_contains_node_modules(path: &Path) -> bool {
     })
 }
 
-/// Returns true if `path` matches any exclusion pattern from config.
-fn is_excluded_by_config(path: &Path, config: &CodeGraphConfig) -> bool {
-    let patterns = match &config.exclude {
-        Some(p) => p,
-        None => return false,
-    };
+/// Pre-compile glob exclusion patterns from config.
+///
+/// Call once before the walk loop and pass the result to `is_excluded_by_patterns`.
+fn compile_exclude_patterns(config: &CodeGraphConfig) -> Vec<glob::Pattern> {
+    match &config.exclude {
+        Some(patterns) => patterns
+            .iter()
+            .filter_map(|p| glob::Pattern::new(p).ok())
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+/// Returns true if `path` matches any pre-compiled exclusion pattern.
+fn is_excluded_by_patterns(path: &Path, compiled: &[glob::Pattern]) -> bool {
+    if compiled.is_empty() {
+        return false;
+    }
 
     let path_str = path.to_string_lossy();
 
-    for pattern in patterns {
-        if let Ok(matched) = glob::Pattern::new(pattern)
-            && matched.matches(&path_str)
-        {
+    for pattern in compiled {
+        if pattern.matches(&path_str) {
             return true;
         }
         // Also check if any component matches the pattern directly.
         for component in path.components() {
             if let Some(s) = component.as_os_str().to_str()
-                && let Ok(matched) = glob::Pattern::new(pattern)
-                && matched.matches(s)
+                && pattern.matches(s)
             {
                 return true;
             }
@@ -257,6 +269,15 @@ fn is_excluded_by_config(path: &Path, config: &CodeGraphConfig) -> bool {
     }
 
     false
+}
+
+/// Returns true if `path` matches any exclusion pattern from config.
+///
+/// Convenience wrapper that compiles patterns on each call.
+/// For hot loops, prefer `compile_exclude_patterns` + `is_excluded_by_patterns`.
+fn is_excluded_by_config(path: &Path, config: &CodeGraphConfig) -> bool {
+    let compiled = compile_exclude_patterns(config);
+    is_excluded_by_patterns(path, &compiled)
 }
 
 #[cfg(test)]

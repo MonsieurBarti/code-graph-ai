@@ -7,11 +7,9 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use petgraph::Direction;
 use petgraph::stable_graph::NodeIndex;
-use petgraph::visit::EdgeRef;
 
-use crate::graph::{CodeGraph, edge::EdgeKind, node::GraphNode};
+use crate::graph::{CodeGraph, node::GraphNode};
 use crate::query::refs::find_refs;
 
 // ---------------------------------------------------------------------------
@@ -117,29 +115,14 @@ pub fn plan_rename(
 // Private helpers
 // ---------------------------------------------------------------------------
 
-/// Find the file path containing a symbol node by walking Contains (or ChildOf → Contains) edges.
+/// Find the file path containing a symbol node, using the shared utility.
 fn find_containing_file_path(graph: &CodeGraph, sym_idx: NodeIndex) -> Option<PathBuf> {
-    // Direct Contains edge: File -> Symbol (incoming to symbol).
-    for edge_ref in graph.graph.edges_directed(sym_idx, Direction::Incoming) {
-        if matches!(edge_ref.weight(), EdgeKind::Contains) {
-            let source = edge_ref.source();
-            if let GraphNode::File(fi) = &graph.graph[source] {
-                return Some(fi.path.clone());
-            }
-        }
+    let file_idx = super::util::find_containing_file_idx(graph, sym_idx)?;
+    if let GraphNode::File(fi) = &graph.graph[file_idx] {
+        Some(fi.path.clone())
+    } else {
+        None
     }
-
-    // Child symbol: ChildOf edge from child to parent symbol, then Contains on parent.
-    for edge_ref in graph.graph.edges_directed(sym_idx, Direction::Outgoing) {
-        if matches!(edge_ref.weight(), EdgeKind::ChildOf) {
-            let parent_idx = edge_ref.target();
-            if let Some(fp) = find_containing_file_path(graph, parent_idx) {
-                return Some(fp);
-            }
-        }
-    }
-
-    None
 }
 
 // ---------------------------------------------------------------------------

@@ -229,6 +229,14 @@ pub fn load_snapshot(project_root: &Path, name: &str) -> anyhow::Result<GraphSna
     Ok(snapshot)
 }
 
+/// Lightweight struct for listing snapshots without deserializing the full file map.
+#[derive(Deserialize)]
+struct SnapshotMeta {
+    #[allow(dead_code)]
+    name: String,
+    created_at: u64,
+}
+
 /// List all stored snapshots, sorted by created_at descending (newest first).
 ///
 /// Returns `(name, created_at)` pairs.
@@ -245,11 +253,11 @@ pub fn list_snapshots(project_root: &Path) -> anyhow::Result<Vec<(String, u64)>>
         if path.extension().and_then(|e| e.to_str()) == Some("json")
             && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
         {
-            // Parse the JSON to get created_at
+            // Deserialize only metadata fields (name + created_at), not the full file map.
             if let Ok(contents) = std::fs::read_to_string(&path)
-                && let Ok(snap) = serde_json::from_str::<GraphSnapshot>(&contents)
+                && let Ok(meta) = serde_json::from_str::<SnapshotMeta>(&contents)
             {
-                results.push((stem.to_string(), snap.created_at));
+                results.push((stem.to_string(), meta.created_at));
             }
         }
     }
@@ -271,28 +279,12 @@ pub fn delete_snapshot(project_root: &Path, name: &str) -> anyhow::Result<()> {
 // Diff computation
 // ---------------------------------------------------------------------------
 
-/// Compare two snapshots (or a snapshot against the current live graph).
+/// Diff two snapshot structs directly, without disk I/O.
 ///
-/// - `from`: name of the base snapshot
-/// - `to`: optional name of the target snapshot; if None, uses the live graph
-/// - `graph`: the current live graph (used when `to` is None)
-pub fn compute_diff(
-    root: &Path,
-    from: &str,
-    to: Option<&str>,
-    graph: &CodeGraph,
-) -> Result<GraphDiff, String> {
-    let from_snap =
-        load_snapshot(root, from).map_err(|e| format!("cannot load snapshot '{}': {}", from, e))?;
-
-    let to_snap: GraphSnapshot = match to {
-        Some(name) => load_snapshot(root, name)
-            .map_err(|e| format!("cannot load snapshot '{}': {}", name, e))?,
-        None => graph_to_snapshot(graph, root, "__live__"),
-    };
-
-    let from_files = &from_snap.files;
-    let to_files = &to_snap.files;
+/// This is the core diff logic used by `compute_diff` and available for tests.
+pub(crate) fn diff_snapshots(from: &GraphSnapshot, to: &GraphSnapshot) -> GraphDiff {
+    let from_files = &from.files;
+    let to_files = &to.files;
 
     let mut added_files: Vec<String> = Vec::new();
     let mut removed_files: Vec<String> = Vec::new();
@@ -378,13 +370,36 @@ pub fn compute_diff(
     removed_symbols.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
     modified_symbols.sort_by(|a, b| a.file.cmp(&b.file).then(a.name.cmp(&b.name)));
 
-    Ok(GraphDiff {
+    GraphDiff {
         added_files,
         removed_files,
         added_symbols,
         removed_symbols,
         modified_symbols,
-    })
+    }
+}
+
+/// Compare two snapshots (or a snapshot against the current live graph).
+///
+/// - `from`: name of the base snapshot
+/// - `to`: optional name of the target snapshot; if None, uses the live graph
+/// - `graph`: the current live graph (used when `to` is None)
+pub fn compute_diff(
+    root: &Path,
+    from: &str,
+    to: Option<&str>,
+    graph: &CodeGraph,
+) -> Result<GraphDiff, String> {
+    let from_snap =
+        load_snapshot(root, from).map_err(|e| format!("cannot load snapshot '{}': {}", from, e))?;
+
+    let to_snap: GraphSnapshot = match to {
+        Some(name) => load_snapshot(root, name)
+            .map_err(|e| format!("cannot load snapshot '{}': {}", name, e))?,
+        None => graph_to_snapshot(graph, root, "__live__"),
+    };
+
+    Ok(diff_snapshots(&from_snap, &to_snap))
 }
 
 // ---------------------------------------------------------------------------
@@ -542,88 +557,7 @@ mod tests {
         }
     }
 
-    /// Helper: diff two manually constructed snapshots (no disk I/O needed).
-    fn diff_snapshots(from: &GraphSnapshot, to: &GraphSnapshot) -> GraphDiff {
-        let mut added_files = Vec::new();
-        let mut removed_files = Vec::new();
-        let mut added_symbols = Vec::new();
-        let mut removed_symbols = Vec::new();
-        let mut modified_symbols = Vec::new();
-
-        for key in to.files.keys() {
-            if !from.files.contains_key(key) {
-                added_files.push(key.clone());
-            }
-        }
-        for key in from.files.keys() {
-            if !to.files.contains_key(key) {
-                removed_files.push(key.clone());
-            }
-        }
-        for (file_key, from_file) in &from.files {
-            if let Some(to_file) = to.files.get(file_key) {
-                let from_syms: HashMap<&str, &SnapshotSymbol> = from_file
-                    .symbols
-                    .iter()
-                    .map(|s| (s.name.as_str(), s))
-                    .collect();
-                let to_syms: HashMap<&str, &SnapshotSymbol> = to_file
-                    .symbols
-                    .iter()
-                    .map(|s| (s.name.as_str(), s))
-                    .collect();
-
-                for name in to_syms.keys() {
-                    if !from_syms.contains_key(name) {
-                        added_symbols.push((file_key.clone(), name.to_string()));
-                    }
-                }
-                for name in from_syms.keys() {
-                    if !to_syms.contains_key(name) {
-                        removed_symbols.push((file_key.clone(), name.to_string()));
-                    }
-                }
-                for (name, from_sym) in &from_syms {
-                    if let Some(to_sym) = to_syms.get(name) {
-                        let mut changes = Vec::new();
-                        if from_sym.kind != to_sym.kind {
-                            changes.push(format!("kind {} → {}", from_sym.kind, to_sym.kind));
-                        }
-                        if from_sym.line != to_sym.line {
-                            changes.push(format!("line {} → {}", from_sym.line, to_sym.line));
-                        }
-                        if from_sym.caller_count != to_sym.caller_count {
-                            changes.push(format!(
-                                "callers {} → {}",
-                                from_sym.caller_count, to_sym.caller_count
-                            ));
-                        }
-                        if !changes.is_empty() {
-                            modified_symbols.push(SymbolChange {
-                                file: file_key.clone(),
-                                name: name.to_string(),
-                                changes,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        added_files.sort();
-        removed_files.sort();
-        added_symbols.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-        removed_symbols.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-        modified_symbols.sort_by(|a, b| a.file.cmp(&b.file).then(a.name.cmp(&b.name)));
-
-        GraphDiff {
-            added_files,
-            removed_files,
-            added_symbols,
-            removed_symbols,
-            modified_symbols,
-        }
-    }
+    // Tests call the module-level diff_snapshots directly (no duplication).
 
     #[test]
     fn test_diff_added_file() {
@@ -632,7 +566,7 @@ mod tests {
         to_files.insert("src/new.rs".to_string(), make_file(vec![]));
         let to = make_snapshot("to", to_files);
 
-        let diff = diff_snapshots(&from, &to);
+        let diff = super::diff_snapshots(&from, &to);
         assert_eq!(diff.added_files, vec!["src/new.rs"]);
         assert!(diff.removed_files.is_empty());
     }
@@ -644,7 +578,7 @@ mod tests {
         let from = make_snapshot("from", from_files);
         let to = make_snapshot("to", HashMap::new());
 
-        let diff = diff_snapshots(&from, &to);
+        let diff = super::diff_snapshots(&from, &to);
         assert!(diff.added_files.is_empty());
         assert_eq!(diff.removed_files, vec!["src/old.rs"]);
     }
@@ -662,7 +596,7 @@ mod tests {
         );
         let to = make_snapshot("to", to_files);
 
-        let diff = diff_snapshots(&from, &to);
+        let diff = super::diff_snapshots(&from, &to);
         assert!(diff.added_files.is_empty());
         assert_eq!(
             diff.added_symbols,
@@ -684,7 +618,7 @@ mod tests {
         to_files.insert("src/lib.rs".to_string(), make_file(vec![]));
         let to = make_snapshot("to", to_files);
 
-        let diff = diff_snapshots(&from, &to);
+        let diff = super::diff_snapshots(&from, &to);
         assert!(diff.removed_files.is_empty());
         assert_eq!(
             diff.removed_symbols,
@@ -709,7 +643,7 @@ mod tests {
         );
         let to = make_snapshot("to", to_files);
 
-        let diff = diff_snapshots(&from, &to);
+        let diff = super::diff_snapshots(&from, &to);
         assert!(diff.added_symbols.is_empty());
         assert!(diff.removed_symbols.is_empty());
         assert_eq!(diff.modified_symbols.len(), 1);
@@ -729,7 +663,7 @@ mod tests {
         let snap1 = make_snapshot("snap1", files.clone());
         let snap2 = make_snapshot("snap2", files);
 
-        let diff = diff_snapshots(&snap1, &snap2);
+        let diff = super::diff_snapshots(&snap1, &snap2);
         assert!(diff.added_files.is_empty());
         assert!(diff.removed_files.is_empty());
         assert!(diff.added_symbols.is_empty());

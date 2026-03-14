@@ -93,11 +93,13 @@ pub fn find_clusters(
     }
 
     // Step 3: label propagation iterations
+    // Pre-allocate snapshot buffer outside the loop; clone_from reuses the existing allocation.
+    let mut snapshot: BTreeMap<NodeIndex, String> = BTreeMap::new();
     for _ in 0..max_iterations {
         let mut changed = false;
 
         // Snapshot current labels so all updates use the same generation.
-        let snapshot: BTreeMap<NodeIndex, String> = labels.clone();
+        snapshot.clone_from(&labels);
 
         for (&node, current_label) in &mut labels {
             // Collect neighbour labels from Calls + ChildOf edges (both directions).

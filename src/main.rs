@@ -277,36 +277,47 @@ fn file_language_matches(path: &Path, lang: &str) -> bool {
     }
 }
 
-/// Build the code graph for a project at `path` by walking, parsing, and resolving all files.
+/// Map a file extension to its language string for the graph.
 ///
-/// This is the shared pipeline used by all query subcommands. The Index command has its own
-/// inline copy so it can also compute detailed stats without a second pass.
-pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
-    let config = CodeGraphConfig::load(path);
-    let files = walk_project(path, &config, verbose, None)?;
+/// Returns `None` for unsupported extensions. Used by both `build_graph` and
+/// the Index command to avoid duplicating the extension→language mapping.
+fn ext_to_language(ext: &str) -> Option<&'static str> {
+    match ext {
+        "ts" => Some("typescript"),
+        "tsx" => Some("tsx"),
+        "js" | "jsx" => Some("javascript"),
+        "rs" => Some("rust"),
+        "py" => Some("python"),
+        "go" => Some("go"),
+        _ => None,
+    }
+}
 
-    // Phase 1: Parse all files in parallel (CPU-bound — rayon par_iter).
-    let raw_results: Vec<(PathBuf, &'static str, ParseResult)> = files
+/// Parse all files in parallel (CPU-bound — rayon par_iter).
+///
+/// Shared helper used by both `build_graph` and the Index command.
+/// Returns `(file_path, language_str, ParseResult)` triples.
+fn parse_files_parallel(files: &[PathBuf]) -> Vec<(PathBuf, &'static str, ParseResult)> {
+    files
         .par_iter()
         .filter_map(|file_path| {
             let source = std::fs::read(file_path).ok()?;
-            let language_str: &'static str =
-                match file_path.extension().and_then(|e| e.to_str()).unwrap_or("") {
-                    "ts" => "typescript",
-                    "tsx" => "tsx",
-                    "js" | "jsx" => "javascript",
-                    "rs" => "rust",
-                    "py" => "python",
-                    "go" => "go",
-                    _ => return None,
-                };
+            let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            let language_str = ext_to_language(ext)?;
             let result = parser::parse_file_parallel(file_path, &source).ok()?;
             Some((file_path.clone(), language_str, result))
         })
-        .collect();
+        .collect()
+}
 
-    // Phase 2: Insert into graph sequentially (petgraph is not Send).
-    let mut graph = CodeGraph::new();
+/// Insert parse results into the graph sequentially (petgraph is not Send).
+///
+/// Returns the parse results map for the resolver pass.
+fn insert_parsed_into_graph(
+    graph: &mut CodeGraph,
+    raw_results: Vec<(PathBuf, &'static str, ParseResult)>,
+    verbose: bool,
+) -> HashMap<PathBuf, ParseResult> {
     let mut parse_results: HashMap<PathBuf, ParseResult> = HashMap::new();
 
     for (file_path, language_str, result) in raw_results {
@@ -352,6 +363,22 @@ pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
 
         parse_results.insert(file_path, result);
     }
+
+    parse_results
+}
+
+/// Build the code graph for a project at `path` by walking, parsing, and resolving all files.
+///
+/// This is the shared pipeline used by all query subcommands. The Index command
+/// calls the same parse/insert helpers but also accumulates detailed stats.
+pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
+    let config = CodeGraphConfig::load(path);
+    let files = walk_project(path, &config, verbose, None)?;
+
+    let raw_results = parse_files_parallel(&files);
+
+    let mut graph = CodeGraph::new();
+    let parse_results = insert_parsed_into_graph(&mut graph, raw_results, verbose);
 
     // Populate crate_name on FileInfo for all Rust files.
     populate_rust_crate_names(&mut graph, path);
@@ -447,46 +474,14 @@ fn main() -> Result<()> {
             let mut rust_use_count: usize = 0;
             let mut rust_pub_use_count: usize = 0;
 
-            // Parse results map — retained for the resolution step.
-            let mut parse_results: HashMap<PathBuf, ParseResult> = HashMap::new();
-
-            // 7. Parse all TS/JS/RS/Python/Go files in parallel (rayon par_iter).
-            let raw_results: Vec<(PathBuf, &'static str, ParseResult)> = files
-                .par_iter()
-                .filter_map(|file_path| {
-                    let source = std::fs::read(file_path).ok()?;
-                    let language_str: &'static str =
-                        match file_path.extension().and_then(|e| e.to_str()).unwrap_or("") {
-                            "ts" => "typescript",
-                            "tsx" => "tsx",
-                            "js" | "jsx" => "javascript",
-                            "rs" => "rust",
-                            "py" => "python",
-                            "go" => "go",
-                            _ => return None,
-                        };
-                    let result = parser::parse_file_parallel(file_path, &source).ok()?;
-                    Some((file_path.clone(), language_str, result))
-                })
-                .collect();
+            // 7. Parse all files in parallel using shared helper.
+            let raw_results = parse_files_parallel(&files);
 
             // skipped = files that couldn't be read or parsed.
             let skipped = files.len() - raw_results.len();
 
-            // 8. Insert into graph sequentially + accumulate stats.
-            for (file_path, language_str, result) in raw_results {
-                // Add file node to graph.
-                let file_idx = graph.add_file(file_path.clone(), language_str);
-
-                // Add symbols (parent + child).
-                for (symbol, children) in &result.symbols {
-                    let sym_idx = graph.add_symbol(file_idx, symbol.clone());
-                    for child in children {
-                        graph.add_child_symbol(sym_idx, child.clone());
-                    }
-                }
-
-                // Accumulate import/export counts.
+            // 8. Accumulate import/export stats before consuming raw_results.
+            for (_file_path, _language_str, result) in &raw_results {
                 total_imports += result.imports.len();
                 total_exports += result.exports.len();
                 for imp in &result.imports {
@@ -504,43 +499,17 @@ fn main() -> Result<()> {
                         | ImportKind::GoDot => {}
                     }
                 }
-
-                // Accumulate Rust use/pub-use counts and emit edges.
                 for rust_use in &result.rust_uses {
                     if rust_use.is_pub_use {
                         rust_pub_use_count += 1;
-                        graph.graph.add_edge(
-                            file_idx,
-                            file_idx,
-                            EdgeKind::ReExport {
-                                path: rust_use.path.clone(),
-                            },
-                        );
                     } else {
                         rust_use_count += 1;
-                        graph.graph.add_edge(
-                            file_idx,
-                            file_idx,
-                            EdgeKind::RustImport {
-                                path: rust_use.path.clone(),
-                            },
-                        );
                     }
                 }
-
-                if verbose {
-                    eprintln!(
-                        "  {} symbols, {} imports, {} exports from {}",
-                        result.symbols.len(),
-                        result.imports.len(),
-                        result.exports.len(),
-                        file_path.display()
-                    );
-                }
-
-                // Store parse result for the resolution pass.
-                parse_results.insert(file_path, result);
             }
+
+            // Insert into graph using shared helper (handles symbols, children, Rust edges).
+            let parse_results = insert_parsed_into_graph(&mut graph, raw_results, verbose);
 
             // Populate crate_name on FileInfo for all Rust files.
             populate_rust_crate_names(&mut graph, &path);
@@ -1378,4 +1347,46 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_epoch_secs_known_date() {
+        // 2024-01-01 00:00:00 UTC = 1704067200
+        assert_eq!(format_epoch_secs(1704067200), "2024-01-01 00:00:00 UTC");
+    }
+
+    #[test]
+    fn test_format_epoch_secs_leap_year() {
+        // 2024 is a leap year. Feb 29 exists.
+        // 2024-02-29 12:00:00 UTC = 1709208000
+        assert_eq!(format_epoch_secs(1709208000), "2024-02-29 12:00:00 UTC");
+    }
+
+    #[test]
+    fn test_format_epoch_secs_2100_non_leap() {
+        // 2100 is NOT a leap year (divisible by 100 but not 400).
+        // 2100-03-01 00:00:00 UTC = 4107542400
+        assert_eq!(format_epoch_secs(4107542400), "2100-03-01 00:00:00 UTC");
+    }
+
+    #[test]
+    fn test_format_epoch_secs_unix_epoch() {
+        assert_eq!(format_epoch_secs(0), "1970-01-01 00:00:00 UTC");
+    }
+
+    #[test]
+    fn test_ext_to_language() {
+        assert_eq!(ext_to_language("ts"), Some("typescript"));
+        assert_eq!(ext_to_language("tsx"), Some("tsx"));
+        assert_eq!(ext_to_language("js"), Some("javascript"));
+        assert_eq!(ext_to_language("jsx"), Some("javascript"));
+        assert_eq!(ext_to_language("rs"), Some("rust"));
+        assert_eq!(ext_to_language("py"), Some("python"));
+        assert_eq!(ext_to_language("go"), Some("go"));
+        assert_eq!(ext_to_language("txt"), None);
+    }
 }

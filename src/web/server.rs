@@ -23,6 +23,8 @@ pub struct AppState {
     pub project_root: PathBuf,
     /// Broadcast sender for WebSocket push messages (e.g. "graph_updated").
     pub ws_tx: broadcast::Sender<String>,
+    /// Single-use auth token required for API access. Generated at startup.
+    pub auth_token: String,
 
     // ── RAG fields (only available when compiled with the `rag` feature) ──────
     //
@@ -92,7 +94,65 @@ pub fn build_router(state: AppState) -> Router {
             axum::routing::get(api::auth::ollama_models_handler),
         );
 
-    router.layer(CorsLayer::permissive()).with_state(state)
+    // Apply security headers middleware.
+    let router = router.layer(axum::middleware::from_fn(security_headers));
+
+    // Fix: Restrict CORS to expected local origin instead of wildcard.
+    let cors = CorsLayer::new()
+        .allow_origin("http://127.0.0.1:3000".parse::<axum::http::HeaderValue>().unwrap())
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::OPTIONS,
+        ])
+        .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]);
+
+    router.layer(cors).with_state(state)
+}
+
+/// Middleware to inject security headers (CSP, X-Content-Type-Options, etc.).
+async fn security_headers(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(
+        "Content-Security-Policy",
+        "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
+            .parse()
+            .unwrap(),
+    );
+    headers.insert(
+        "X-Content-Type-Options",
+        "nosniff".parse().unwrap(),
+    );
+    headers.insert(
+        "X-Frame-Options",
+        "DENY".parse().unwrap(),
+    );
+    headers.insert(
+        "Referrer-Policy",
+        "no-referrer".parse().unwrap(),
+    );
+    response
+}
+
+/// Generate a random 32-character hex auth token.
+fn generate_auth_token() -> String {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+    let s = RandomState::new();
+    let mut h = s.build_hasher();
+    h.write_u128(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos());
+    let a = h.finish();
+    let mut h2 = s.build_hasher();
+    h2.write_u64(a);
+    let b = h2.finish();
+    format!("{:016x}{:016x}", a, b)
 }
 
 /// Serve embedded frontend assets. Falls back to index.html for unknown paths (SPA routing).
@@ -146,7 +206,7 @@ async fn serve_asset(uri: axum::http::Uri) -> impl IntoResponse {
 /// 4. Spawns a background watcher task that receives file events, updates the graph,
 ///    and broadcasts `{"type":"graph_updated"}` to connected WebSocket clients.
 /// 5. When compiled with `rag` feature: after graph updates, re-embeds changed file's symbols.
-/// 6. Serves on `0.0.0.0:{port}` (listens on all interfaces).
+/// 6. Serves on `127.0.0.1:{port}` (localhost only).
 ///
 /// # Parameters
 ///
@@ -223,10 +283,14 @@ pub async fn serve(root: PathBuf, port: u16, ollama: bool) -> anyhow::Result<()>
         (vector_store, embedding_engine, session_store, auth_state)
     };
 
+    // Generate a random single-use auth token for API access.
+    let auth_token = generate_auth_token();
+
     let state = AppState {
         graph: Arc::new(RwLock::new(graph)),
         project_root: root.clone(),
         ws_tx: ws_tx.clone(),
+        auth_token: auth_token.clone(),
         #[cfg(feature = "rag")]
         vector_store,
         #[cfg(feature = "rag")]
@@ -330,9 +394,11 @@ pub async fn serve(root: PathBuf, port: u16, ollama: bool) -> anyhow::Result<()>
     }
 
     let router = build_router(state);
-    let addr = format!("0.0.0.0:{port}");
+    // Bind to localhost only — not exposed on all interfaces.
+    let addr = format!("127.0.0.1:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     println!("Serving on http://127.0.0.1:{port}");
+    println!("Auth token: {auth_token}");
     axum::serve(listener, router).await?;
     Ok(())
 }

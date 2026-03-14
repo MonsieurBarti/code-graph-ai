@@ -58,7 +58,8 @@ pub async fn handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<SearchResult>>, (StatusCode, String)> {
     let q = &params.q;
-    let limit = params.limit;
+    // Cap limit to a reasonable maximum to prevent excessive resource usage.
+    let limit = params.limit.min(500);
     let graph = state.graph.read().await;
 
     // Tier 1: exact/regex match (case-insensitive, no kind/file/language filter)

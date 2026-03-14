@@ -91,9 +91,11 @@ pub fn start_watcher(
     // Bridge thread: receive from notify channel, classify, forward as WatchEvent
     let root = watch_root.to_path_buf();
     let bridge_thread = std::thread::spawn(move || {
+        let mut consecutive_errors: usize = 0;
         while let Ok(result) = notify_rx.recv() {
             match result {
                 Ok(events) => {
+                    consecutive_errors = 0;
                     for debounced_event in events {
                         let path = debounced_event.path;
                         if let Some(watch_event) = classify_event(&path, &root, &gitignore)
@@ -104,7 +106,14 @@ pub fn start_watcher(
                     }
                 }
                 Err(err) => {
+                    consecutive_errors += 1;
                     eprintln!("[watcher] error: {:?}", err);
+                    if consecutive_errors >= 5 {
+                        eprintln!(
+                            "[watcher] warning: {} consecutive errors — watcher may be degraded",
+                            consecutive_errors
+                        );
+                    }
                 }
             }
         }

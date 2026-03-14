@@ -35,7 +35,7 @@ fn is_mixed_language<F: Fn(&T) -> &Path, T>(items: &[T], get_path: F) -> bool {
         .any(|i| language_of_file(get_path(i)) != first_lang)
 }
 
-/// Sort key for language grouping: Rust < TypeScript < JavaScript < Python < Unknown (alphabetical).
+/// Sort key for language grouping: JavaScript < Python < Rust < TypeScript < Unknown.
 fn language_sort_key(lang: &str) -> u8 {
     match lang {
         "JavaScript" => 1,

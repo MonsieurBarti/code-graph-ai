@@ -61,9 +61,11 @@ pub fn apply_staleness_diff(
     let total_changed = files_to_reparse.len() + deleted_files.len();
     let total_current = current_files.len().max(1);
 
-    // Threshold: if >= 10% changed, do full rebuild (faster than scoped re-resolve for many changes)
+    // Threshold: if >= 10% changed, do full rebuild (faster than scoped re-resolve for many changes).
+    // NOTE: build_graph blocks the calling thread for the full duration of the rebuild.
+    // Async callers should use spawn_blocking or equivalent.
     if total_changed * 10 >= total_current {
-        return crate::build_graph(project_root, false).map_err(|e| anyhow::anyhow!(e));
+        return crate::build_graph(project_root, false);
     }
 
     // Scoped approach: remove deleted + changed files, re-add changed files
@@ -127,17 +129,28 @@ pub fn apply_staleness_diff(
         }
     }
 
-    // If any files were re-parsed, do a scoped resolve pass:
-    // collect parse results for ALL current files, then resolve all.
-    // This is acceptable on cold start (runs once).
+    // If any files were re-parsed, do a scoped resolve pass.
+    // Reuse already-reparsed results from the earlier parallel parse, and only re-parse
+    // unchanged files that are still needed for resolution (avoids full re-read from disk).
     if !files_to_reparse.is_empty() || !deleted_files.is_empty() {
         // Populate crate_name on FileInfo before resolve_all (same as build_graph does).
         // Without this, the resolver cannot classify Rust symbols by crate.
         crate::populate_rust_crate_names(&mut graph, project_root);
 
-        // Build parse results for all files in the updated graph (parallel re-parse for resolve)
-        let all_file_paths: Vec<PathBuf> = graph.file_index.keys().cloned().collect();
-        let parsed: Vec<(PathBuf, crate::parser::ParseResult)> = all_file_paths
+        // Seed with already-reparsed results (avoids re-reading changed files from disk).
+        let mut all_parse_results: HashMap<PathBuf, crate::parser::ParseResult> = HashMap::new();
+        for (path, _language_str, result) in reparsed {
+            all_parse_results.insert(path, result);
+        }
+
+        // Only re-parse unchanged files that were not already parsed above.
+        let unchanged_paths: Vec<PathBuf> = graph
+            .file_index
+            .keys()
+            .filter(|p| !all_parse_results.contains_key(*p))
+            .cloned()
+            .collect();
+        let unchanged_parsed: Vec<(PathBuf, crate::parser::ParseResult)> = unchanged_paths
             .par_iter()
             .filter_map(|file_path| {
                 let source = std::fs::read(file_path).ok()?;
@@ -145,8 +158,7 @@ pub fn apply_staleness_diff(
                 Some((file_path.clone(), result))
             })
             .collect();
-        let mut all_parse_results = HashMap::new();
-        for (path, result) in parsed {
+        for (path, result) in unchanged_parsed {
             all_parse_results.insert(path, result);
         }
         crate::resolver::resolve_all(&mut graph, project_root, &all_parse_results, false);
@@ -161,10 +173,11 @@ pub fn apply_staleness_diff(
     }
 
     // Phase 25: Enrich decorator frameworks and add HasDecorator self-edges after partial re-parse.
-    // Called unconditionally (no guard on files_to_reparse) -- both functions are idempotent and
-    // cached graphs from before Phase 18 may lack HasDecorator edges entirely.
-    crate::query::decorators::enrich_decorator_frameworks(&mut graph);
-    crate::query::decorators::add_has_decorator_edges(&mut graph);
+    // Only run when files were actually changed or deleted to avoid unnecessary full-graph scans.
+    if !files_to_reparse.is_empty() || !deleted_files.is_empty() {
+        crate::query::decorators::enrich_decorator_frameworks(&mut graph);
+        crate::query::decorators::add_has_decorator_edges(&mut graph);
+    }
 
     Ok(graph)
 }
