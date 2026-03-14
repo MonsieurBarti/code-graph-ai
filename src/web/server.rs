@@ -99,13 +99,20 @@ pub fn build_router(state: AppState) -> Router {
 
     // Fix: Restrict CORS to expected local origin instead of wildcard.
     let cors = CorsLayer::new()
-        .allow_origin("http://127.0.0.1:3000".parse::<axum::http::HeaderValue>().unwrap())
+        .allow_origin(
+            "http://127.0.0.1:3000"
+                .parse::<axum::http::HeaderValue>()
+                .unwrap(),
+        )
         .allow_methods([
             axum::http::Method::GET,
             axum::http::Method::POST,
             axum::http::Method::OPTIONS,
         ])
-        .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]);
+        .allow_headers([
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::AUTHORIZATION,
+        ]);
 
     router.layer(cors).with_state(state)
 }
@@ -123,18 +130,9 @@ async fn security_headers(
             .parse()
             .unwrap(),
     );
-    headers.insert(
-        "X-Content-Type-Options",
-        "nosniff".parse().unwrap(),
-    );
-    headers.insert(
-        "X-Frame-Options",
-        "DENY".parse().unwrap(),
-    );
-    headers.insert(
-        "Referrer-Policy",
-        "no-referrer".parse().unwrap(),
-    );
+    headers.insert("X-Content-Type-Options", "nosniff".parse().unwrap());
+    headers.insert("X-Frame-Options", "DENY".parse().unwrap());
+    headers.insert("Referrer-Policy", "no-referrer".parse().unwrap());
     response
 }
 
@@ -144,10 +142,12 @@ fn generate_auth_token() -> String {
     use std::hash::{BuildHasher, Hasher};
     let s = RandomState::new();
     let mut h = s.build_hasher();
-    h.write_u128(std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos());
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+    );
     let a = h.finish();
     let mut h2 = s.build_hasher();
     h2.write_u64(a);

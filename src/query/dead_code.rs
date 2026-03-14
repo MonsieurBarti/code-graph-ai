@@ -214,7 +214,10 @@ pub fn find_dead_code(graph: &CodeGraph, root: &Path, scope: Option<&Path>) -> D
 
     // Build a map: symbol NodeIndex -> file NodeIndex (avoids cloning FileInfo per symbol).
     // We iterate all node indices, for Symbol nodes check incoming Contains edge.
-    let mut sym_to_file_idx: HashMap<petgraph::stable_graph::NodeIndex, petgraph::stable_graph::NodeIndex> = HashMap::new();
+    let mut sym_to_file_idx: HashMap<
+        petgraph::stable_graph::NodeIndex,
+        petgraph::stable_graph::NodeIndex,
+    > = HashMap::new();
 
     for node_idx in graph.graph.node_indices() {
         if let GraphNode::Symbol(_) = &graph.graph[node_idx] {

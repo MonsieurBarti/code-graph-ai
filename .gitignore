@@ -32,6 +32,8 @@ test-results/
 .cache
 .fastembed_cache
 .dolt/
+.beads/
+.forge/
 
 # Dolt database files (added by bd init)
 *.db

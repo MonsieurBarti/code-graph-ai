@@ -651,7 +651,9 @@ fn main() -> Result<()> {
                             let end = (start + chunk.len()).min(total);
                             eprint!("\rEmbedding [{}/{}] ...", end, total);
 
-                            let embeddings = rag::embedding::embed_symbols(&engine, chunk).await?;
+                            let rt = tokio::runtime::Runtime::new()?;
+                            let embeddings =
+                                rt.block_on(rag::embedding::embed_symbols(&engine, chunk))?;
 
                             for (i, emb) in embeddings.iter().enumerate() {
                                 let (name, file_path, line) = &chunk[i];
@@ -1172,11 +1174,14 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::DeadCode { path, scope, format } => {
+        Commands::DeadCode {
+            path,
+            scope,
+            format,
+        } => {
             let path = project::resolve_project_root(path);
             let graph = cache::load_or_build(&path, false)?;
-            let result =
-                query::dead_code::find_dead_code(&graph, &path, scope.as_deref());
+            let result = query::dead_code::find_dead_code(&graph, &path, scope.as_deref());
             match format {
                 cli::OutputFormat::Json => {
                     println!("{}", serde_json::to_string_pretty(&result)?);
@@ -1188,7 +1193,12 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::Diff { path, from, to, format } => {
+        Commands::Diff {
+            path,
+            from,
+            to,
+            format,
+        } => {
             let path = project::resolve_project_root(path);
             let graph = cache::load_or_build(&path, false)?;
             match query::diff::compute_diff(&path, &from, to.as_deref(), &graph) {
@@ -1208,7 +1218,11 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::DiffImpact { base_ref, path, format } => {
+        Commands::DiffImpact {
+            base_ref,
+            path,
+            format,
+        } => {
             let path = project::resolve_project_root(path);
 
             // Shell out to git diff --name-only
@@ -1246,7 +1260,8 @@ fn main() -> Result<()> {
                         println!("{}", serde_json::to_string_pretty(&results)?);
                     }
                     _ => {
-                        let formatted = query::output::format_diff_impact_to_string(&results, &path);
+                        let formatted =
+                            query::output::format_diff_impact_to_string(&results, &path);
                         print!("{}", formatted);
                     }
                 }
@@ -1274,14 +1289,17 @@ fn main() -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&results)?);
                 }
                 _ => {
-                    let output =
-                        query::output::format_decorator_to_string(&results, &path, 100);
+                    let output = query::output::format_decorator_to_string(&results, &path, 100);
                     println!("{}", output);
                 }
             }
         }
 
-        Commands::Clusters { path, scope, format } => {
+        Commands::Clusters {
+            path,
+            scope,
+            format,
+        } => {
             let path = project::resolve_project_root(path);
             let graph = cache::load_or_build(&path, false)?;
             let results = query::clusters::find_clusters(
@@ -1311,15 +1329,13 @@ fn main() -> Result<()> {
         } => {
             let path = project::resolve_project_root(path);
             let graph = cache::load_or_build(&path, false)?;
-            let result =
-                query::flow::trace_flow(&graph, &entry, &target, max_paths, max_depth);
+            let result = query::flow::trace_flow(&graph, &entry, &target, max_paths, max_depth);
             match format {
                 cli::OutputFormat::Json => {
                     println!("{}", serde_json::to_string_pretty(&result)?);
                 }
                 _ => {
-                    let output =
-                        query::output::format_flow_to_string(&result, &entry, &target);
+                    let output = query::output::format_flow_to_string(&result, &entry, &target);
                     println!("{}", output);
                 }
             }
