@@ -77,22 +77,30 @@ pub fn format_find_results(
     let mixed = is_mixed_language(results, |r: &FindResult| r.file_path.as_path());
 
     // Sort results: by language first (for grouping), then file path, then line.
-    let mut sorted = results.to_vec();
-    if mixed {
-        sorted.sort_by(|a, b| {
-            let la = language_of_file(&a.file_path);
-            let lb = language_of_file(&b.file_path);
-            language_sort_key(la)
-                .cmp(&language_sort_key(lb))
-                .then(a.file_path.cmp(&b.file_path))
-                .then(a.line.cmp(&b.line))
-        });
-    }
+    // Only clone when sorting is needed to avoid unnecessary allocation.
+    let sorted;
+    let results_ref = if mixed {
+        sorted = {
+            let mut v = results.to_vec();
+            v.sort_by(|a, b| {
+                let la = language_of_file(&a.file_path);
+                let lb = language_of_file(&b.file_path);
+                language_sort_key(la)
+                    .cmp(&language_sort_key(lb))
+                    .then(a.file_path.cmp(&b.file_path))
+                    .then(a.line.cmp(&b.line))
+            });
+            v
+        };
+        &sorted[..]
+    } else {
+        results
+    };
 
     match format {
         OutputFormat::Compact => {
             let mut last_lang: Option<&'static str> = None;
-            for r in &sorted {
+            for r in results_ref {
                 if mixed {
                     let lang = language_of_file(&r.file_path);
                     if last_lang != Some(lang) {
@@ -134,25 +142,16 @@ pub fn format_find_results(
         OutputFormat::Table => {
             let use_color = std::io::stdout().is_terminal();
 
-            // Column widths: auto-sized to data.
-            let name_w = sorted
-                .iter()
-                .map(|r| r.symbol_name.len())
-                .max()
-                .unwrap_or(6)
-                .max(6);
-            let file_w = sorted
-                .iter()
-                .map(|r| {
-                    r.file_path
-                        .strip_prefix(project_root)
-                        .unwrap_or(&r.file_path)
-                        .to_string_lossy()
-                        .len()
-                })
-                .max()
-                .unwrap_or(4)
-                .max(4);
+            // Column widths: auto-sized to data (single pass).
+            let (name_w, file_w) = results_ref.iter().fold((6usize, 4usize), |(nw, fw), r| {
+                let file_len = r
+                    .file_path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&r.file_path)
+                    .to_string_lossy()
+                    .len();
+                (nw.max(r.symbol_name.len()), fw.max(file_len))
+            });
 
             if show_vis {
                 if use_color {
@@ -178,7 +177,7 @@ pub fn format_find_results(
                 }
                 println!("{}", "-".repeat(name_w + file_w + 26));
                 let mut last_lang: Option<&'static str> = None;
-                for r in &sorted {
+                for r in results_ref {
                     if mixed {
                         let lang = language_of_file(&r.file_path);
                         if last_lang != Some(lang) {
@@ -223,7 +222,7 @@ pub fn format_find_results(
                 }
                 println!("{}", "-".repeat(name_w + file_w + 14));
                 let mut last_lang: Option<&'static str> = None;
-                for r in &sorted {
+                for r in results_ref {
                     if mixed {
                         let lang = language_of_file(&r.file_path);
                         if last_lang != Some(lang) {
@@ -249,7 +248,7 @@ pub fn format_find_results(
         }
 
         OutputFormat::Json => {
-            let json_results: Vec<serde_json::Value> = sorted
+            let json_results: Vec<serde_json::Value> = results_ref
                 .iter()
                 .map(|r| {
                     let rel = r
@@ -1500,21 +1499,29 @@ pub fn format_find_to_string(
     let show_vis = any_non_private(results);
     let mixed = is_mixed_language(results, |r: &FindResult| r.file_path.as_path());
 
-    let mut sorted = results.to_vec();
-    if mixed {
-        sorted.sort_by(|a, b| {
-            let la = language_of_file(&a.file_path);
-            let lb = language_of_file(&b.file_path);
-            language_sort_key(la)
-                .cmp(&language_sort_key(lb))
-                .then(a.file_path.cmp(&b.file_path))
-                .then(a.line.cmp(&b.line))
-        });
-    }
+    // Only clone when sorting is needed to avoid unnecessary allocation.
+    let sorted;
+    let results_ref = if mixed {
+        sorted = {
+            let mut v = results.to_vec();
+            v.sort_by(|a, b| {
+                let la = language_of_file(&a.file_path);
+                let lb = language_of_file(&b.file_path);
+                language_sort_key(la)
+                    .cmp(&language_sort_key(lb))
+                    .then(a.file_path.cmp(&b.file_path))
+                    .then(a.line.cmp(&b.line))
+            });
+            v
+        };
+        &sorted[..]
+    } else {
+        results
+    };
 
     let mut buf = String::new();
     let mut last_lang: Option<&'static str> = None;
-    for r in &sorted {
+    for r in results_ref {
         if mixed {
             let lang = language_of_file(&r.file_path);
             if last_lang != Some(lang) {

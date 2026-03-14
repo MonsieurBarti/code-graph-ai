@@ -7,8 +7,8 @@ use anyhow::{Context, Result};
 const HOOK_FILES: &[&str] = &["codegraph-pretool-bash.sh", "codegraph-pretool-search.sh"];
 
 /// The hook matcher entries that code-graph adds to settings.json.
-const BASH_HOOK_COMMAND: &str = ".claude/hooks/codegraph-pretool-bash.sh";
-const SEARCH_HOOK_COMMAND: &str = ".claude/hooks/codegraph-pretool-search.sh";
+const BASH_HOOK_PATH: &str = ".claude/hooks/codegraph-pretool-bash.sh";
+const SEARCH_HOOK_PATH: &str = ".claude/hooks/codegraph-pretool-search.sh";
 const PERMISSION_ENTRY: &str = "Bash(code-graph *)";
 
 /// Run the setup (or uninstall) workflow.
@@ -103,7 +103,8 @@ fn run_uninstall(base_dir: &Path) -> Result<()> {
     for &hook_file in HOOK_FILES {
         let path = hooks_dir.join(hook_file);
         if path.exists() {
-            fs::remove_file(&path)?;
+            fs::remove_file(&path)
+                .with_context(|| format!("Failed to remove hook file: {}", path.display()))?;
             removed.push(hook_file);
         }
     }
@@ -174,7 +175,12 @@ fn set_executable(_path: &Path) -> Result<()> {
 fn merge_settings(settings_path: &Path, global: bool) -> Result<bool> {
     let mut settings: serde_json::Value = if settings_path.exists() {
         let content = fs::read_to_string(settings_path)?;
-        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+        serde_json::from_str(&content).with_context(|| {
+            format!(
+                "{} contains invalid JSON — fix or delete it first",
+                settings_path.display()
+            )
+        })?
     } else {
         serde_json::json!({})
     };
@@ -183,56 +189,56 @@ fn merge_settings(settings_path: &Path, global: bool) -> Result<bool> {
 
     // Determine command prefix based on scope
     let (bash_cmd, search_cmd) = if global {
+        let base = resolve_base_dir(true)?;
         (
-            format!(
-                "{}/hooks/codegraph-pretool-bash.sh",
-                resolve_base_dir(true)?.display()
-            ),
-            format!(
-                "{}/hooks/codegraph-pretool-search.sh",
-                resolve_base_dir(true)?.display()
-            ),
+            format!("{}/hooks/codegraph-pretool-bash.sh", base.display()),
+            format!("{}/hooks/codegraph-pretool-search.sh", base.display()),
         )
     } else {
-        (
-            BASH_HOOK_COMMAND.to_string(),
-            SEARCH_HOOK_COMMAND.to_string(),
-        )
+        (BASH_HOOK_PATH.to_string(), SEARCH_HOOK_PATH.to_string())
     };
 
     // Ensure hooks.PreToolUse exists
-    let hooks = settings
+    let settings_obj = settings
         .as_object_mut()
-        .unwrap()
+        .ok_or_else(|| anyhow::anyhow!("settings.json root is not a JSON object"))?;
+    let hooks = settings_obj
         .entry("hooks")
         .or_insert_with(|| serde_json::json!({}));
-    let pre_tool_use = hooks
+    let hooks_obj = hooks
         .as_object_mut()
-        .unwrap()
+        .ok_or_else(|| anyhow::anyhow!("settings.json \"hooks\" is not a JSON object"))?;
+    let pre_tool_use = hooks_obj
         .entry("PreToolUse")
         .or_insert_with(|| serde_json::json!([]));
 
-    let arr = pre_tool_use.as_array_mut().unwrap();
+    let arr = pre_tool_use
+        .as_array_mut()
+        .ok_or_else(|| anyhow::anyhow!("settings.json \"hooks.PreToolUse\" is not a JSON array"))?;
 
     // Add/update Bash matcher with codegraph hook
-    modified |= ensure_hook_entry(arr, "Bash", &bash_cmd);
+    modified |= ensure_hook_entry(arr, "Bash", &bash_cmd)?;
 
     // Add/update Grep|Glob matcher with codegraph hook
-    modified |= ensure_hook_entry(arr, "Grep|Glob", &search_cmd);
+    modified |= ensure_hook_entry(arr, "Grep|Glob", &search_cmd)?;
 
     // Add permission
-    let permissions = settings
+    let settings_obj = settings
         .as_object_mut()
-        .unwrap()
+        .ok_or_else(|| anyhow::anyhow!("settings.json root is not a JSON object"))?;
+    let permissions = settings_obj
         .entry("permissions")
         .or_insert_with(|| serde_json::json!({}));
-    let allow = permissions
+    let permissions_obj = permissions
         .as_object_mut()
-        .unwrap()
+        .ok_or_else(|| anyhow::anyhow!("settings.json \"permissions\" is not a JSON object"))?;
+    let allow = permissions_obj
         .entry("allow")
         .or_insert_with(|| serde_json::json!([]));
 
-    let allow_arr = allow.as_array_mut().unwrap();
+    let allow_arr = allow.as_array_mut().ok_or_else(|| {
+        anyhow::anyhow!("settings.json \"permissions.allow\" is not a JSON array")
+    })?;
     let perm_str = serde_json::Value::String(PERMISSION_ENTRY.to_string());
     if !allow_arr.contains(&perm_str) {
         allow_arr.push(perm_str);
@@ -263,7 +269,7 @@ fn ensure_hook_entry(
     pre_tool_use: &mut Vec<serde_json::Value>,
     matcher: &str,
     command: &str,
-) -> bool {
+) -> Result<bool> {
     let hook_entry = serde_json::json!({
         "type": "command",
         "command": command
@@ -272,12 +278,15 @@ fn ensure_hook_entry(
     // Find existing matcher group
     for entry in pre_tool_use.iter_mut() {
         if entry.get("matcher").and_then(|m| m.as_str()) == Some(matcher) {
-            let hooks = entry
-                .as_object_mut()
-                .unwrap()
+            let entry_obj = entry.as_object_mut().ok_or_else(|| {
+                anyhow::anyhow!("PreToolUse entry for matcher \"{matcher}\" is not a JSON object")
+            })?;
+            let hooks = entry_obj
                 .entry("hooks")
                 .or_insert_with(|| serde_json::json!([]));
-            let hooks_arr = hooks.as_array_mut().unwrap();
+            let hooks_arr = hooks.as_array_mut().ok_or_else(|| {
+                anyhow::anyhow!("\"hooks\" for matcher \"{matcher}\" is not a JSON array")
+            })?;
 
             // Check if our hook is already there
             let already_has = hooks_arr.iter().any(|h| {
@@ -288,9 +297,9 @@ fn ensure_hook_entry(
 
             if !already_has {
                 hooks_arr.push(hook_entry);
-                return true;
+                return Ok(true);
             }
-            return false;
+            return Ok(false);
         }
     }
 
@@ -299,7 +308,7 @@ fn ensure_hook_entry(
         "matcher": matcher,
         "hooks": [hook_entry]
     }));
-    true
+    Ok(true)
 }
 
 /// Remove code-graph hook entries from settings.json.
@@ -492,7 +501,7 @@ mod tests {
     #[test]
     fn test_ensure_hook_entry_adds_new_matcher() {
         let mut arr: Vec<serde_json::Value> = vec![];
-        let modified = ensure_hook_entry(&mut arr, "Bash", "some/hook.sh");
+        let modified = ensure_hook_entry(&mut arr, "Bash", "some/hook.sh").unwrap();
         assert!(modified);
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["matcher"], "Bash");
@@ -506,7 +515,7 @@ mod tests {
                 { "type": "command", "command": "other-hook.sh" }
             ]
         })];
-        let modified = ensure_hook_entry(&mut arr, "Bash", "codegraph-pretool-bash.sh");
+        let modified = ensure_hook_entry(&mut arr, "Bash", "codegraph-pretool-bash.sh").unwrap();
         assert!(modified);
         assert_eq!(arr.len(), 1); // Still one matcher group
         let hooks = arr[0]["hooks"].as_array().unwrap();
@@ -521,7 +530,7 @@ mod tests {
                 { "type": "command", "command": "codegraph-pretool-bash.sh" }
             ]
         })];
-        let modified = ensure_hook_entry(&mut arr, "Bash", "codegraph-pretool-bash.sh");
+        let modified = ensure_hook_entry(&mut arr, "Bash", "codegraph-pretool-bash.sh").unwrap();
         assert!(!modified); // Already present
         let hooks = arr[0]["hooks"].as_array().unwrap();
         assert_eq!(hooks.len(), 1); // Still one hook
