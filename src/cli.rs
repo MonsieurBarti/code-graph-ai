@@ -11,23 +11,20 @@ pub enum SnapshotAction {
     Create {
         /// Snapshot name (alphanumeric, hyphens, underscores only).
         name: String,
-        /// Path to the project root (defaults to current directory).
-        #[arg(default_value = ".")]
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
     },
     /// List all stored snapshots with creation timestamps.
     List {
-        /// Path to the project root (defaults to current directory).
-        #[arg(default_value = ".")]
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
     },
     /// Delete a named snapshot.
     Delete {
         /// Snapshot name to delete.
         name: String,
-        /// Path to the project root (defaults to current directory).
-        #[arg(default_value = ".")]
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
     },
 }
 
@@ -100,8 +97,8 @@ pub enum Commands {
         /// Symbol name or regex pattern (e.g. "UserService" or "User.*Service").
         symbol: String,
 
-        /// Path to the project root to index and query.
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
 
         /// Case-insensitive pattern matching.
         #[arg(short = 'i', long)]
@@ -131,8 +128,8 @@ pub enum Commands {
         /// Symbol name or regex pattern.
         symbol: String,
 
-        /// Path to the project root to index and query.
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
 
         /// Case-insensitive pattern matching.
         #[arg(short = 'i', long)]
@@ -162,8 +159,8 @@ pub enum Commands {
         /// Symbol name or regex pattern.
         symbol: String,
 
-        /// Path to the project root to index and query.
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
 
         /// Case-insensitive pattern matching.
         #[arg(short = 'i', long)]
@@ -187,8 +184,8 @@ pub enum Commands {
     /// Uses Kosaraju's SCC algorithm. Each reported cycle is a set of files
     /// that mutually import each other directly or transitively.
     Circular {
-        /// Path to the project root to index and query.
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
 
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
@@ -201,8 +198,8 @@ pub enum Commands {
 
     /// Project statistics overview: file count, symbol breakdown, import summary.
     Stats {
-        /// Path to the project root to index and query.
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
 
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
@@ -220,8 +217,8 @@ pub enum Commands {
         /// Symbol name or regex pattern.
         symbol: String,
 
-        /// Path to the project root to index and query.
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
 
         /// Case-insensitive pattern matching.
         #[arg(short = 'i', long)]
@@ -250,8 +247,8 @@ pub enum Commands {
     /// Useful for debugging watcher behavior. The MCP server starts its own
     /// embedded watcher automatically — this command runs standalone.
     Watch {
-        /// Path to the project root to watch.
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
     },
 
     /// Create, list, or delete graph snapshots for diff comparisons.
@@ -312,8 +309,8 @@ pub enum Commands {
 
     /// Export the code graph to DOT or Mermaid format for architectural visualization.
     Export {
-        /// Path to the project root to index and export.
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
 
         /// Output format: dot (default) or mermaid.
         #[arg(long, value_enum, default_value_t = export::model::ExportFormat::Dot)]
@@ -393,7 +390,7 @@ mod tests {
             Commands::Snapshot { action } => match action {
                 SnapshotAction::Create { name, path } => {
                     assert_eq!(name, "my-snap");
-                    assert_eq!(path, PathBuf::from("."));
+                    assert!(path.is_none(), "path should be None when not specified");
                 }
                 _ => panic!("expected Create action"),
             },
@@ -407,7 +404,7 @@ mod tests {
         match cli.command {
             Commands::Snapshot { action } => match action {
                 SnapshotAction::List { path } => {
-                    assert_eq!(path, PathBuf::from("."));
+                    assert!(path.is_none(), "path should be None when not specified");
                 }
                 _ => panic!("expected List action"),
             },
@@ -422,7 +419,7 @@ mod tests {
             Commands::Snapshot { action } => match action {
                 SnapshotAction::Delete { name, path } => {
                     assert_eq!(name, "my-snap");
-                    assert_eq!(path, PathBuf::from("."));
+                    assert!(path.is_none(), "path should be None when not specified");
                 }
                 _ => panic!("expected Delete action"),
             },
