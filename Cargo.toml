@@ -53,3 +53,6 @@ usearch = { version = "2", optional = true }
 genai = { version = "0.5", optional = true }
 oauth2 = { version = "4", optional = true }
 uuid = { version = "1", features = ["v4"], optional = true }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

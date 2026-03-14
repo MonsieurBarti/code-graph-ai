@@ -584,6 +584,34 @@ mod tests {
         }
     }
 
+    /// Verify that `code-graph serve` parses with default port and path.
+    #[test]
+    #[cfg(feature = "web")]
+    fn test_serve_parses_defaults() {
+        let cli = Cli::parse_from(["code-graph", "serve"]);
+        match cli.command {
+            Commands::Serve { path, port, .. } => {
+                assert_eq!(path, PathBuf::from("."));
+                assert_eq!(port, 7070);
+            }
+            _ => panic!("expected Serve command"),
+        }
+    }
+
+    /// Verify that `code-graph serve /tmp --port 8080` parses correctly.
+    #[test]
+    #[cfg(feature = "web")]
+    fn test_serve_custom_port_and_path() {
+        let cli = Cli::parse_from(["code-graph", "serve", "/tmp", "--port", "8080"]);
+        match cli.command {
+            Commands::Serve { path, port, .. } => {
+                assert_eq!(path, PathBuf::from("/tmp"));
+                assert_eq!(port, 8080);
+            }
+            _ => panic!("expected Serve command"),
+        }
+    }
+
     /// Verify that `code-graph serve --ollama` parses when compiled with rag feature.
     #[test]
     #[cfg(all(feature = "web", feature = "rag"))]

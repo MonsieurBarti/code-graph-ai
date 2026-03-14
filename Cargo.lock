@@ -587,6 +587,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "tower",
  "tower-http",
  "tree-sitter",
  "tree-sitter-go",
