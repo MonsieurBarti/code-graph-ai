@@ -401,6 +401,18 @@ pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
     Ok(graph)
 }
 
+/// Try to query the daemon first; if unavailable, fall back to local graph execution.
+/// Returns `Some(DaemonResponse)` if the daemon handled the query, `None` if fallback needed.
+fn try_daemon_query(
+    project_root: &Path,
+    request: &daemon::protocol::DaemonRequest,
+) -> Option<daemon::protocol::DaemonResponse> {
+    if !daemon::pid::is_daemon_running(project_root) {
+        return None;
+    }
+    daemon::client::query_daemon(project_root, request).ok()
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -721,6 +733,27 @@ fn main() -> Result<()> {
 
             let language_filter = parse_language_filter(language.as_deref())?;
 
+            if let Some(resp) = try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::Find {
+                    symbol: symbol.clone(),
+                    case_insensitive,
+                    kind: kind.clone(),
+                    file: file.clone(),
+                    language: language.clone(),
+                },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
+
             let graph = cache::load_or_build(&path, false)?;
             let results = query::find::find_symbol(
                 &graph,
@@ -754,6 +787,24 @@ fn main() -> Result<()> {
         } => {
             let path = project::resolve_project_root(path);
             let language_filter = parse_language_filter(language.as_deref())?;
+
+            if let Some(resp) = try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::Stats {
+                    language: language.clone(),
+                },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
+
             let graph = cache::load_or_build(&path, false)?;
             let stats = query::stats::project_stats(&graph);
             query::output::format_stats(&stats, &format, language_filter);
@@ -777,6 +828,27 @@ fn main() -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("invalid symbol pattern '{}': {}", symbol, e))?;
 
             let language_filter = parse_language_filter(language.as_deref())?;
+
+            if let Some(resp) = try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::Refs {
+                    symbol: symbol.clone(),
+                    case_insensitive,
+                    kind: vec![],
+                    file: None,
+                    language: language.clone(),
+                },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
 
             let graph = cache::load_or_build(&path, false)?;
             let matches = query::find::match_symbols(&graph, &symbol, case_insensitive)?;
@@ -831,6 +903,26 @@ fn main() -> Result<()> {
 
             let language_filter = parse_language_filter(language.as_deref())?;
 
+            if let Some(resp) = try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::Impact {
+                    symbol: symbol.clone(),
+                    case_insensitive,
+                    tree,
+                    language: language.clone(),
+                },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
+
             let graph = cache::load_or_build(&path, false)?;
             let matches = query::find::match_symbols(&graph, &symbol, case_insensitive)?;
 
@@ -861,6 +953,23 @@ fn main() -> Result<()> {
         } => {
             let path = project::resolve_project_root(path);
             let language_filter = parse_language_filter(language.as_deref())?;
+
+            if let Some(resp) = try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::Circular {
+                    language: language.clone(),
+                },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
 
             let graph = cache::load_or_build(&path, false)?;
             let mut cycles = query::circular::find_circular(&graph, &path);
@@ -893,6 +1002,25 @@ fn main() -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("invalid symbol pattern '{}': {}", symbol, e))?;
 
             let language_filter = parse_language_filter(language.as_deref())?;
+
+            if let Some(resp) = try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::Context {
+                    symbol: symbol.clone(),
+                    case_insensitive,
+                    language: language.clone(),
+                },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
 
             let graph = cache::load_or_build(&path, false)?;
             let matches = query::find::match_symbols(&graph, &symbol, case_insensitive)?;
@@ -940,6 +1068,22 @@ fn main() -> Result<()> {
             match action {
                 cli::SnapshotAction::Create { name, path } => {
                     let path = project::resolve_project_root(path);
+
+                    if let Some(resp) = try_daemon_query(
+                        &path,
+                        &daemon::protocol::DaemonRequest::SnapshotCreate { name: name.clone() },
+                    ) {
+                        match resp {
+                            daemon::protocol::DaemonResponse::Success { data, .. } => {
+                                println!("{}", serde_json::to_string_pretty(&data)?);
+                                return Ok(());
+                            }
+                            daemon::protocol::DaemonResponse::Error { message, .. } => {
+                                eprintln!("daemon error: {}", message);
+                            }
+                        }
+                    }
+
                     let graph = cache::load_or_build(&path, false)?;
                     crate::query::diff::create_snapshot(&graph, &path, &name)?;
                     println!("snapshot '{}' created", name);
@@ -978,6 +1122,30 @@ fn main() -> Result<()> {
             exclude,
         } => {
             let path = project::resolve_project_root(path);
+
+            if let Some(resp) = try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::Export {
+                    format: format!("{:?}", format).to_lowercase(),
+                    granularity: format!("{:?}", granularity).to_lowercase(),
+                    stdout,
+                    root: root.clone(),
+                    symbol: symbol.clone(),
+                    depth,
+                    exclude: exclude.clone(),
+                },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
+
             let graph = cache::load_or_build(&path, false)?;
             let params = export::model::ExportParams {
                 format,
@@ -1119,6 +1287,25 @@ fn main() -> Result<()> {
             format,
         } => {
             let project_root = project::resolve_project_root(None);
+
+            if let Some(resp) = try_daemon_query(
+                &project_root,
+                &daemon::protocol::DaemonRequest::Structure {
+                    path: path.clone(),
+                    depth,
+                },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
+
             let graph = cache::load_or_build(&project_root, false)?;
             let tree =
                 query::structure::file_structure(&graph, &project_root, path.as_deref(), depth);
@@ -1135,6 +1322,22 @@ fn main() -> Result<()> {
 
         Commands::FileSummary { file, path, format } => {
             let path = project::resolve_project_root(path);
+
+            if let Some(resp) = try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::FileSummary { file: file.clone() },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
+
             let graph = cache::load_or_build(&path, false)?;
             match query::file_summary::file_summary(&graph, &path, &file) {
                 Ok(summary) => match format {
@@ -1155,6 +1358,22 @@ fn main() -> Result<()> {
 
         Commands::Imports { file, path, format } => {
             let path = project::resolve_project_root(path);
+
+            if let Some(resp) = try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::Imports { file: file.clone() },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
+
             let graph = cache::load_or_build(&path, false)?;
             match query::imports::file_imports(&graph, &path, &file) {
                 Ok(entries) => match format {
@@ -1182,6 +1401,24 @@ fn main() -> Result<()> {
             format,
         } => {
             let path = project::resolve_project_root(path);
+
+            if let Some(resp) = try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::DeadCode {
+                    scope: scope.clone(),
+                },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
+
             let graph = cache::load_or_build(&path, false)?;
             let result = query::dead_code::find_dead_code(&graph, &path, scope.as_deref());
             match format {
@@ -1202,6 +1439,25 @@ fn main() -> Result<()> {
             format,
         } => {
             let path = project::resolve_project_root(path);
+
+            if let Some(resp) = try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::Diff {
+                    from: from.clone(),
+                    to: to.clone(),
+                },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
+
             let graph = cache::load_or_build(&path, false)?;
             match query::diff::compute_diff(&path, &from, to.as_deref(), &graph) {
                 Ok(diff) => match format {
@@ -1226,6 +1482,23 @@ fn main() -> Result<()> {
             format,
         } => {
             let path = project::resolve_project_root(path);
+
+            if let Some(resp) = try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::DiffImpact {
+                    base_ref: base_ref.clone(),
+                },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
 
             // Shell out to git diff --name-only
             let output = std::process::Command::new("git")
@@ -1278,6 +1551,26 @@ fn main() -> Result<()> {
             format,
         } => {
             let path = project::resolve_project_root(path);
+
+            if let Some(resp) = try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::Decorators {
+                    pattern: pattern.clone(),
+                    language: language.clone(),
+                    framework: framework.clone(),
+                },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
+
             let graph = cache::load_or_build(&path, false)?;
             let results = query::decorators::find_by_decorator(
                 &graph,
@@ -1303,6 +1596,24 @@ fn main() -> Result<()> {
             format,
         } => {
             let path = project::resolve_project_root(path);
+
+            if let Some(resp) = try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::Clusters {
+                    scope: scope.clone(),
+                },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
+
             let graph = cache::load_or_build(&path, false)?;
             let results = query::clusters::find_clusters(
                 &graph,
@@ -1330,6 +1641,27 @@ fn main() -> Result<()> {
             format,
         } => {
             let path = project::resolve_project_root(path);
+
+            if let Some(resp) = try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::Flow {
+                    entry: entry.clone(),
+                    target: target.clone(),
+                    max_paths,
+                    max_depth,
+                },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
+
             let graph = cache::load_or_build(&path, false)?;
             let result = query::flow::trace_flow(&graph, &entry, &target, max_paths, max_depth);
             match format {
@@ -1354,6 +1686,25 @@ fn main() -> Result<()> {
             format,
         } => {
             let path = project::resolve_project_root(path);
+
+            if let Some(resp) = try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::Rename {
+                    symbol: symbol.clone(),
+                    new_name: new_name.clone(),
+                },
+            ) {
+                match resp {
+                    daemon::protocol::DaemonResponse::Success { data, .. } => {
+                        println!("{}", serde_json::to_string_pretty(&data)?);
+                        return Ok(());
+                    }
+                    daemon::protocol::DaemonResponse::Error { message, .. } => {
+                        eprintln!("daemon error: {}", message);
+                    }
+                }
+            }
+
             let graph = cache::load_or_build(&path, false)?;
             let items = query::rename::plan_rename(&graph, &symbol, &new_name, &path);
             match format {
@@ -1363,6 +1714,102 @@ fn main() -> Result<()> {
                 _ => {
                     let output = query::output::format_rename_to_string(&items, &path);
                     println!("{}", output);
+                }
+            }
+        }
+
+        Commands::DaemonRun { path } => {
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(daemon::server::run_daemon(path))?;
+        }
+
+        Commands::Daemon { action } => {
+            match action {
+                cli::DaemonAction::Start { path } => {
+                    let path = project::resolve_project_root(path);
+
+                    if daemon::pid::is_daemon_running(&path) {
+                        let pid = daemon::pid::read_pid_file(&path).unwrap_or(0);
+                        eprintln!("daemon already running (pid {})", pid);
+                        return Ok(());
+                    }
+
+                    // Re-exec the current binary with daemon-run.
+                    let exe = std::env::current_exe()
+                        .map_err(|e| anyhow::anyhow!("failed to get current exe: {}", e))?;
+
+                    // Ensure .code-graph dir exists for the log file.
+                    let log_dir = path.join(".code-graph");
+                    std::fs::create_dir_all(&log_dir)?;
+                    let log_file = std::fs::File::create(daemon::pid::log_path(&path))?;
+
+                    let child = std::process::Command::new(exe)
+                        .arg("daemon-run")
+                        .arg(&path)
+                        .stdout(log_file.try_clone()?)
+                        .stderr(log_file)
+                        .stdin(std::process::Stdio::null())
+                        .spawn()
+                        .map_err(|e| anyhow::anyhow!("failed to spawn daemon: {}", e))?;
+
+                    println!("daemon started (pid {})", child.id());
+                }
+                cli::DaemonAction::Stop { path } => {
+                    let path = project::resolve_project_root(path);
+
+                    // Try graceful shutdown via socket first.
+                    let shutdown_sent = daemon::client::query_daemon(
+                        &path,
+                        &daemon::protocol::DaemonRequest::Shutdown,
+                    )
+                    .is_ok();
+
+                    if !shutdown_sent {
+                        // Fall back to kill(pid, SIGTERM).
+                        if let Some(pid) = daemon::pid::read_pid_file(&path) {
+                            #[cfg(unix)]
+                            unsafe {
+                                libc::kill(pid as libc::pid_t, libc::SIGTERM);
+                            }
+                            eprintln!("sent SIGTERM to pid {}", pid);
+                        } else {
+                            eprintln!("daemon is not running");
+                        }
+                    } else {
+                        eprintln!("daemon shutting down");
+                    }
+
+                    // Clean up stale PID and socket files.
+                    let _ = daemon::pid::remove_pid_file(&path);
+                    let _ = daemon::pid::remove_socket_file(&path);
+                }
+                cli::DaemonAction::Status { path } => {
+                    let path = project::resolve_project_root(path);
+
+                    if daemon::pid::is_daemon_running(&path) {
+                        let pid = daemon::pid::read_pid_file(&path).unwrap_or(0);
+
+                        // Try a Ping to verify the socket is responsive.
+                        match daemon::client::query_daemon(
+                            &path,
+                            &daemon::protocol::DaemonRequest::Ping,
+                        ) {
+                            Ok(daemon::protocol::DaemonResponse::Success { version, .. }) => {
+                                println!("daemon running (pid {}, protocol v{})", pid, version);
+                            }
+                            Ok(_) => {
+                                println!(
+                                    "daemon running (pid {}), but returned unexpected response",
+                                    pid
+                                );
+                            }
+                            Err(_) => {
+                                println!("daemon running (pid {}), but socket unreachable", pid);
+                            }
+                        }
+                    } else {
+                        println!("daemon not running");
+                    }
                 }
             }
         }

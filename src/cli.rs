@@ -4,6 +4,26 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::export;
 
+/// Action for the `daemon` subcommand.
+#[derive(Subcommand, Debug)]
+pub enum DaemonAction {
+    /// Start the background daemon for the given project.
+    Start {
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
+    },
+    /// Stop the background daemon for the given project.
+    Stop {
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
+    },
+    /// Show daemon status for the given project.
+    Status {
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
+    },
+}
+
 /// Action for the `snapshot` subcommand.
 #[derive(Subcommand, Debug)]
 pub enum SnapshotAction {
@@ -459,6 +479,19 @@ pub enum Commands {
         uninstall: bool,
     },
 
+    /// Manage the background daemon (start, stop, status).
+    Daemon {
+        #[command(subcommand)]
+        action: DaemonAction,
+    },
+
+    /// Internal: run daemon server (invoked via re-exec, hidden from help).
+    #[command(name = "daemon-run", hide = true)]
+    DaemonRun {
+        /// Path to the project root.
+        path: PathBuf,
+    },
+
     /// Plan a symbol rename: list all files and lines that reference the symbol.
     Rename {
         /// Current symbol name to rename.
@@ -574,6 +607,73 @@ mod tests {
                 assert!(!ollama, "--ollama should default to false");
             }
             _ => panic!("expected Serve command"),
+        }
+    }
+
+    #[test]
+    fn test_daemon_start_parses() {
+        let cli = Cli::parse_from(["code-graph", "daemon", "start"]);
+        match cli.command {
+            Commands::Daemon { action } => match action {
+                DaemonAction::Start { path } => {
+                    assert!(path.is_none(), "path should be None when not specified");
+                }
+                _ => panic!("expected Start action"),
+            },
+            _ => panic!("expected Daemon command"),
+        }
+    }
+
+    #[test]
+    fn test_daemon_start_with_path_parses() {
+        let cli = Cli::parse_from(["code-graph", "daemon", "start", "/tmp/myproject"]);
+        match cli.command {
+            Commands::Daemon { action } => match action {
+                DaemonAction::Start { path } => {
+                    assert_eq!(path, Some(PathBuf::from("/tmp/myproject")));
+                }
+                _ => panic!("expected Start action"),
+            },
+            _ => panic!("expected Daemon command"),
+        }
+    }
+
+    #[test]
+    fn test_daemon_stop_parses() {
+        let cli = Cli::parse_from(["code-graph", "daemon", "stop"]);
+        match cli.command {
+            Commands::Daemon { action } => match action {
+                DaemonAction::Stop { path } => {
+                    assert!(path.is_none(), "path should be None when not specified");
+                }
+                _ => panic!("expected Stop action"),
+            },
+            _ => panic!("expected Daemon command"),
+        }
+    }
+
+    #[test]
+    fn test_daemon_status_parses() {
+        let cli = Cli::parse_from(["code-graph", "daemon", "status"]);
+        match cli.command {
+            Commands::Daemon { action } => match action {
+                DaemonAction::Status { path } => {
+                    assert!(path.is_none(), "path should be None when not specified");
+                }
+                _ => panic!("expected Status action"),
+            },
+            _ => panic!("expected Daemon command"),
+        }
+    }
+
+    #[test]
+    fn test_daemon_run_parses() {
+        let cli = Cli::parse_from(["code-graph", "daemon-run", "/tmp/myproject"]);
+        match cli.command {
+            Commands::DaemonRun { path } => {
+                assert_eq!(path, PathBuf::from("/tmp/myproject"));
+            }
+            _ => panic!("expected DaemonRun command"),
         }
     }
 }
