@@ -1,5 +1,9 @@
 # code-graph
 
+<p align="center">
+  <img src="assets/banner.png" alt="Code Graph AI" />
+</p>
+
 High-performance code intelligence engine that indexes TypeScript, JavaScript, Rust, Python, and Go codebases into a queryable dependency graph. Built in Rust, designed for AI agents.
 
 Gives [Claude Code](https://docs.anthropic.com/en/docs/claude-code) direct access to your codebase's structure via [MCP](https://modelcontextprotocol.io/) -- no source file reading needed. Twenty MCP tools cover symbol search, reference tracing, blast radius analysis, circular dependency detection, dead code detection, decorator search, clustering, call chain tracing, rename planning, diff impact, graph export, batch queries, snapshot/diff, and multi-project management.
