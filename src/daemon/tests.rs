@@ -1,6 +1,6 @@
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use tempfile::TempDir;
@@ -39,8 +39,8 @@ async fn wait_for_socket(sock: &std::path::Path, timeout: Duration) -> bool {
 
 /// Send a query to the daemon from a blocking context, avoiding blocking the
 /// tokio runtime thread. Returns the deserialized response.
-async fn query_blocking(root: &PathBuf, request: DaemonRequest) -> anyhow::Result<DaemonResponse> {
-    let root = root.clone();
+async fn query_blocking(root: &Path, request: DaemonRequest) -> anyhow::Result<DaemonResponse> {
+    let root = root.to_path_buf();
     tokio::task::spawn_blocking(move || query_daemon(&root, &request))
         .await
         .expect("spawn_blocking panicked")

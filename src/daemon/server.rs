@@ -561,12 +561,14 @@ fn dispatch_query(
         } => dispatch_export(
             graph,
             project_root,
-            format,
-            granularity,
-            root.as_deref(),
-            symbol.as_deref(),
-            *depth,
-            exclude,
+            &ExportArgs {
+                format,
+                granularity,
+                root_filter: root.as_deref(),
+                symbol_filter: symbol.as_deref(),
+                depth: *depth,
+                exclude,
+            },
         ),
 
         DaemonRequest::Structure { path, depth } => {
@@ -835,17 +837,21 @@ fn dispatch_dead_code(
     }
 }
 
+struct ExportArgs<'a> {
+    format: &'a str,
+    granularity: &'a str,
+    root_filter: Option<&'a Path>,
+    symbol_filter: Option<&'a str>,
+    depth: usize,
+    exclude: &'a [String],
+}
+
 fn dispatch_export(
     graph: &CodeGraph,
     project_root: &Path,
-    format: &str,
-    granularity: &str,
-    root_filter: Option<&Path>,
-    symbol_filter: Option<&str>,
-    depth: usize,
-    exclude: &[String],
+    args: &ExportArgs<'_>,
 ) -> DaemonResponse {
-    let fmt = match format {
+    let fmt = match args.format {
         "dot" => crate::export::model::ExportFormat::Dot,
         "mermaid" => crate::export::model::ExportFormat::Mermaid,
         other => {
@@ -856,7 +862,7 @@ fn dispatch_export(
         }
     };
 
-    let gran = match granularity {
+    let gran = match args.granularity {
         "symbol" => crate::export::model::Granularity::Symbol,
         "file" => crate::export::model::Granularity::File,
         "package" => crate::export::model::Granularity::Package,
@@ -871,10 +877,10 @@ fn dispatch_export(
     let params = crate::export::model::ExportParams {
         format: fmt,
         granularity: gran,
-        root_filter: root_filter.map(|p| p.to_path_buf()),
-        symbol_filter: symbol_filter.map(|s| s.to_string()),
-        depth,
-        exclude_patterns: exclude.to_vec(),
+        root_filter: args.root_filter.map(|p| p.to_path_buf()),
+        symbol_filter: args.symbol_filter.map(|s| s.to_string()),
+        depth: args.depth,
+        exclude_patterns: args.exclude.to_vec(),
         project_root: project_root.to_path_buf(),
         stdout: true,
     };
