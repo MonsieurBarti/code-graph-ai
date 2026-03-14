@@ -11,23 +11,20 @@ pub enum SnapshotAction {
     Create {
         /// Snapshot name (alphanumeric, hyphens, underscores only).
         name: String,
-        /// Path to the project root (defaults to current directory).
-        #[arg(default_value = ".")]
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
     },
     /// List all stored snapshots with creation timestamps.
     List {
-        /// Path to the project root (defaults to current directory).
-        #[arg(default_value = ".")]
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
     },
     /// Delete a named snapshot.
     Delete {
         /// Snapshot name to delete.
         name: String,
-        /// Path to the project root (defaults to current directory).
-        #[arg(default_value = ".")]
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
     },
 }
 
@@ -100,8 +97,8 @@ pub enum Commands {
         /// Symbol name or regex pattern (e.g. "UserService" or "User.*Service").
         symbol: String,
 
-        /// Path to the project root to index and query.
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
 
         /// Case-insensitive pattern matching.
         #[arg(short = 'i', long)]
@@ -131,8 +128,8 @@ pub enum Commands {
         /// Symbol name or regex pattern.
         symbol: String,
 
-        /// Path to the project root to index and query.
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
 
         /// Case-insensitive pattern matching.
         #[arg(short = 'i', long)]
@@ -162,8 +159,8 @@ pub enum Commands {
         /// Symbol name or regex pattern.
         symbol: String,
 
-        /// Path to the project root to index and query.
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
 
         /// Case-insensitive pattern matching.
         #[arg(short = 'i', long)]
@@ -187,8 +184,8 @@ pub enum Commands {
     /// Uses Kosaraju's SCC algorithm. Each reported cycle is a set of files
     /// that mutually import each other directly or transitively.
     Circular {
-        /// Path to the project root to index and query.
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
 
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
@@ -201,8 +198,8 @@ pub enum Commands {
 
     /// Project statistics overview: file count, symbol breakdown, import summary.
     Stats {
-        /// Path to the project root to index and query.
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
 
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
@@ -220,8 +217,8 @@ pub enum Commands {
         /// Symbol name or regex pattern.
         symbol: String,
 
-        /// Path to the project root to index and query.
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
 
         /// Case-insensitive pattern matching.
         #[arg(short = 'i', long)]
@@ -236,60 +233,16 @@ pub enum Commands {
         language: Option<String>,
     },
 
-    /// Start an MCP stdio server exposing graph queries as tools for Claude Code.
-    Mcp {
-        /// Path to the project root (defaults to current directory if omitted).
-        path: Option<PathBuf>,
-        /// Start a file watcher that auto-reindexes on changes.
-        #[arg(long)]
-        watch: bool,
-    },
-
     /// Start a file watcher that monitors for changes and re-indexes incrementally.
-    ///
-    /// Useful for debugging watcher behavior. The MCP server starts its own
-    /// embedded watcher automatically — this command runs standalone.
     Watch {
-        /// Path to the project root to watch.
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
     },
 
     /// Create, list, or delete graph snapshots for diff comparisons.
     Snapshot {
         #[command(subcommand)]
         action: SnapshotAction,
-    },
-
-    /// Set up MCP server configuration for supported editors (Claude Code, Cursor, Windsurf).
-    ///
-    /// Auto-detects editors, writes config files, and verifies the server starts.
-    /// Shows a confirmation prompt before writing. Use --yes to skip the prompt.
-    Setup {
-        /// Path to the project root (defaults to current directory).
-        #[arg(default_value = ".")]
-        path: PathBuf,
-
-        /// Skip confirmation prompt and write immediately (for non-interactive/CI usage).
-        #[arg(long, short = 'y')]
-        yes: bool,
-
-        /// Install Claude Code skills (explore-codebase, debug-impact, refactor-symbol) into .claude/skills/.
-        /// Enabled by default for Claude Code — use --no-skills to skip.
-        #[arg(long)]
-        skills: bool,
-
-        /// Install PreToolUse hook that enriches Grep/Glob results with graph context.
-        /// Enabled by default for Claude Code — use --no-hooks to skip.
-        #[arg(long)]
-        hooks: bool,
-
-        /// Skip skill installation even when Claude Code is detected.
-        #[arg(long)]
-        no_skills: bool,
-
-        /// Skip hook installation even when Claude Code is detected.
-        #[arg(long)]
-        no_hooks: bool,
     },
 
     /// Start a web server with interactive graph visualization UI.
@@ -312,8 +265,8 @@ pub enum Commands {
 
     /// Export the code graph to DOT or Mermaid format for architectural visualization.
     Export {
-        /// Path to the project root to index and export.
-        path: PathBuf,
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
 
         /// Output format: dot (default) or mermaid.
         #[arg(long, value_enum, default_value_t = export::model::ExportFormat::Dot)]
@@ -343,6 +296,170 @@ pub enum Commands {
         #[arg(long, value_delimiter = ',')]
         exclude: Vec<String>,
     },
+
+    /// Show file/directory tree structure with symbol outlines.
+    Structure {
+        /// Scope output to a specific directory (relative to project root).
+        #[arg(long)]
+        path: Option<PathBuf>,
+
+        /// Maximum directory depth to display (default: 3).
+        #[arg(long, default_value_t = 3)]
+        depth: usize,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
+        format: OutputFormat,
+    },
+
+    /// Summarize a single file: role, symbols, imports, dependents.
+    #[command(name = "file-summary")]
+    FileSummary {
+        /// Path to the file to summarize (relative to project root).
+        file: PathBuf,
+
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
+        format: OutputFormat,
+    },
+
+    /// List all imports of a file, categorized by type.
+    Imports {
+        /// Path to the file to inspect (relative to project root).
+        file: PathBuf,
+
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
+        format: OutputFormat,
+    },
+
+    /// Detect dead code: unreachable files and unreferenced symbols.
+    #[command(name = "dead-code")]
+    DeadCode {
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
+
+        /// Scope analysis to a specific directory (relative to project root).
+        #[arg(long)]
+        scope: Option<PathBuf>,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
+        format: OutputFormat,
+    },
+
+    /// Compare two graph snapshots and show structural differences.
+    Diff {
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
+
+        /// Name of the base snapshot.
+        #[arg(long)]
+        from: String,
+
+        /// Name of the target snapshot (defaults to current graph state).
+        #[arg(long)]
+        to: Option<String>,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
+        format: OutputFormat,
+    },
+
+    /// Analyze impact of git-changed files on the dependency graph.
+    #[command(name = "diff-impact")]
+    DiffImpact {
+        /// Git ref to diff against (e.g. HEAD~1, main, origin/main).
+        base_ref: String,
+
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
+        format: OutputFormat,
+    },
+
+    /// Find symbols decorated with a specific decorator/attribute pattern.
+    Decorators {
+        /// Decorator/attribute name or regex pattern (e.g. "@Component", "derive(Debug)").
+        pattern: String,
+
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
+
+        /// Filter by language (rust/rs, typescript/ts, javascript/js, python/py).
+        #[arg(long = "language", alias = "lang")]
+        language: Option<String>,
+
+        /// Filter by framework (e.g. nestjs, angular, fastapi).
+        #[arg(long)]
+        framework: Option<String>,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
+        format: OutputFormat,
+    },
+
+    /// Discover functional clusters (groups of related symbols) via graph analysis.
+    Clusters {
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
+
+        /// Scope analysis to a specific directory (relative to project root).
+        #[arg(long)]
+        scope: Option<PathBuf>,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
+        format: OutputFormat,
+    },
+
+    /// Trace data/call flow paths between two symbols.
+    Flow {
+        /// Entry (source) symbol name.
+        entry: String,
+
+        /// Target (destination) symbol name.
+        target: String,
+
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
+
+        /// Maximum number of paths to return (default: 3).
+        #[arg(long, default_value_t = 3)]
+        max_paths: usize,
+
+        /// Maximum search depth in hops (default: 20).
+        #[arg(long, default_value_t = 20)]
+        max_depth: usize,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
+        format: OutputFormat,
+    },
+
+    /// Plan a symbol rename: list all files and lines that reference the symbol.
+    Rename {
+        /// Current symbol name to rename.
+        symbol: String,
+
+        /// New name for the symbol.
+        new_name: String,
+
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
+        format: OutputFormat,
+    },
 }
 
 #[cfg(test)]
@@ -351,49 +468,13 @@ mod tests {
     use clap::Parser;
 
     #[test]
-    fn test_mcp_accepts_watch_flag() {
-        let cli = Cli::parse_from(["code-graph", "mcp", "--watch"]);
-        match cli.command {
-            Commands::Mcp { path, watch } => {
-                assert!(watch, "--watch flag should be true");
-                assert!(path.is_none(), "path should be None when not specified");
-            }
-            _ => panic!("expected Mcp command"),
-        }
-    }
-
-    #[test]
-    fn test_mcp_without_watch_flag() {
-        let cli = Cli::parse_from(["code-graph", "mcp"]);
-        match cli.command {
-            Commands::Mcp { path, watch } => {
-                assert!(!watch, "--watch flag should default to false");
-                assert!(path.is_none(), "path should be None when not specified");
-            }
-            _ => panic!("expected Mcp command"),
-        }
-    }
-
-    #[test]
-    fn test_mcp_with_path_and_watch() {
-        let cli = Cli::parse_from(["code-graph", "mcp", "--watch", "/some/path"]);
-        match cli.command {
-            Commands::Mcp { path, watch } => {
-                assert!(watch, "--watch flag should be true");
-                assert_eq!(path, Some(PathBuf::from("/some/path")));
-            }
-            _ => panic!("expected Mcp command"),
-        }
-    }
-
-    #[test]
     fn test_snapshot_create_parses() {
         let cli = Cli::parse_from(["code-graph", "snapshot", "create", "my-snap"]);
         match cli.command {
             Commands::Snapshot { action } => match action {
                 SnapshotAction::Create { name, path } => {
                     assert_eq!(name, "my-snap");
-                    assert_eq!(path, PathBuf::from("."));
+                    assert!(path.is_none(), "path should be None when not specified");
                 }
                 _ => panic!("expected Create action"),
             },
@@ -407,7 +488,7 @@ mod tests {
         match cli.command {
             Commands::Snapshot { action } => match action {
                 SnapshotAction::List { path } => {
-                    assert_eq!(path, PathBuf::from("."));
+                    assert!(path.is_none(), "path should be None when not specified");
                 }
                 _ => panic!("expected List action"),
             },
@@ -422,55 +503,11 @@ mod tests {
             Commands::Snapshot { action } => match action {
                 SnapshotAction::Delete { name, path } => {
                     assert_eq!(name, "my-snap");
-                    assert_eq!(path, PathBuf::from("."));
+                    assert!(path.is_none(), "path should be None when not specified");
                 }
                 _ => panic!("expected Delete action"),
             },
             _ => panic!("expected Snapshot command"),
-        }
-    }
-
-    #[test]
-    fn test_setup_skills_flag() {
-        let cli = Cli::parse_from(["code-graph", "setup", "--skills"]);
-        match cli.command {
-            Commands::Setup { skills, .. } => {
-                assert!(skills, "--skills flag should be true");
-            }
-            _ => panic!("expected Setup command"),
-        }
-    }
-
-    #[test]
-    fn test_setup_hooks_flag() {
-        let cli = Cli::parse_from(["code-graph", "setup", "--hooks"]);
-        match cli.command {
-            Commands::Setup { hooks, .. } => {
-                assert!(hooks, "--hooks flag should be true");
-            }
-            _ => panic!("expected Setup command"),
-        }
-    }
-
-    #[test]
-    fn test_setup_no_skills_flag() {
-        let cli = Cli::parse_from(["code-graph", "setup", "--no-skills"]);
-        match cli.command {
-            Commands::Setup { no_skills, .. } => {
-                assert!(no_skills, "--no-skills flag should be true");
-            }
-            _ => panic!("expected Setup command"),
-        }
-    }
-
-    #[test]
-    fn test_setup_no_hooks_flag() {
-        let cli = Cli::parse_from(["code-graph", "setup", "--no-hooks"]);
-        match cli.command {
-            Commands::Setup { no_hooks, .. } => {
-                assert!(no_hooks, "--no-hooks flag should be true");
-            }
-            _ => panic!("expected Setup command"),
         }
     }
 

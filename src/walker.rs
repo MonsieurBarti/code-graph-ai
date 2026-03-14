@@ -1,34 +1,8 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
-
 use crate::config::CodeGraphConfig;
 use crate::language::LanguageKind;
-
-/// Workspace field from package.json — can be either a flat list of glob patterns
-/// or an object with a `packages` key.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum WorkspacesField {
-    Patterns(Vec<String>),
-    Config { packages: Vec<String> },
-}
-
-impl WorkspacesField {
-    fn patterns(&self) -> &[String] {
-        match self {
-            Self::Patterns(p) => p,
-            Self::Config { packages } => packages,
-        }
-    }
-}
-
-/// Minimal package.json representation for monorepo workspace detection.
-#[derive(Debug, Deserialize)]
-struct PackageJson {
-    workspaces: Option<WorkspacesField>,
-}
 
 /// Source file extensions that code-graph discovers.
 /// .rs files are discovered and counted but not parsed until Phase 8.
@@ -53,10 +27,7 @@ pub fn walk_project(
 ) -> anyhow::Result<Vec<PathBuf>> {
     // Always walk from the project root — this covers all files including workspace packages
     // (since workspace dirs are sub-directories of the root).
-    //
-    // We detect workspaces primarily so future plans can scope per-package operations,
-    // but for file discovery the root walk is sufficient and avoids duplicates.
-    let _ = detect_workspace_roots(root);
+    // TODO: Use workspace roots for scoped per-package operations when implemented.
 
     let mut files = Vec::new();
     collect_files(root, config, verbose, allowed_languages, &mut files);
@@ -77,6 +48,9 @@ pub fn walk_non_parsed_files(
     config: &CodeGraphConfig,
 ) -> anyhow::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
+
+    // Pre-compile glob patterns once before the walk loop.
+    let compiled_excludes = compile_exclude_patterns(config);
 
     let walker = ignore::WalkBuilder::new(root)
         .standard_filters(true)
@@ -101,8 +75,8 @@ pub fn walk_non_parsed_files(
             continue;
         }
 
-        // Apply config exclusions (IDX-03: reuses same logic as source file walking)
-        if is_excluded_by_config(path, config) {
+        // Apply config exclusions (using pre-compiled patterns)
+        if is_excluded_by_patterns(path, &compiled_excludes) {
             continue;
         }
 
@@ -118,45 +92,6 @@ pub fn walk_non_parsed_files(
     Ok(files)
 }
 
-/// Resolve workspace glob patterns from package.json to concrete directory paths.
-fn detect_workspace_roots(root: &Path) -> Vec<PathBuf> {
-    let mut roots = vec![root.to_path_buf()];
-
-    let pkg_path = root.join("package.json");
-    if !pkg_path.exists() {
-        return roots;
-    }
-
-    let contents = match std::fs::read_to_string(&pkg_path) {
-        Ok(c) => c,
-        Err(_) => return roots,
-    };
-
-    let pkg: PackageJson = match serde_json::from_str(&contents) {
-        Ok(p) => p,
-        Err(_) => return roots,
-    };
-
-    let workspaces = match pkg.workspaces {
-        Some(w) => w,
-        None => return roots,
-    };
-
-    // Expand each workspace glob pattern to concrete directories.
-    for pattern in workspaces.patterns() {
-        let glob_pattern = root.join(pattern).to_string_lossy().into_owned();
-        if let Ok(entries) = glob::glob(&glob_pattern) {
-            for entry in entries.flatten() {
-                if entry.is_dir() && !roots.contains(&entry) {
-                    roots.push(entry);
-                }
-            }
-        }
-    }
-
-    roots
-}
-
 /// Collect source files from a single directory tree using the `ignore` crate.
 fn collect_files(
     root: &Path,
@@ -165,6 +100,9 @@ fn collect_files(
     allowed_languages: Option<&HashSet<LanguageKind>>,
     out: &mut Vec<PathBuf>,
 ) {
+    // Pre-compile glob patterns once before the walk loop.
+    let compiled_excludes = compile_exclude_patterns(config);
+
     let walker = ignore::WalkBuilder::new(root)
         .standard_filters(true)
         // Read .gitignore files even when the directory is not inside a git repository.
@@ -194,8 +132,8 @@ fn collect_files(
             continue;
         }
 
-        // Apply additional config exclusions.
-        if is_excluded_by_config(path, config) {
+        // Apply additional config exclusions (using pre-compiled patterns).
+        if is_excluded_by_patterns(path, &compiled_excludes) {
             continue;
         }
 
@@ -230,26 +168,35 @@ fn path_contains_node_modules(path: &Path) -> bool {
     })
 }
 
-/// Returns true if `path` matches any exclusion pattern from config.
-fn is_excluded_by_config(path: &Path, config: &CodeGraphConfig) -> bool {
-    let patterns = match &config.exclude {
-        Some(p) => p,
-        None => return false,
-    };
+/// Pre-compile glob exclusion patterns from config.
+///
+/// Call once before the walk loop and pass the result to `is_excluded_by_patterns`.
+fn compile_exclude_patterns(config: &CodeGraphConfig) -> Vec<glob::Pattern> {
+    match &config.exclude {
+        Some(patterns) => patterns
+            .iter()
+            .filter_map(|p| glob::Pattern::new(p).ok())
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+/// Returns true if `path` matches any pre-compiled exclusion pattern.
+fn is_excluded_by_patterns(path: &Path, compiled: &[glob::Pattern]) -> bool {
+    if compiled.is_empty() {
+        return false;
+    }
 
     let path_str = path.to_string_lossy();
 
-    for pattern in patterns {
-        if let Ok(matched) = glob::Pattern::new(pattern)
-            && matched.matches(&path_str)
-        {
+    for pattern in compiled {
+        if pattern.matches(&path_str) {
             return true;
         }
         // Also check if any component matches the pattern directly.
         for component in path.components() {
             if let Some(s) = component.as_os_str().to_str()
-                && let Ok(matched) = glob::Pattern::new(pattern)
-                && matched.matches(s)
+                && pattern.matches(s)
             {
                 return true;
             }
@@ -319,7 +266,6 @@ mod tests {
         // Create a code-graph.toml with exclude patterns
         let config = CodeGraphConfig {
             exclude: Some(vec!["*.toml".to_string()]),
-            mcp: Default::default(),
             impact: Default::default(),
         };
 

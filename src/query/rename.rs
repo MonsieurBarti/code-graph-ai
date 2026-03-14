@@ -1,17 +1,15 @@
 // QUERY-03 NOTE: The requirement "git diff files mapped to affected symbols with risk tier
-// classification" is already fully satisfied by the existing `get_diff_impact` MCP tool,
-// backed by `diff_impact()` in impact.rs (see also get_diff_impact in mcp/handlers).
+// classification" is already fully satisfied by the existing `diff-impact` CLI subcommand,
+// backed by `diff_impact()` in impact.rs.
 // The existing IMPACT-03 implementation covers the identical requirement.
 // No additional implementation is needed for QUERY-03.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use petgraph::Direction;
 use petgraph::stable_graph::NodeIndex;
-use petgraph::visit::EdgeRef;
 
-use crate::graph::{CodeGraph, edge::EdgeKind, node::GraphNode};
+use crate::graph::{CodeGraph, node::GraphNode};
 use crate::query::refs::find_refs;
 
 // ---------------------------------------------------------------------------
@@ -22,7 +20,7 @@ use crate::query::refs::find_refs;
 ///
 /// `plan_rename` returns one item per definition site and one per reference site.
 /// No files on disk are modified — this is a planning-only function.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct RenameItem {
     /// Absolute path of the file containing this occurrence.
     pub file_path: PathBuf,
@@ -117,29 +115,14 @@ pub fn plan_rename(
 // Private helpers
 // ---------------------------------------------------------------------------
 
-/// Find the file path containing a symbol node by walking Contains (or ChildOf → Contains) edges.
+/// Find the file path containing a symbol node, using the shared utility.
 fn find_containing_file_path(graph: &CodeGraph, sym_idx: NodeIndex) -> Option<PathBuf> {
-    // Direct Contains edge: File -> Symbol (incoming to symbol).
-    for edge_ref in graph.graph.edges_directed(sym_idx, Direction::Incoming) {
-        if matches!(edge_ref.weight(), EdgeKind::Contains) {
-            let source = edge_ref.source();
-            if let GraphNode::File(fi) = &graph.graph[source] {
-                return Some(fi.path.clone());
-            }
-        }
+    let file_idx = super::util::find_containing_file_idx(graph, sym_idx)?;
+    if let GraphNode::File(fi) = &graph.graph[file_idx] {
+        Some(fi.path.clone())
+    } else {
+        None
     }
-
-    // Child symbol: ChildOf edge from child to parent symbol, then Contains on parent.
-    for edge_ref in graph.graph.edges_directed(sym_idx, Direction::Outgoing) {
-        if matches!(edge_ref.weight(), EdgeKind::ChildOf) {
-            let parent_idx = edge_ref.target();
-            if let Some(fp) = find_containing_file_path(graph, parent_idx) {
-                return Some(fp);
-            }
-        }
-    }
-
-    None
 }
 
 // ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ use crate::graph::{
 // ---------------------------------------------------------------------------
 
 /// A single unreferenced symbol within a file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct DeadSymbol {
     pub name: String,
     pub kind: String,
@@ -23,7 +23,7 @@ pub struct DeadSymbol {
 }
 
 /// Result of dead code analysis.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct DeadCodeResult {
     /// Files with zero incoming import edges that are not entry points.
     pub unreachable_files: Vec<PathBuf>,
@@ -212,18 +212,21 @@ pub fn find_dead_code(graph: &CodeGraph, root: &Path, scope: Option<&Path>) -> D
     // The Contains edge goes: File -> Symbol.
     // So for a symbol node, we look for incoming Contains edges.
 
-    // Build a map: symbol NodeIndex -> FileInfo (for exclusion checks)
-    // We iterate all node indices, for Symbol nodes check incoming Contains edge
-    let mut sym_to_file: HashMap<petgraph::stable_graph::NodeIndex, FileInfo> = HashMap::new();
+    // Build a map: symbol NodeIndex -> file NodeIndex (avoids cloning FileInfo per symbol).
+    // We iterate all node indices, for Symbol nodes check incoming Contains edge.
+    let mut sym_to_file_idx: HashMap<
+        petgraph::stable_graph::NodeIndex,
+        petgraph::stable_graph::NodeIndex,
+    > = HashMap::new();
 
     for node_idx in graph.graph.node_indices() {
         if let GraphNode::Symbol(_) = &graph.graph[node_idx] {
             // Find the file that contains this symbol via incoming Contains edge
             for edge in graph.graph.edges_directed(node_idx, Direction::Incoming) {
                 if matches!(edge.weight(), EdgeKind::Contains)
-                    && let GraphNode::File(fi) = &graph.graph[edge.source()]
+                    && matches!(graph.graph[edge.source()], GraphNode::File(_))
                 {
-                    sym_to_file.insert(node_idx, fi.clone());
+                    sym_to_file_idx.insert(node_idx, edge.source());
                     break;
                 }
             }
@@ -239,10 +242,14 @@ pub fn find_dead_code(graph: &CodeGraph, root: &Path, scope: Option<&Path>) -> D
             _ => continue,
         };
 
-        // Get file info for this symbol
-        let file_info = match sym_to_file.get(&node_idx) {
-            Some(fi) => fi,
+        // Get file info for this symbol (look up on demand instead of cloning).
+        let file_idx = match sym_to_file_idx.get(&node_idx) {
+            Some(&idx) => idx,
             None => continue, // orphan symbol, skip
+        };
+        let file_info = match &graph.graph[file_idx] {
+            GraphNode::File(fi) => fi,
+            _ => continue,
         };
 
         // Check scope

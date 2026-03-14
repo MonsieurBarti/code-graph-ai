@@ -13,14 +13,14 @@ use crate::graph::node::SymbolKind;
 // ---------------------------------------------------------------------------
 
 /// A symbol that has a decorator matching the query pattern.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct DecoratorMatch {
     pub symbol_name: String,
     pub kind: SymbolKind,
     pub file_path: PathBuf,
     pub line: usize,
     /// End line of the decorated symbol — populated for API completeness; not yet
-    /// consumed by the current text formatter but available for rich MCP clients.
+    /// consumed by the current text formatter but available for rich output formats.
     #[allow(dead_code)]
     pub line_end: usize,
     pub decorator_name: String,
@@ -179,14 +179,61 @@ pub fn lookup_framework(decorator_name: &str, file_language: &str) -> Option<&'s
     None
 }
 
+/// Find the FileInfo for the file containing a symbol node.
+///
+/// Walks Contains edges (direct parent) or ChildOf → Contains chains (nested symbols).
+/// Used by both `enrich_decorator_frameworks` and `find_by_decorator` to avoid duplication.
+fn find_file_info(
+    graph: &CodeGraph,
+    sym_idx: petgraph::stable_graph::NodeIndex,
+) -> Option<crate::graph::node::FileInfo> {
+    use crate::graph::edge::EdgeKind;
+    use crate::graph::node::GraphNode;
+    use petgraph::Direction;
+
+    // Direct Contains edge: File -> Symbol (incoming to symbol).
+    graph
+        .graph
+        .edges_directed(sym_idx, Direction::Incoming)
+        .find_map(|e| {
+            if let EdgeKind::Contains = e.weight()
+                && let GraphNode::File(ref f) = graph.graph[e.source()]
+            {
+                return Some(f.clone());
+            }
+            None
+        })
+        // Child symbol: ChildOf → parent → Contains → file
+        .or_else(|| {
+            graph
+                .graph
+                .edges_directed(sym_idx, Direction::Outgoing)
+                .find_map(|e| {
+                    if let EdgeKind::ChildOf = e.weight() {
+                        graph
+                            .graph
+                            .edges_directed(e.target(), Direction::Incoming)
+                            .find_map(|pe| {
+                                if let EdgeKind::Contains = pe.weight()
+                                    && let GraphNode::File(ref f) = graph.graph[pe.source()]
+                                {
+                                    return Some(f.clone());
+                                }
+                                None
+                            })
+                    } else {
+                        None
+                    }
+                })
+        })
+}
+
 /// Enrich all symbols' decorators with framework labels from the static registry.
 ///
 /// Called after graph build and before returning the graph to callers. Sets
 /// `DecoratorInfo.framework` for any decorator whose name appears in the registry.
 pub fn enrich_decorator_frameworks(graph: &mut CodeGraph) {
-    use crate::graph::edge::EdgeKind;
     use crate::graph::node::GraphNode;
-    use petgraph::Direction;
 
     // Collect (node_idx, file_language) for all symbol nodes that have decorators.
     let enrichments: Vec<(petgraph::stable_graph::NodeIndex, String)> = graph
@@ -197,42 +244,7 @@ pub fn enrich_decorator_frameworks(graph: &mut CodeGraph) {
                 if s.decorators.is_empty() {
                     return None;
                 }
-                // Find file language via a Contains edge from a File node.
-                let lang = graph
-                    .graph
-                    .edges_directed(idx, Direction::Incoming)
-                    .find_map(|e| {
-                        if let EdgeKind::Contains = e.weight()
-                            && let GraphNode::File(ref f) = graph.graph[e.source()]
-                        {
-                            return Some(f.language.clone());
-                        }
-                        None
-                    })
-                    // Child symbol: ChildOf → parent → Contains → file
-                    .or_else(|| {
-                        graph
-                            .graph
-                            .edges_directed(idx, Direction::Outgoing)
-                            .find_map(|e| {
-                                if let EdgeKind::ChildOf = e.weight() {
-                                    graph
-                                        .graph
-                                        .edges_directed(e.target(), Direction::Incoming)
-                                        .find_map(|pe| {
-                                            if let EdgeKind::Contains = pe.weight()
-                                                && let GraphNode::File(ref f) =
-                                                    graph.graph[pe.source()]
-                                            {
-                                                return Some(f.language.clone());
-                                            }
-                                            None
-                                        })
-                                } else {
-                                    None
-                                }
-                            })
-                    })?;
+                let lang = find_file_info(graph, idx)?.language;
                 Some((idx, lang))
             } else {
                 None
@@ -302,9 +314,7 @@ pub fn find_by_decorator(
     framework_filter: Option<&str>,
     limit: usize,
 ) -> Result<Vec<DecoratorMatch>> {
-    use crate::graph::edge::EdgeKind;
     use crate::graph::node::GraphNode;
-    use petgraph::Direction;
     use regex::RegexBuilder;
 
     let re = RegexBuilder::new(pattern)
@@ -320,41 +330,8 @@ pub fn find_by_decorator(
                 continue;
             }
 
-            // Find containing file for language / path info.
-            let file_info = graph
-                .graph
-                .edges_directed(idx, Direction::Incoming)
-                .find_map(|e| {
-                    if let EdgeKind::Contains = e.weight()
-                        && let GraphNode::File(ref f) = graph.graph[e.source()]
-                    {
-                        return Some(f.clone());
-                    }
-                    None
-                })
-                .or_else(|| {
-                    // Child symbol: ChildOf → parent → Contains → file
-                    graph
-                        .graph
-                        .edges_directed(idx, Direction::Outgoing)
-                        .find_map(|e| {
-                            if let EdgeKind::ChildOf = e.weight() {
-                                graph
-                                    .graph
-                                    .edges_directed(e.target(), Direction::Incoming)
-                                    .find_map(|pe| {
-                                        if let EdgeKind::Contains = pe.weight()
-                                            && let GraphNode::File(ref f) = graph.graph[pe.source()]
-                                        {
-                                            return Some(f.clone());
-                                        }
-                                        None
-                                    })
-                            } else {
-                                None
-                            }
-                        })
-                });
+            // Find containing file for language / path info using shared helper.
+            let file_info = find_file_info(graph, idx);
 
             let file_info = match file_info {
                 Some(fi) => fi,

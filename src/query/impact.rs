@@ -8,7 +8,7 @@ use petgraph::visit::EdgeRef;
 use crate::graph::{CodeGraph, edge::EdgeKind, node::GraphNode};
 
 /// Confidence tier for impact analysis results.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum ConfidenceTier {
     High,
     Medium,
@@ -30,7 +30,7 @@ impl std::fmt::Display for ConfidenceTier {
 }
 
 /// Risk tier for diff-impact classification based on downstream file count.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum RiskTier {
     High,
     Medium,
@@ -48,7 +48,7 @@ impl std::fmt::Display for RiskTier {
 }
 
 /// A single file in the blast-radius (impact) result set.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ImpactResult {
     /// Absolute path to the affected file.
     pub file_path: PathBuf,
@@ -61,7 +61,7 @@ pub struct ImpactResult {
 }
 
 /// Result of diff-based impact analysis: a changed file and its downstream blast radius.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct DiffImpactResult {
     /// The file that changed (from git diff).
     pub changed_file: PathBuf,
@@ -120,6 +120,9 @@ pub fn blast_radius(
 ) -> Vec<ImpactResult> {
     let _ = project_root; // kept for API consistency with find_refs
 
+    // Convert to HashSet for O(1) lookups instead of linear slice scan.
+    let symbol_set: HashSet<NodeIndex> = symbol_indices.iter().copied().collect();
+
     // Step 1: Collect starting file indices — the file(s) that define the queried symbols.
     let mut starting_files: HashSet<NodeIndex> = HashSet::new();
     for &sym_idx in symbol_indices {
@@ -176,7 +179,7 @@ pub fn blast_radius(
                         .edges_directed(idx, Direction::Outgoing)
                         .any(|e| {
                             matches!(e.weight(), EdgeKind::Calls)
-                                && symbol_indices.contains(&e.target())
+                                && symbol_set.contains(&e.target())
                         });
 
                 let (confidence, basis) = score_confidence(depth, has_direct_call);
@@ -265,34 +268,8 @@ pub fn diff_impact(
     results
 }
 
-// ---------------------------------------------------------------------------
-// Private helper
-// ---------------------------------------------------------------------------
-
-/// Return the NodeIndex of the File node that contains `sym_idx` via a Contains or ChildOf edge.
-fn find_containing_file_idx(graph: &CodeGraph, sym_idx: NodeIndex) -> Option<NodeIndex> {
-    // Direct Contains edge: File -> Symbol (incoming to symbol).
-    for edge_ref in graph.graph.edges_directed(sym_idx, Direction::Incoming) {
-        if matches!(edge_ref.weight(), EdgeKind::Contains) {
-            let source = edge_ref.source();
-            if matches!(graph.graph[source], GraphNode::File(_)) {
-                return Some(source);
-            }
-        }
-    }
-
-    // Child symbol: ChildOf edge from child (outgoing) to parent symbol, then Contains on parent.
-    for edge_ref in graph.graph.edges_directed(sym_idx, Direction::Outgoing) {
-        if matches!(edge_ref.weight(), EdgeKind::ChildOf) {
-            let parent_idx = edge_ref.target();
-            if let Some(file_idx) = find_containing_file_idx(graph, parent_idx) {
-                return Some(file_idx);
-            }
-        }
-    }
-
-    None
-}
+// Re-export the shared utility for backward compatibility within this module.
+use super::util::find_containing_file_idx;
 
 // ---------------------------------------------------------------------------
 // Unit tests

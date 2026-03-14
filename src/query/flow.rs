@@ -11,7 +11,7 @@ use crate::graph::{CodeGraph, edge::EdgeKind, node::GraphNode};
 // ---------------------------------------------------------------------------
 
 /// A single call-chain path from entry to target symbol.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct FlowPath {
     /// Ordered list of symbol names from entry to target (inclusive).
     pub hops: Vec<String>,
@@ -20,7 +20,7 @@ pub struct FlowPath {
 }
 
 /// Result of a flow trace query.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct FlowResult {
     /// All discovered paths from entry to target, up to `max_paths`.
     pub paths: Vec<FlowPath>,
@@ -70,70 +70,21 @@ pub fn trace_flow(
     // Use the first occurrence of entry and target (by NodeIndex order).
     let entry_idx = entry_indices[0];
 
-    // BFS queue: (current_node, path_so_far, visited_for_this_path)
-    // path_so_far includes current_node.
-    let mut queue: VecDeque<(NodeIndex, Vec<NodeIndex>, HashSet<NodeIndex>)> = VecDeque::new();
-    {
-        let mut init_visited = HashSet::new();
-        init_visited.insert(entry_idx);
-        queue.push_back((entry_idx, vec![entry_idx], init_visited));
-    }
-
+    // DFS with backtracking: shared path Vec and visited HashSet avoid O(b^d) cloning.
     let mut found_paths: Vec<FlowPath> = Vec::new();
+    let mut path: Vec<NodeIndex> = vec![entry_idx];
+    let mut visited: HashSet<NodeIndex> = HashSet::new();
+    visited.insert(entry_idx);
 
-    while let Some((current, path, visited)) = queue.pop_front() {
-        // Check if we reached any target node.
-        if target_indices.contains(&current) && path.len() > 1 {
-            // Convert NodeIndex path to symbol names.
-            let hops: Vec<String> = path
-                .iter()
-                .map(|&idx| node_symbol_name(graph, idx))
-                .collect();
-            let depth = hops.len() - 1;
-            found_paths.push(FlowPath { hops, depth });
-
-            if found_paths.len() >= max_paths {
-                break;
-            }
-            // Don't expand from target — we found a complete path.
-            continue;
-        }
-
-        // Depth cap: path already has max_depth+1 nodes (entry + max_depth hops).
-        if path.len() > max_depth {
-            continue;
-        }
-
-        // Expand via Calls and ResolvedImport outgoing edges.
-        for edge_ref in graph.graph.edges_directed(current, Direction::Outgoing) {
-            if !matches!(
-                edge_ref.weight(),
-                EdgeKind::Calls | EdgeKind::ResolvedImport { .. }
-            ) {
-                continue;
-            }
-
-            let neighbor = edge_ref.target();
-
-            // Cycle safety: skip if neighbor is already in this path's visited set.
-            if visited.contains(&neighbor) {
-                continue;
-            }
-
-            // Only follow Symbol nodes (or File nodes for ResolvedImport).
-            match &graph.graph[neighbor] {
-                GraphNode::Symbol(_) | GraphNode::File(_) => {}
-                _ => continue,
-            }
-
-            let mut new_path = path.clone();
-            new_path.push(neighbor);
-            let mut new_visited = visited.clone();
-            new_visited.insert(neighbor);
-
-            queue.push_back((neighbor, new_path, new_visited));
-        }
-    }
+    dfs_trace(
+        graph,
+        &target_indices,
+        max_paths,
+        max_depth,
+        &mut path,
+        &mut visited,
+        &mut found_paths,
+    );
 
     // If no paths found, compute shared dependency via forward BFS intersection.
     let shared_dependency = if found_paths.is_empty() {
@@ -151,6 +102,83 @@ pub fn trace_flow(
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+/// DFS with backtracking to find paths from the current node to any target.
+///
+/// Uses a shared `path` Vec and `visited` HashSet to avoid per-branch cloning.
+/// Pushes on descent, pops on backtrack. Stops early once `max_paths` are found.
+fn dfs_trace(
+    graph: &CodeGraph,
+    target_indices: &HashSet<NodeIndex>,
+    max_paths: usize,
+    max_depth: usize,
+    path: &mut Vec<NodeIndex>,
+    visited: &mut HashSet<NodeIndex>,
+    found_paths: &mut Vec<FlowPath>,
+) {
+    let current = *path.last().unwrap();
+
+    // Check if we reached any target node.
+    if target_indices.contains(&current) && path.len() > 1 {
+        let hops: Vec<String> = path
+            .iter()
+            .map(|&idx| node_symbol_name(graph, idx))
+            .collect();
+        let depth = hops.len() - 1;
+        found_paths.push(FlowPath { hops, depth });
+        return; // Don't expand from target — we found a complete path.
+    }
+
+    // Depth cap: path already has max_depth+1 nodes (entry + max_depth hops).
+    if path.len() > max_depth {
+        return;
+    }
+
+    // Expand via Calls and ResolvedImport outgoing edges.
+    for edge_ref in graph.graph.edges_directed(current, Direction::Outgoing) {
+        if found_paths.len() >= max_paths {
+            return;
+        }
+
+        if !matches!(
+            edge_ref.weight(),
+            EdgeKind::Calls | EdgeKind::ResolvedImport { .. }
+        ) {
+            continue;
+        }
+
+        let neighbor = edge_ref.target();
+
+        // Cycle safety: skip if neighbor is already visited on this path.
+        if visited.contains(&neighbor) {
+            continue;
+        }
+
+        // Only follow Symbol nodes (or File nodes for ResolvedImport).
+        match &graph.graph[neighbor] {
+            GraphNode::Symbol(_) | GraphNode::File(_) => {}
+            _ => continue,
+        }
+
+        // Descend: push onto shared path and visited set.
+        path.push(neighbor);
+        visited.insert(neighbor);
+
+        dfs_trace(
+            graph,
+            target_indices,
+            max_paths,
+            max_depth,
+            path,
+            visited,
+            found_paths,
+        );
+
+        // Backtrack: pop from shared path and visited set.
+        path.pop();
+        visited.remove(&neighbor);
+    }
+}
 
 /// Compute the closest shared dependency reachable from both `entry_idx` and any target.
 ///

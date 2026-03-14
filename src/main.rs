@@ -4,14 +4,13 @@ mod config;
 mod export;
 mod graph;
 mod language;
-mod mcp;
 mod output;
 mod parser;
+mod project;
 mod query;
 #[cfg(feature = "rag")]
 mod rag;
 mod resolver;
-mod setup;
 mod walker;
 mod watcher;
 #[cfg(feature = "web")]
@@ -278,36 +277,47 @@ fn file_language_matches(path: &Path, lang: &str) -> bool {
     }
 }
 
-/// Build the code graph for a project at `path` by walking, parsing, and resolving all files.
+/// Map a file extension to its language string for the graph.
 ///
-/// This is the shared pipeline used by all query subcommands. The Index command has its own
-/// inline copy so it can also compute detailed stats without a second pass.
-pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
-    let config = CodeGraphConfig::load(path);
-    let files = walk_project(path, &config, verbose, None)?;
+/// Returns `None` for unsupported extensions. Used by both `build_graph` and
+/// the Index command to avoid duplicating the extension→language mapping.
+fn ext_to_language(ext: &str) -> Option<&'static str> {
+    match ext {
+        "ts" => Some("typescript"),
+        "tsx" => Some("tsx"),
+        "js" | "jsx" => Some("javascript"),
+        "rs" => Some("rust"),
+        "py" => Some("python"),
+        "go" => Some("go"),
+        _ => None,
+    }
+}
 
-    // Phase 1: Parse all files in parallel (CPU-bound — rayon par_iter).
-    let raw_results: Vec<(PathBuf, &'static str, ParseResult)> = files
+/// Parse all files in parallel (CPU-bound — rayon par_iter).
+///
+/// Shared helper used by both `build_graph` and the Index command.
+/// Returns `(file_path, language_str, ParseResult)` triples.
+fn parse_files_parallel(files: &[PathBuf]) -> Vec<(PathBuf, &'static str, ParseResult)> {
+    files
         .par_iter()
         .filter_map(|file_path| {
             let source = std::fs::read(file_path).ok()?;
-            let language_str: &'static str =
-                match file_path.extension().and_then(|e| e.to_str()).unwrap_or("") {
-                    "ts" => "typescript",
-                    "tsx" => "tsx",
-                    "js" | "jsx" => "javascript",
-                    "rs" => "rust",
-                    "py" => "python",
-                    "go" => "go",
-                    _ => return None,
-                };
+            let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            let language_str = ext_to_language(ext)?;
             let result = parser::parse_file_parallel(file_path, &source).ok()?;
             Some((file_path.clone(), language_str, result))
         })
-        .collect();
+        .collect()
+}
 
-    // Phase 2: Insert into graph sequentially (petgraph is not Send).
-    let mut graph = CodeGraph::new();
+/// Insert parse results into the graph sequentially (petgraph is not Send).
+///
+/// Returns the parse results map for the resolver pass.
+fn insert_parsed_into_graph(
+    graph: &mut CodeGraph,
+    raw_results: Vec<(PathBuf, &'static str, ParseResult)>,
+    verbose: bool,
+) -> HashMap<PathBuf, ParseResult> {
     let mut parse_results: HashMap<PathBuf, ParseResult> = HashMap::new();
 
     for (file_path, language_str, result) in raw_results {
@@ -354,6 +364,22 @@ pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
         parse_results.insert(file_path, result);
     }
 
+    parse_results
+}
+
+/// Build the code graph for a project at `path` by walking, parsing, and resolving all files.
+///
+/// This is the shared pipeline used by all query subcommands. The Index command
+/// calls the same parse/insert helpers but also accumulates detailed stats.
+pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
+    let config = CodeGraphConfig::load(path);
+    let files = walk_project(path, &config, verbose, None)?;
+
+    let raw_results = parse_files_parallel(&files);
+
+    let mut graph = CodeGraph::new();
+    let parse_results = insert_parsed_into_graph(&mut graph, raw_results, verbose);
+
     // Populate crate_name on FileInfo for all Rust files.
     populate_rust_crate_names(&mut graph, path);
 
@@ -373,8 +399,7 @@ pub(crate) fn build_graph(path: &Path, verbose: bool) -> Result<CodeGraph> {
     Ok(graph)
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -449,46 +474,14 @@ async fn main() -> Result<()> {
             let mut rust_use_count: usize = 0;
             let mut rust_pub_use_count: usize = 0;
 
-            // Parse results map — retained for the resolution step.
-            let mut parse_results: HashMap<PathBuf, ParseResult> = HashMap::new();
-
-            // 7. Parse all TS/JS/RS/Python/Go files in parallel (rayon par_iter).
-            let raw_results: Vec<(PathBuf, &'static str, ParseResult)> = files
-                .par_iter()
-                .filter_map(|file_path| {
-                    let source = std::fs::read(file_path).ok()?;
-                    let language_str: &'static str =
-                        match file_path.extension().and_then(|e| e.to_str()).unwrap_or("") {
-                            "ts" => "typescript",
-                            "tsx" => "tsx",
-                            "js" | "jsx" => "javascript",
-                            "rs" => "rust",
-                            "py" => "python",
-                            "go" => "go",
-                            _ => return None,
-                        };
-                    let result = parser::parse_file_parallel(file_path, &source).ok()?;
-                    Some((file_path.clone(), language_str, result))
-                })
-                .collect();
+            // 7. Parse all files in parallel using shared helper.
+            let raw_results = parse_files_parallel(&files);
 
             // skipped = files that couldn't be read or parsed.
             let skipped = files.len() - raw_results.len();
 
-            // 8. Insert into graph sequentially + accumulate stats.
-            for (file_path, language_str, result) in raw_results {
-                // Add file node to graph.
-                let file_idx = graph.add_file(file_path.clone(), language_str);
-
-                // Add symbols (parent + child).
-                for (symbol, children) in &result.symbols {
-                    let sym_idx = graph.add_symbol(file_idx, symbol.clone());
-                    for child in children {
-                        graph.add_child_symbol(sym_idx, child.clone());
-                    }
-                }
-
-                // Accumulate import/export counts.
+            // 8. Accumulate import/export stats before consuming raw_results.
+            for (_file_path, _language_str, result) in &raw_results {
                 total_imports += result.imports.len();
                 total_exports += result.exports.len();
                 for imp in &result.imports {
@@ -506,43 +499,17 @@ async fn main() -> Result<()> {
                         | ImportKind::GoDot => {}
                     }
                 }
-
-                // Accumulate Rust use/pub-use counts and emit edges.
                 for rust_use in &result.rust_uses {
                     if rust_use.is_pub_use {
                         rust_pub_use_count += 1;
-                        graph.graph.add_edge(
-                            file_idx,
-                            file_idx,
-                            EdgeKind::ReExport {
-                                path: rust_use.path.clone(),
-                            },
-                        );
                     } else {
                         rust_use_count += 1;
-                        graph.graph.add_edge(
-                            file_idx,
-                            file_idx,
-                            EdgeKind::RustImport {
-                                path: rust_use.path.clone(),
-                            },
-                        );
                     }
                 }
-
-                if verbose {
-                    eprintln!(
-                        "  {} symbols, {} imports, {} exports from {}",
-                        result.symbols.len(),
-                        result.imports.len(),
-                        result.exports.len(),
-                        file_path.display()
-                    );
-                }
-
-                // Store parse result for the resolution pass.
-                parse_results.insert(file_path, result);
             }
+
+            // Insert into graph using shared helper (handles symbols, children, Rust edges).
+            let parse_results = insert_parsed_into_graph(&mut graph, raw_results, verbose);
 
             // Populate crate_name on FileInfo for all Rust files.
             populate_rust_crate_names(&mut graph, &path);
@@ -684,7 +651,9 @@ async fn main() -> Result<()> {
                             let end = (start + chunk.len()).min(total);
                             eprint!("\rEmbedding [{}/{}] ...", end, total);
 
-                            let embeddings = rag::embedding::embed_symbols(&engine, chunk).await?;
+                            let rt = tokio::runtime::Runtime::new()?;
+                            let embeddings =
+                                rt.block_on(rag::embedding::embed_symbols(&engine, chunk))?;
 
                             for (i, emb) in embeddings.iter().enumerate() {
                                 let (name, file_path, line) = &chunk[i];
@@ -740,6 +709,8 @@ async fn main() -> Result<()> {
             format,
             language,
         } => {
+            let path = project::resolve_project_root(path);
+
             // Validate regex FIRST before the expensive index pipeline (Research Pitfall 4).
             regex::RegexBuilder::new(&symbol)
                 .case_insensitive(case_insensitive)
@@ -748,7 +719,7 @@ async fn main() -> Result<()> {
 
             let language_filter = parse_language_filter(language.as_deref())?;
 
-            let graph = build_graph(&path, false)?;
+            let graph = cache::load_or_build(&path, false)?;
             let results = query::find::find_symbol(
                 &graph,
                 &symbol,
@@ -779,8 +750,9 @@ async fn main() -> Result<()> {
             format,
             language,
         } => {
+            let path = project::resolve_project_root(path);
             let language_filter = parse_language_filter(language.as_deref())?;
-            let graph = build_graph(&path, false)?;
+            let graph = cache::load_or_build(&path, false)?;
             let stats = query::stats::project_stats(&graph);
             query::output::format_stats(&stats, &format, language_filter);
         }
@@ -794,6 +766,8 @@ async fn main() -> Result<()> {
             format,
             language,
         } => {
+            let path = project::resolve_project_root(path);
+
             // Validate regex FIRST before the expensive index pipeline.
             regex::RegexBuilder::new(&symbol)
                 .case_insensitive(case_insensitive)
@@ -802,7 +776,7 @@ async fn main() -> Result<()> {
 
             let language_filter = parse_language_filter(language.as_deref())?;
 
-            let graph = build_graph(&path, false)?;
+            let graph = cache::load_or_build(&path, false)?;
             let matches = query::find::match_symbols(&graph, &symbol, case_insensitive)?;
 
             if matches.is_empty() {
@@ -845,6 +819,8 @@ async fn main() -> Result<()> {
             format,
             language,
         } => {
+            let path = project::resolve_project_root(path);
+
             // Validate regex FIRST.
             regex::RegexBuilder::new(&symbol)
                 .case_insensitive(case_insensitive)
@@ -853,7 +829,7 @@ async fn main() -> Result<()> {
 
             let language_filter = parse_language_filter(language.as_deref())?;
 
-            let graph = build_graph(&path, false)?;
+            let graph = cache::load_or_build(&path, false)?;
             let matches = query::find::match_symbols(&graph, &symbol, case_insensitive)?;
 
             if matches.is_empty() {
@@ -881,9 +857,10 @@ async fn main() -> Result<()> {
             format,
             language,
         } => {
+            let path = project::resolve_project_root(path);
             let language_filter = parse_language_filter(language.as_deref())?;
 
-            let graph = build_graph(&path, false)?;
+            let graph = cache::load_or_build(&path, false)?;
             let mut cycles = query::circular::find_circular(&graph, &path);
 
             // Apply language filter: retain cycles where all files match the language.
@@ -905,6 +882,8 @@ async fn main() -> Result<()> {
             format,
             language,
         } => {
+            let path = project::resolve_project_root(path);
+
             // Validate regex FIRST before the expensive index pipeline.
             regex::RegexBuilder::new(&symbol)
                 .case_insensitive(case_insensitive)
@@ -913,7 +892,7 @@ async fn main() -> Result<()> {
 
             let language_filter = parse_language_filter(language.as_deref())?;
 
-            let graph = build_graph(&path, false)?;
+            let graph = cache::load_or_build(&path, false)?;
             let matches = query::find::match_symbols(&graph, &symbol, case_insensitive)?;
 
             if matches.is_empty() {
@@ -955,34 +934,16 @@ async fn main() -> Result<()> {
             query::output::format_context_results(&results, &format, &path, &symbol);
         }
 
-        Commands::Mcp { path, watch } => {
-            let project_root = path.unwrap_or_else(|| {
-                std::env::current_dir().expect("cannot determine current directory")
-            });
-            mcp::run(project_root, watch).await?;
-        }
-
-        Commands::Setup {
-            path,
-            yes,
-            skills,
-            hooks,
-            no_skills,
-            no_hooks,
-        } => {
-            let project_root = std::fs::canonicalize(&path)
-                .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-            setup::run_setup(&project_root, yes, skills, hooks, no_skills, no_hooks)?;
-        }
-
         Commands::Snapshot { action } => {
             match action {
                 cli::SnapshotAction::Create { name, path } => {
-                    let graph = build_graph(&path, false)?;
+                    let path = project::resolve_project_root(path);
+                    let graph = cache::load_or_build(&path, false)?;
                     crate::query::diff::create_snapshot(&graph, &path, &name)?;
                     println!("snapshot '{}' created", name);
                 }
                 cli::SnapshotAction::List { path } => {
+                    let path = project::resolve_project_root(path);
                     let snapshots = crate::query::diff::list_snapshots(&path)?;
                     if snapshots.is_empty() {
                         println!("no snapshots found");
@@ -997,6 +958,7 @@ async fn main() -> Result<()> {
                     }
                 }
                 cli::SnapshotAction::Delete { name, path } => {
+                    let path = project::resolve_project_root(path);
                     crate::query::diff::delete_snapshot(&path, &name)?;
                     println!("snapshot '{}' deleted", name);
                 }
@@ -1013,7 +975,8 @@ async fn main() -> Result<()> {
             depth,
             exclude,
         } => {
-            let graph = build_graph(&path, false)?;
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
             let params = export::model::ExportParams {
                 format,
                 granularity,
@@ -1066,10 +1029,11 @@ async fn main() -> Result<()> {
             let use_ollama = ollama;
             #[cfg(not(feature = "rag"))]
             let use_ollama = false;
-            web::serve(root, port, use_ollama).await?;
+            tokio::runtime::Runtime::new()?.block_on(web::serve(root, port, use_ollama))?;
         }
 
         Commands::Watch { path } => {
+            let path = project::resolve_project_root(path);
             eprintln!("Indexing {}...", path.display());
             let mut graph = build_graph(&path, false)?;
             eprintln!(
@@ -1084,7 +1048,7 @@ async fn main() -> Result<()> {
             }
 
             // Start watcher
-            let (handle, mut rx) = watcher::start_watcher(&path)
+            let (handle, rx) = watcher::start_watcher(&path)
                 .map_err(|e| anyhow::anyhow!("failed to start watcher: {}", e))?;
 
             // Keep handle alive — dropping it stops the watcher
@@ -1093,7 +1057,7 @@ async fn main() -> Result<()> {
             eprintln!("Watching for changes... (press Ctrl+C to stop)");
 
             // Process events — terminal status output goes to stderr (Phase 1 convention)
-            while let Some(event) = rx.recv().await {
+            while let Ok(event) = rx.recv() {
                 match &event {
                     watcher::event::WatchEvent::Modified(p) => {
                         let start = std::time::Instant::now();
@@ -1146,7 +1110,299 @@ async fn main() -> Result<()> {
                 }
             }
         }
+
+        Commands::Structure {
+            path,
+            depth,
+            format,
+        } => {
+            let project_root = project::resolve_project_root(None);
+            let graph = cache::load_or_build(&project_root, false)?;
+            let tree =
+                query::structure::file_structure(&graph, &project_root, path.as_deref(), depth);
+            match format {
+                cli::OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&tree)?);
+                }
+                _ => {
+                    let output = query::output::format_structure_to_string(&tree, &project_root);
+                    println!("{}", output);
+                }
+            }
+        }
+
+        Commands::FileSummary { file, path, format } => {
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
+            match query::file_summary::file_summary(&graph, &path, &file) {
+                Ok(summary) => match format {
+                    cli::OutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&summary)?);
+                    }
+                    _ => {
+                        let output = query::output::format_file_summary_to_string(&summary);
+                        println!("{}", output);
+                    }
+                },
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Imports { file, path, format } => {
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
+            match query::imports::file_imports(&graph, &path, &file) {
+                Ok(entries) => match format {
+                    cli::OutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&entries)?);
+                    }
+                    _ => {
+                        let output = query::output::format_imports_to_string(
+                            &entries,
+                            &file.to_string_lossy(),
+                        );
+                        println!("{}", output);
+                    }
+                },
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::DeadCode {
+            path,
+            scope,
+            format,
+        } => {
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
+            let result = query::dead_code::find_dead_code(&graph, &path, scope.as_deref());
+            match format {
+                cli::OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                }
+                _ => {
+                    let output = query::output::format_dead_code_to_string(&result, &path);
+                    println!("{}", output);
+                }
+            }
+        }
+
+        Commands::Diff {
+            path,
+            from,
+            to,
+            format,
+        } => {
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
+            match query::diff::compute_diff(&path, &from, to.as_deref(), &graph) {
+                Ok(diff) => match format {
+                    cli::OutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&diff)?);
+                    }
+                    _ => {
+                        let output = query::output::format_diff_to_string(&diff);
+                        println!("{}", output);
+                    }
+                },
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::DiffImpact {
+            base_ref,
+            path,
+            format,
+        } => {
+            let path = project::resolve_project_root(path);
+
+            // Shell out to git diff --name-only
+            let output = std::process::Command::new("git")
+                .args(["diff", "--name-only", &base_ref])
+                .current_dir(&path)
+                .output()
+                .map_err(|e| anyhow::anyhow!("failed to run git: {}. Ensure git is in PATH.", e))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                anyhow::bail!("git diff failed: {}", stderr);
+            }
+
+            let changed_files: Vec<PathBuf> = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|l| !l.is_empty())
+                .map(|l| path.join(l))
+                .collect();
+
+            if changed_files.is_empty() {
+                println!("No changed files found relative to '{}'.", base_ref);
+            } else {
+                let graph = cache::load_or_build(&path, false)?;
+                let config = CodeGraphConfig::load(&path);
+                let results = query::impact::diff_impact(
+                    &graph,
+                    &changed_files,
+                    &path,
+                    config.impact.high_threshold,
+                    config.impact.medium_threshold,
+                );
+                match format {
+                    cli::OutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&results)?);
+                    }
+                    _ => {
+                        let formatted =
+                            query::output::format_diff_impact_to_string(&results, &path);
+                        print!("{}", formatted);
+                    }
+                }
+            }
+        }
+
+        Commands::Decorators {
+            pattern,
+            path,
+            language,
+            framework,
+            format,
+        } => {
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
+            let results = query::decorators::find_by_decorator(
+                &graph,
+                &pattern,
+                language.as_deref(),
+                framework.as_deref(),
+                100, // default limit
+            )?;
+            match format {
+                cli::OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&results)?);
+                }
+                _ => {
+                    let output = query::output::format_decorator_to_string(&results, &path, 100);
+                    println!("{}", output);
+                }
+            }
+        }
+
+        Commands::Clusters {
+            path,
+            scope,
+            format,
+        } => {
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
+            let results = query::clusters::find_clusters(
+                &graph,
+                &path,
+                scope.as_deref(),
+                100, // default max_iterations for Louvain
+            );
+            match format {
+                cli::OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&results)?);
+                }
+                _ => {
+                    let output = query::output::format_clusters_to_string(&results);
+                    println!("{}", output);
+                }
+            }
+        }
+
+        Commands::Flow {
+            entry,
+            target,
+            path,
+            max_paths,
+            max_depth,
+            format,
+        } => {
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
+            let result = query::flow::trace_flow(&graph, &entry, &target, max_paths, max_depth);
+            match format {
+                cli::OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                }
+                _ => {
+                    let output = query::output::format_flow_to_string(&result, &entry, &target);
+                    println!("{}", output);
+                }
+            }
+        }
+
+        Commands::Rename {
+            symbol,
+            new_name,
+            path,
+            format,
+        } => {
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
+            let items = query::rename::plan_rename(&graph, &symbol, &new_name, &path);
+            match format {
+                cli::OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&items)?);
+                }
+                _ => {
+                    let output = query::output::format_rename_to_string(&items, &path);
+                    println!("{}", output);
+                }
+            }
+        }
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_epoch_secs_known_date() {
+        // 2024-01-01 00:00:00 UTC = 1704067200
+        assert_eq!(format_epoch_secs(1704067200), "2024-01-01 00:00:00 UTC");
+    }
+
+    #[test]
+    fn test_format_epoch_secs_leap_year() {
+        // 2024 is a leap year. Feb 29 exists.
+        // 2024-02-29 12:00:00 UTC = 1709208000
+        assert_eq!(format_epoch_secs(1709208000), "2024-02-29 12:00:00 UTC");
+    }
+
+    #[test]
+    fn test_format_epoch_secs_2100_non_leap() {
+        // 2100 is NOT a leap year (divisible by 100 but not 400).
+        // 2100-03-01 00:00:00 UTC = 4107542400
+        assert_eq!(format_epoch_secs(4107542400), "2100-03-01 00:00:00 UTC");
+    }
+
+    #[test]
+    fn test_format_epoch_secs_unix_epoch() {
+        assert_eq!(format_epoch_secs(0), "1970-01-01 00:00:00 UTC");
+    }
+
+    #[test]
+    fn test_ext_to_language() {
+        assert_eq!(ext_to_language("ts"), Some("typescript"));
+        assert_eq!(ext_to_language("tsx"), Some("tsx"));
+        assert_eq!(ext_to_language("js"), Some("javascript"));
+        assert_eq!(ext_to_language("jsx"), Some("javascript"));
+        assert_eq!(ext_to_language("rs"), Some("rust"));
+        assert_eq!(ext_to_language("py"), Some("python"));
+        assert_eq!(ext_to_language("go"), Some("go"));
+        assert_eq!(ext_to_language("txt"), None);
+    }
 }

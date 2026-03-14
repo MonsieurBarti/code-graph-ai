@@ -31,3 +31,9 @@ test-results/
 .mcp.json
 .cache
 .fastembed_cache
+.dolt/
+.beads/
+.forge/
+
+# Dolt database files (added by bd init)
+*.db

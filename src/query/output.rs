@@ -35,7 +35,7 @@ fn is_mixed_language<F: Fn(&T) -> &Path, T>(items: &[T], get_path: F) -> bool {
         .any(|i| language_of_file(get_path(i)) != first_lang)
 }
 
-/// Sort key for language grouping: Rust < TypeScript < JavaScript < Python < Unknown (alphabetical).
+/// Sort key for language grouping: JavaScript < Python < Rust < TypeScript < Unknown.
 fn language_sort_key(lang: &str) -> u8 {
     match lang {
         "JavaScript" => 1,
@@ -1444,14 +1444,15 @@ pub fn format_context_results(
 }
 
 // ---------------------------------------------------------------------------
-// MCP String-returning formatters (siblings of the println!-based CLI formatters)
+// String-returning formatters (siblings of the println!-based CLI formatters)
 // ---------------------------------------------------------------------------
 
-/// Format find results to a String in compact prefix-free format for MCP tool responses.
+/// Format find results to a String in compact prefix-free format for CLI output.
 ///
 /// No summary line. No "def " prefix. Line format: `{rel_path}:{line} {symbol_name} {kind}`
 /// (with optional visibility suffix for Rust). In mixed-language results, groups by language
 /// with `--- {Language} ---` section headers.
+#[cfg(test)]
 pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> String {
     use std::fmt::Write;
     let show_vis = any_non_private(results);
@@ -1514,22 +1515,7 @@ pub fn format_find_to_string(results: &[FindResult], project_root: &Path) -> Str
     buf
 }
 
-/// Format find results with a match method tag prepended.
-///
-/// Produces: `"[exact]\nsrc/foo.rs:L10 authHandler function\n..."`
-///
-/// Used by the tiered find_symbol pipeline in the MCP server to annotate
-/// results with how they were found.
-pub fn format_find_to_string_tagged(
-    results: &[FindResult],
-    project_root: &Path,
-    method: crate::query::find::MatchMethod,
-) -> String {
-    let base = format_find_to_string(results, project_root);
-    format!("{}\n{}", method, base)
-}
-
-/// Format find_by_decorator results to a String for MCP tool responses.
+/// Format find_by_decorator results to a String for CLI output.
 ///
 /// Each result is formatted as:
 /// `@decorator_name[args] symbol_name (kind) file:line`
@@ -1577,149 +1563,12 @@ pub fn format_decorator_to_string(
     out
 }
 
-/// Format project stats to a String in compact format for MCP tool responses.
-///
-/// Summary header (file + symbol counts) is written FIRST.
-/// `language_filter`: if Some, only show the matching language section.
-pub fn format_stats_to_string(stats: &ProjectStats, language_filter: Option<&str>) -> String {
-    use std::fmt::Write;
-    let mut buf = String::new();
-
-    let show_rust = language_filter.is_none() || language_filter == Some("rust");
-    let show_ts = language_filter.is_none()
-        || language_filter == Some("typescript")
-        || language_filter == Some("javascript");
-    let show_totals = language_filter.is_none();
-
-    let has_rust = stats_has_rust(stats);
-    let has_ts = stats_has_ts_js(stats);
-
-    writeln!(
-        buf,
-        "{} files ({} source, {} non-parsed), {} symbols",
-        stats.file_count, stats.source_files, stats.non_parsed_files, stats.symbol_count
-    )
-    .unwrap();
-    if stats.non_parsed_files > 0 {
-        writeln!(
-            buf,
-            "non-parsed: doc {} config {} ci {} asset {} other {}",
-            stats.doc_files,
-            stats.config_files,
-            stats.ci_files,
-            stats.asset_files,
-            stats.other_files,
-        )
-        .unwrap();
-    }
-
-    if show_rust && has_rust {
-        let rust_symbol_total = stats.rust_fns
-            + stats.rust_structs
-            + stats.rust_enums
-            + stats.rust_traits
-            + stats.rust_impl_methods
-            + stats.rust_type_aliases
-            + stats.rust_consts
-            + stats.rust_statics
-            + stats.rust_macros;
-        writeln!(buf, "Rust: {} symbols (fn: {} struct: {} enum: {} trait: {} impl_method: {} type: {} const: {} static: {} macro: {})",
-            rust_symbol_total,
-            stats.rust_fns, stats.rust_structs, stats.rust_enums,
-            stats.rust_traits, stats.rust_impl_methods, stats.rust_type_aliases,
-            stats.rust_consts, stats.rust_statics, stats.rust_macros,
-        ).unwrap();
-        writeln!(
-            buf,
-            "rust_use {} rust_pub_use {}",
-            stats.rust_imports, stats.rust_reexports,
-        )
-        .unwrap();
-        // Dependencies section (Phase 9)
-        let has_deps = stats.external_packages > 0 || stats.builtin_count > 0;
-        if has_deps {
-            writeln!(
-                buf,
-                "dependencies external_crates {} (usages {}) builtins {} (usages {})",
-                stats.external_packages,
-                stats.external_usage_count,
-                stats.builtin_count,
-                stats.builtin_usage_count,
-            )
-            .unwrap();
-        }
-        // Per-crate breakdown (Phase 9, only for workspaces with multiple crates)
-        if !stats.rust_crate_stats.is_empty() {
-            for cs in &stats.rust_crate_stats {
-                writeln!(
-                    buf,
-                    "crate {} files {} symbols {}",
-                    cs.crate_name, cs.file_count, cs.symbol_count
-                )
-                .unwrap();
-            }
-        }
-    }
-
-    if show_ts && has_ts {
-        let ts_fns = stats.functions.saturating_sub(stats.rust_fns);
-        let ts_enums = stats.enums.saturating_sub(stats.rust_enums);
-        let ts_type_aliases = stats.type_aliases.saturating_sub(stats.rust_type_aliases);
-        writeln!(
-            buf,
-            "TypeScript: functions {} classes {} interfaces {} types {} enums {} variables {} components {} methods {} properties {}",
-            ts_fns, stats.classes, stats.interfaces,
-            ts_type_aliases, ts_enums,
-            stats.variables, stats.components, stats.methods, stats.properties,
-        ).unwrap();
-        writeln!(
-            buf,
-            "imports {} external {} unresolved {}",
-            stats.import_edges, stats.external_packages, stats.unresolved_imports,
-        )
-        .unwrap();
-    }
-
-    if show_totals && has_rust && has_ts {
-        writeln!(buf, "---").unwrap();
-        writeln!(
-            buf,
-            "Total: {} files, {} symbols",
-            stats.file_count, stats.symbol_count
-        )
-        .unwrap();
-    } else if show_totals && !has_rust {
-        writeln!(buf, "files {}", stats.file_count).unwrap();
-        writeln!(buf, "symbols {}", stats.symbol_count).unwrap();
-        writeln!(
-            buf,
-            "functions {} classes {} interfaces {} types {} enums {} variables {} components {} methods {} properties {}",
-            stats.functions,
-            stats.classes,
-            stats.interfaces,
-            stats.type_aliases,
-            stats.enums,
-            stats.variables,
-            stats.components,
-            stats.methods,
-            stats.properties,
-        ).unwrap();
-        writeln!(
-            buf,
-            "imports {} external {} unresolved {}",
-            stats.import_edges, stats.external_packages, stats.unresolved_imports,
-        )
-        .unwrap();
-    }
-
-    buf
-}
-
-/// Format reference results to a String in compact prefix-free format for MCP tool responses.
+/// Format reference results to a String in compact prefix-free format for CLI output.
 ///
 /// No summary line. No "ref " prefix. Line formats:
 /// - Import: `{rel_path} import`
 /// - Call:   `{rel_path}:{line} call {caller_name}`
+#[cfg(test)]
 pub fn format_refs_to_string(results: &[RefResult], project_root: &Path) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
@@ -1742,10 +1591,11 @@ pub fn format_refs_to_string(results: &[RefResult], project_root: &Path) -> Stri
     buf
 }
 
-/// Format impact (blast radius) results to a String in compact prefix-free flat format for MCP tool responses.
+/// Format impact (blast radius) results to a String in compact prefix-free flat format for CLI output.
 ///
 /// No summary line. No "impact " prefix. Line format: `{rel_path} (depth N) [TIER: basis]`.
-/// Uses flat (non-tree) format — MCP responses do not benefit from indentation.
+/// Uses flat (non-tree) format — flat format is more token-efficient.
+#[cfg(test)]
 pub fn format_impact_to_string(results: &[ImpactResult], project_root: &Path) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
@@ -1767,9 +1617,10 @@ pub fn format_impact_to_string(results: &[ImpactResult], project_root: &Path) ->
     buf
 }
 
-/// Format circular dependency results to a String in compact prefix-free format for MCP tool responses.
+/// Format circular dependency results to a String in compact prefix-free format for CLI output.
 ///
 /// No summary line. No "cycle " prefix. Line format: `{file1} -> {file2} -> {file3}`.
+#[cfg(test)]
 pub fn format_circular_to_string(cycles: &[CircularDep], project_root: &Path) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
@@ -1797,6 +1648,7 @@ pub fn format_circular_to_string(cycles: &[CircularDep], project_root: &Path) ->
 /// - Commas and whitespace are separators (silently ignored)
 /// - Unknown characters are silently ignored
 /// - Returns `Some(HashSet)` with the matched section names
+#[cfg(test)]
 pub fn parse_sections(sections: Option<&str>) -> Option<std::collections::HashSet<&'static str>> {
     let s = sections?;
     let mut set = std::collections::HashSet::new();
@@ -1829,7 +1681,7 @@ pub fn parse_sections(sections: Option<&str>) -> Option<std::collections::HashSe
     Some(set)
 }
 
-/// Format symbol context results to a String in compact prefix-free format for MCP tool responses.
+/// Format symbol context results to a String in compact prefix-free format for CLI output.
 ///
 /// No "N symbols" summary. No "symbol " prefix (bare symbol name on its own line).
 /// No "--- section ---" delimiter lines. No "def ", "ref ", "called-by ", "calls ",
@@ -1848,6 +1700,7 @@ pub fn parse_sections(sections: Option<&str>) -> Option<std::collections::HashSe
 ///
 /// `sections`: optional filter string (e.g. `"r,c"`). Definitions are always included.
 /// Non-empty sections that were filtered out are listed on an `omitted: ...` line.
+#[cfg(test)]
 pub fn format_context_to_string(
     contexts: &[SymbolContext],
     project_root: &Path,
@@ -2106,9 +1959,9 @@ pub fn format_circular_results(cycles: &[CircularDep], format: &OutputFormat, pr
 /// Format:
 /// ```text
 /// src/
-///   mcp/
-///     server.rs
-///       pub get_structure (fn)
+///   cache/
+///     loader.rs
+///       pub load_or_build (fn)
 ///   query/
 ///     structure.rs
 ///       pub file_structure (fn)
@@ -2167,15 +2020,15 @@ fn format_nodes(nodes: &[StructureNode], depth: usize, lines: &mut Vec<String>) 
 // FileSummary formatter
 // ---------------------------------------------------------------------------
 
-/// Render a `FileSummary` to a compact string (MCP format, no trailing newline).
+/// Render a `FileSummary` to a compact string (compact format, no trailing newline).
 ///
 /// Format:
 /// ```text
-/// src/mcp/server.rs
+/// src/cache/loader.rs
 /// role: utility
-/// lines: 729
-/// symbols: 7 (3 fn, 1 struct, 3 function)
-/// exports: get_structure (fn), get_file_summary (fn)
+/// lines: 200
+/// symbols: 3 (2 fn, 1 struct)
+/// exports: load_or_build (fn), apply_staleness_diff (fn)
 /// imports: 12
 /// importers: 0
 /// graph: leaf
@@ -2257,15 +2110,15 @@ pub fn format_file_summary_to_string(summary: &crate::query::file_summary::FileS
 // Imports formatter
 // ---------------------------------------------------------------------------
 
-/// Render a list of `ImportEntry` items to a compact string (MCP format, no trailing newline).
+/// Render a list of `ImportEntry` items to a compact string (compact format, no trailing newline).
 ///
 /// Format:
 /// ```text
-/// src/mcp/server.rs imports:
-/// ./params (internal)
+/// src/cache/loader.rs imports:
+/// ./envelope (internal)
 /// ../graph (internal)
-/// rmcp (external)
-/// tokio (external)
+/// ../parser (internal)
+/// rayon (external)
 /// std::sync (builtin)
 /// crate::query::structure [re-export] (internal)
 /// ```
@@ -2306,7 +2159,7 @@ pub fn format_imports_to_string(
     lines.join("\n")
 }
 
-/// Format dead code analysis results to a compact MCP string.
+/// Format dead code analysis results to a compact string.
 ///
 /// Output format:
 /// ```text
@@ -2375,7 +2228,7 @@ pub fn format_dead_code_to_string(
 // Diff output
 // ---------------------------------------------------------------------------
 
-/// Format a GraphDiff as a compact string for MCP output.
+/// Format a GraphDiff as a compact string for CLI output.
 ///
 /// Example:
 /// ```text
@@ -2430,7 +2283,7 @@ pub fn format_diff_to_string(diff: &crate::query::diff::GraphDiff) -> String {
     lines.join("\n")
 }
 // ---------------------------------------------------------------------------
-// Unit tests for MCP formatters
+// Unit tests for compact formatters
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -2461,7 +2314,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mcp_find_format_no_prefix() {
+    fn test_find_compact_format_no_prefix() {
         let root = PathBuf::from("/project");
         let results = vec![make_find_result(
             "MyFunc",
@@ -2489,7 +2342,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mcp_refs_format_no_prefix() {
+    fn test_refs_compact_format_no_prefix() {
         let root = PathBuf::from("/project");
         let results = vec![
             RefResult {
@@ -2529,7 +2382,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mcp_impact_format_no_prefix() {
+    fn test_impact_compact_format_no_prefix() {
         use crate::query::impact::ConfidenceTier;
 
         let root = PathBuf::from("/project");
@@ -2591,7 +2444,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mcp_circular_format_no_prefix() {
+    fn test_circular_compact_format_no_prefix() {
         let root = PathBuf::from("/project");
         let cycles = vec![CircularDep {
             files: vec![
@@ -2620,7 +2473,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mcp_context_format_no_delimiters() {
+    fn test_context_compact_format_no_delimiters() {
         let root = PathBuf::from("/project");
         let def = make_find_result("MyStruct", "/project/src/lib.rs", 5, SymbolKind::Struct);
         let caller = CallInfo {
@@ -2916,14 +2769,14 @@ mod tests {
 }
 
 // ---------------------------------------------------------------------------
-// Cluster / Flow / Rename string formatters (for MCP tool responses)
+// Cluster / Flow / Rename string formatters (for CLI output)
 // ---------------------------------------------------------------------------
 
 use crate::query::clusters::ClusterResult;
 use crate::query::flow::FlowResult;
 use crate::query::rename::RenameItem;
 
-/// Format cluster results as a human-readable string for MCP responses.
+/// Format cluster results as a human-readable string for CLI output.
 ///
 /// Output format:
 /// ```text
@@ -2951,7 +2804,7 @@ pub fn format_clusters_to_string(clusters: &[ClusterResult]) -> String {
     lines.join("\n")
 }
 
-/// Format flow trace results as a human-readable string for MCP responses.
+/// Format flow trace results as a human-readable string for CLI output.
 ///
 /// Output format (paths found):
 /// ```text
@@ -2988,7 +2841,7 @@ pub fn format_flow_to_string(result: &FlowResult, entry: &str, target: &str) -> 
     lines.join("\n")
 }
 
-/// Format rename plan items as a human-readable string for MCP responses.
+/// Format rename plan items as a human-readable string for CLI output.
 ///
 /// Output format:
 /// ```text
@@ -3037,6 +2890,53 @@ pub fn format_rename_to_string(items: &[RenameItem], root: &Path) -> String {
     }
 
     lines.join("\n")
+}
+
+/// Format diff-impact results as a human-readable string.
+///
+/// Used by the diff-impact CLI subcommand.
+///
+/// Output format:
+/// ```text
+/// ## src/foo.rs [HIGH] (5 affected files)
+///   src/bar.rs (depth 1) [high: direct import]
+///   src/baz.rs (depth 2) [medium: transitive]
+/// ```
+pub fn format_diff_impact_to_string(
+    results: &[crate::query::impact::DiffImpactResult],
+    root: &Path,
+) -> String {
+    use std::fmt::Write;
+    let mut buf = String::new();
+
+    for r in results {
+        let rel = r.changed_file.strip_prefix(root).unwrap_or(&r.changed_file);
+        writeln!(
+            buf,
+            "## {} [{}] ({} affected files)",
+            rel.display(),
+            r.risk,
+            r.affected.len()
+        )
+        .unwrap();
+        for a in &r.affected {
+            let arel = a.file_path.strip_prefix(root).unwrap_or(&a.file_path);
+            writeln!(
+                buf,
+                "  {} (depth {}) [{}: {}]",
+                arel.display(),
+                a.depth,
+                a.confidence,
+                a.basis
+            )
+            .unwrap();
+        }
+    }
+
+    if buf.is_empty() {
+        buf.push_str("No impact detected from changed files.");
+    }
+    buf
 }
 
 #[cfg(test)]

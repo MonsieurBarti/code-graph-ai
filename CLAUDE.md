@@ -1,7 +1,8 @@
-## Code navigation — MANDATORY
+<!-- code-graph:start -->
+## Code navigation -- MANDATORY
 
 NEVER use Grep or Glob to find symbol definitions, trace references, or analyze dependencies.
-ALWAYS use code-graph MCP tools instead — they are faster, more accurate, and understand the full AST.
+ALWAYS use code-graph MCP tools instead -- they are faster, more accurate, and understand the full AST.
 
 | Task | Tool | NOT this |
 |------|------|----------|
@@ -16,3 +17,4 @@ Use Read/Grep/Glob ONLY for:
 - Reading full file contents before editing
 - Searching for string literals, comments, TODOs, error messages
 - Non-structural text searches that have nothing to do with code navigation
+<!-- code-graph:end -->

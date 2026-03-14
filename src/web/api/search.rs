@@ -48,7 +48,7 @@ impl From<FindResult> for SearchResult {
 ///
 /// Returns matching symbol definitions as a JSON array.
 ///
-/// Uses a tiered pipeline mirroring the MCP find_symbol tool:
+/// Uses a tiered pipeline mirroring the CLI find subcommand:
 /// - Tier 1: exact/regex find_symbol (case-insensitive) — returned immediately on hit
 /// - Tier 2+3: trigram + BM25 fuzzy search when Tier 1 misses
 /// - If both trigram and BM25 hit: merge via reciprocal rank fusion (RRF)
@@ -58,7 +58,8 @@ pub async fn handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<SearchResult>>, (StatusCode, String)> {
     let q = &params.q;
-    let limit = params.limit;
+    // Cap limit to a reasonable maximum to prevent excessive resource usage.
+    let limit = params.limit.min(500);
     let graph = state.graph.read().await;
 
     // Tier 1: exact/regex match (case-insensitive, no kind/file/language filter)

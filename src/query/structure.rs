@@ -15,7 +15,7 @@ use crate::query::find::kind_to_str;
 // ---------------------------------------------------------------------------
 
 /// A node in the structure tree.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, serde::Serialize)]
 pub enum StructureNode {
     /// A directory with children.
     Dir {
@@ -39,7 +39,7 @@ pub enum StructureNode {
 }
 
 /// A symbol entry in the structure tree.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, serde::Serialize)]
 pub struct StructureSymbol {
     pub name: String,
     pub kind: String,       // "fn", "struct", "trait", etc.

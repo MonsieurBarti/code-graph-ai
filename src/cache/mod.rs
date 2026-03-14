@@ -1,2 +1,4 @@
 pub mod envelope;
-pub use envelope::{CacheEnvelope, load_cache, save_cache};
+pub mod loader;
+pub use envelope::{load_cache, save_cache};
+pub use loader::load_or_build;

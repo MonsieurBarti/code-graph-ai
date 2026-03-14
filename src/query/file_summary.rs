@@ -16,7 +16,7 @@ use crate::query::find::kind_to_str;
 // ---------------------------------------------------------------------------
 
 /// Dependency role of a file in the project.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum FileRole {
     EntryPoint,
     LibraryRoot,
@@ -27,7 +27,7 @@ pub enum FileRole {
 }
 
 /// Graph topology label for a file.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum GraphLabel {
     Hub,    // >= 5 importers
     Leaf,   // 0 importers
@@ -35,14 +35,14 @@ pub enum GraphLabel {
 }
 
 /// An exported symbol from a file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ExportedSymbol {
     pub name: String,
     pub kind: String, // "fn", "struct", etc.
 }
 
 /// Summary information for a single file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct FileSummary {
     pub relative_path: String,
     pub role: FileRole,
