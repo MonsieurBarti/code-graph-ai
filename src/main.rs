@@ -11,6 +11,7 @@ mod project;
 mod query;
 #[cfg(feature = "rag")]
 mod rag;
+mod registry;
 mod resolver;
 mod setup;
 mod walker;
