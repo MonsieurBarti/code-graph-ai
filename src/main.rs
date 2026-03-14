@@ -1741,7 +1741,22 @@ fn main() -> Result<()> {
                     // Ensure .code-graph dir exists for the log file.
                     let log_dir = path.join(".code-graph");
                     std::fs::create_dir_all(&log_dir)?;
-                    let log_file = std::fs::File::create(daemon::pid::log_path(&path))?;
+
+                    // Open log file with restricted permissions (0600) to avoid
+                    // world-readable log files.
+                    let log_path = daemon::pid::log_path(&path);
+                    let mut log_opts = std::fs::OpenOptions::new();
+                    log_opts
+                        .write(true)
+                        .create(true)
+                        .truncate(false)
+                        .append(true);
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::OpenOptionsExt;
+                        log_opts.mode(0o600);
+                    }
+                    let log_file = log_opts.open(&log_path)?;
 
                     let child = std::process::Command::new(exe)
                         .arg("daemon-run")
@@ -1768,9 +1783,16 @@ fn main() -> Result<()> {
                         // Fall back to kill(pid, SIGTERM).
                         if let Some(pid) = daemon::pid::read_pid_file(&path) {
                             #[cfg(unix)]
-                            unsafe {
-                                libc::kill(pid as libc::pid_t, libc::SIGTERM);
+                            {
+                                let ret = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+                                if ret == 0 {
+                                    eprintln!("sent SIGTERM to pid {}", pid);
+                                } else {
+                                    let err = std::io::Error::last_os_error();
+                                    eprintln!("failed to send SIGTERM to pid {}: {}", pid, err);
+                                }
                             }
+                            #[cfg(not(unix))]
                             eprintln!("sent SIGTERM to pid {}", pid);
                         } else {
                             eprintln!("daemon is not running");

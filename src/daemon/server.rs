@@ -53,7 +53,11 @@ pub async fn run_daemon(project_root: PathBuf) -> Result<()> {
     let listener = UnixListener::bind(&sock_path)
         .with_context(|| format!("failed to bind socket at {}", sock_path.display()))?;
 
-    // Set socket file permissions to 0600.
+    // Restrict socket permissions to owner-only (0600) immediately after bind.
+    // NOTE: umask would be ideal to avoid any TOCTOU window, but it is
+    // process-global and unsafe in multi-threaded programs. The parent
+    // directory is already restricted to 0700 (set in write_pid_file),
+    // which limits exposure during the brief window.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -108,9 +112,13 @@ pub async fn run_daemon(project_root: PathBuf) -> Result<()> {
         }
     }
 
-    // Remove PID and socket files.
-    let _ = pid::remove_pid_file(&project_root);
-    let _ = pid::remove_socket_file(&project_root);
+    // Remove PID and socket files, logging any errors.
+    if let Err(e) = pid::remove_pid_file(&project_root) {
+        eprintln!("[daemon] cleanup warning: {}", e);
+    }
+    if let Err(e) = pid::remove_socket_file(&project_root) {
+        eprintln!("[daemon] cleanup warning: {}", e);
+    }
 
     eprintln!("[daemon] stopped");
     accept_result
@@ -153,6 +161,21 @@ async fn accept_loop(
     Ok(())
 }
 
+/// Send a JSON-line response to the client and shut down the write half.
+///
+/// Appends a newline to the serialized JSON before writing to avoid two
+/// separate write_all syscalls.
+async fn send_response(
+    writer: &mut tokio::net::unix::OwnedWriteHalf,
+    response: &DaemonResponse,
+) -> Result<()> {
+    let mut json = serde_json::to_string(response)?;
+    json.push('\n');
+    writer.write_all(json.as_bytes()).await?;
+    writer.shutdown().await?;
+    Ok(())
+}
+
 /// Handle a single client connection: read one JSON line, dispatch, write one JSON line.
 async fn handle_connection(
     stream: tokio::net::UnixStream,
@@ -162,59 +185,69 @@ async fn handle_connection(
 ) -> Result<()> {
     let (reader, mut writer) = stream.into_split();
     let mut buf_reader = BufReader::new(reader);
-    let mut line = String::new();
 
-    // Read one line (up to MAX_REQUEST_BYTES).
-    let mut total_read = 0usize;
-    loop {
-        let bytes_read = buf_reader
-            .read_line(&mut line)
-            .await
-            .context("failed to read from socket")?;
-        if bytes_read == 0 {
-            // EOF before newline — client disconnected.
+    // Read one line (up to MAX_REQUEST_BYTES) with a 30-second timeout to
+    // prevent slow-client DoS.
+    let read_result = tokio::time::timeout(Duration::from_secs(30), async {
+        let mut line = String::new();
+        let mut total_read = 0usize;
+        loop {
+            let bytes_read = buf_reader
+                .read_line(&mut line)
+                .await
+                .context("failed to read from socket")?;
+            if bytes_read == 0 {
+                // EOF before newline — client disconnected.
+                return Ok(None);
+            }
+            total_read += bytes_read;
+            if total_read > MAX_REQUEST_BYTES {
+                return Ok(Some(Err(
+                    "request too large (exceeds 1 MB limit)".to_string()
+                )));
+            }
+            if line.ends_with('\n') {
+                break;
+            }
+        }
+        Ok(Some(Ok(line)))
+    })
+    .await;
+
+    let line = match read_result {
+        Ok(Ok(Some(Ok(line)))) => line,
+        Ok(Ok(Some(Err(size_err)))) => {
+            let resp = DaemonResponse::error(size_err);
+            send_response(&mut writer, &resp).await?;
             return Ok(());
         }
-        total_read += bytes_read;
-        if total_read > MAX_REQUEST_BYTES {
-            let response = DaemonResponse::error("request too large (exceeds 1 MB limit)");
-            let json = serde_json::to_string(&response)?;
-            writer.write_all(json.as_bytes()).await?;
-            writer.write_all(b"\n").await?;
-            writer.shutdown().await?;
+        Ok(Ok(None)) => {
+            // Client disconnected before sending anything.
             return Ok(());
         }
-        if line.ends_with('\n') {
-            break;
+        Ok(Err(e)) => {
+            // Read error.
+            return Err(e);
         }
-    }
+        Err(_) => {
+            // Timeout.
+            let resp = DaemonResponse::error("request read timeout");
+            send_response(&mut writer, &resp).await?;
+            return Ok(());
+        }
+    };
 
     let line = line.trim();
     if line.is_empty() {
         return Ok(());
     }
 
-    // Validate JSON structure before deserializing into the typed request.
-    let json_value: serde_json::Value = match serde_json::from_str(line) {
-        Ok(v) => v,
-        Err(e) => {
-            let response = DaemonResponse::error(format!("invalid JSON: {}", e));
-            let json = serde_json::to_string(&response)?;
-            writer.write_all(json.as_bytes()).await?;
-            writer.write_all(b"\n").await?;
-            writer.shutdown().await?;
-            return Ok(());
-        }
-    };
-
-    let request: DaemonRequest = match serde_json::from_value(json_value) {
+    // Parse directly into the typed request (single parse, no intermediate Value).
+    let request: DaemonRequest = match serde_json::from_str(line) {
         Ok(r) => r,
         Err(e) => {
             let response = DaemonResponse::error(format!("invalid request: {}", e));
-            let json = serde_json::to_string(&response)?;
-            writer.write_all(json.as_bytes()).await?;
-            writer.write_all(b"\n").await?;
-            writer.shutdown().await?;
+            send_response(&mut writer, &response).await?;
             return Ok(());
         }
     };
@@ -222,24 +255,19 @@ async fn handle_connection(
     // Handle Shutdown specially — it triggers daemon-wide shutdown.
     if matches!(request, DaemonRequest::Shutdown) {
         let response = DaemonResponse::success(serde_json::json!({"message": "shutting down"}));
-        let json = serde_json::to_string(&response)?;
-        writer.write_all(json.as_bytes()).await?;
-        writer.write_all(b"\n").await?;
-        writer.shutdown().await?;
+        send_response(&mut writer, &response).await?;
         let _ = shutdown_tx.send(true);
         return Ok(());
     }
 
-    // Dispatch the query.
+    // Dispatch the query. Use block_in_place to yield the tokio worker thread
+    // during the potentially CPU-bound dispatch, reducing RwLock contention.
     let response = {
         let g = graph.read().await;
-        dispatch_query(&request, &g, &project_root)
+        tokio::task::block_in_place(|| dispatch_query(&request, &g, &project_root))
     };
 
-    let json = serde_json::to_string(&response)?;
-    writer.write_all(json.as_bytes()).await?;
-    writer.write_all(b"\n").await?;
-    writer.shutdown().await?;
+    send_response(&mut writer, &response).await?;
 
     Ok(())
 }
@@ -343,6 +371,32 @@ async fn run_watcher_relay(
     let _ = bridge.await;
 }
 
+/// Perform a full graph re-index, replacing the shared graph under a write lock.
+async fn full_reindex(graph: &Arc<RwLock<CodeGraph>>, project_root: &Path, reason: &str) {
+    eprintln!("[daemon] {} -- full re-index...", reason);
+    let start = std::time::Instant::now();
+    let root = project_root.to_path_buf();
+    match tokio::task::spawn_blocking(move || crate::build_graph(&root, false)).await {
+        Ok(Ok(new_graph)) => {
+            let mut g = graph.write().await;
+            *g = new_graph;
+            let elapsed = start.elapsed();
+            eprintln!(
+                "[daemon] re-indexed in {:.1}ms ({} files, {} symbols)",
+                elapsed.as_secs_f64() * 1000.0,
+                g.file_count(),
+                g.symbol_count(),
+            );
+        }
+        Ok(Err(e)) => {
+            eprintln!("[daemon] full re-index failed: {}", e);
+        }
+        Err(e) => {
+            eprintln!("[daemon] re-index task panicked: {}", e);
+        }
+    }
+}
+
 /// Process a single watcher event, updating the graph.
 async fn handle_watcher_event(
     event: &crate::watcher::event::WatchEvent,
@@ -376,53 +430,11 @@ async fn handle_watcher_event(
             );
         }
         WatchEvent::ConfigChanged => {
-            eprintln!("[daemon] config changed -- full re-index...");
-            let start = std::time::Instant::now();
-            let root = project_root.to_path_buf();
-            match tokio::task::spawn_blocking(move || crate::build_graph(&root, false)).await {
-                Ok(Ok(new_graph)) => {
-                    let mut g = graph.write().await;
-                    *g = new_graph;
-                    let elapsed = start.elapsed();
-                    eprintln!(
-                        "[daemon] re-indexed in {:.1}ms ({} files, {} symbols)",
-                        elapsed.as_secs_f64() * 1000.0,
-                        g.file_count(),
-                        g.symbol_count(),
-                    );
-                }
-                Ok(Err(e)) => {
-                    eprintln!("[daemon] full re-index failed: {}", e);
-                }
-                Err(e) => {
-                    eprintln!("[daemon] re-index task panicked: {}", e);
-                }
-            }
+            full_reindex(graph, project_root, "config changed").await;
         }
         WatchEvent::CrateRootChanged(p) => {
             let filename = p.file_name().unwrap_or_default().to_string_lossy();
-            eprintln!("[daemon] full re-index: {} changed", filename);
-            let start = std::time::Instant::now();
-            let root = project_root.to_path_buf();
-            match tokio::task::spawn_blocking(move || crate::build_graph(&root, false)).await {
-                Ok(Ok(new_graph)) => {
-                    let mut g = graph.write().await;
-                    *g = new_graph;
-                    let elapsed = start.elapsed();
-                    eprintln!(
-                        "[daemon] re-indexed in {:.1}ms ({} files, {} symbols)",
-                        elapsed.as_secs_f64() * 1000.0,
-                        g.file_count(),
-                        g.symbol_count(),
-                    );
-                }
-                Ok(Err(e)) => {
-                    eprintln!("[daemon] full re-index failed: {}", e);
-                }
-                Err(e) => {
-                    eprintln!("[daemon] re-index task panicked: {}", e);
-                }
-            }
+            full_reindex(graph, project_root, &format!("{} changed", filename)).await;
         }
     }
 }
@@ -470,8 +482,7 @@ fn dispatch_query(
         })),
 
         DaemonRequest::Shutdown => {
-            // Handled before dispatch_query is called; included for exhaustiveness.
-            DaemonResponse::success(serde_json::json!({"message": "shutting down"}))
+            unreachable!("Shutdown is intercepted before dispatch_query")
         }
 
         DaemonRequest::Find {
@@ -768,13 +779,13 @@ fn dispatch_context(
 }
 
 fn dispatch_stats(graph: &CodeGraph, language: Option<&str>) -> DaemonResponse {
-    let _language_filter = match parse_lang(language) {
+    let language_filter = match parse_lang(language) {
         Ok(f) => f,
         Err(e) => return DaemonResponse::error(e),
     };
 
     let stats = crate::query::stats::project_stats(graph);
-    DaemonResponse::success(stats_to_json(&stats))
+    DaemonResponse::success(stats_to_json(&stats, language_filter))
 }
 
 fn dispatch_circular(
@@ -929,7 +940,7 @@ fn dispatch_diff(
 fn dispatch_diff_impact(graph: &CodeGraph, project_root: &Path, base_ref: &str) -> DaemonResponse {
     // Shell out to git diff --name-only
     let output = match std::process::Command::new("git")
-        .args(["diff", "--name-only", base_ref])
+        .args(["diff", "--name-only", "--", base_ref])
         .current_dir(project_root)
         .output()
     {
@@ -1128,32 +1139,49 @@ fn call_info_to_json(
     })
 }
 
-fn stats_to_json(stats: &crate::query::stats::ProjectStats) -> serde_json::Value {
-    serde_json::json!({
-        "file_count": stats.file_count,
-        "symbol_count": stats.symbol_count,
-        "functions": stats.functions,
-        "classes": stats.classes,
-        "interfaces": stats.interfaces,
-        "type_aliases": stats.type_aliases,
-        "enums": stats.enums,
-        "variables": stats.variables,
-        "components": stats.components,
-        "methods": stats.methods,
-        "properties": stats.properties,
-        "import_edges": stats.import_edges,
-        "external_packages": stats.external_packages,
-        "unresolved_imports": stats.unresolved_imports,
-        "rust_fns": stats.rust_fns,
-        "rust_structs": stats.rust_structs,
-        "rust_enums": stats.rust_enums,
-        "rust_traits": stats.rust_traits,
-        "rust_impl_methods": stats.rust_impl_methods,
-        "rust_type_aliases": stats.rust_type_aliases,
-        "rust_consts": stats.rust_consts,
-        "rust_statics": stats.rust_statics,
-        "rust_macros": stats.rust_macros,
-    })
+fn stats_to_json(
+    stats: &crate::query::stats::ProjectStats,
+    language_filter: Option<&str>,
+) -> serde_json::Value {
+    let mut obj = serde_json::Map::new();
+
+    // Always include aggregate counts.
+    obj.insert("file_count".into(), stats.file_count.into());
+    obj.insert("symbol_count".into(), stats.symbol_count.into());
+
+    let show_ts = language_filter.is_none()
+        || language_filter == Some("typescript")
+        || language_filter == Some("javascript");
+    let show_rust = language_filter.is_none() || language_filter == Some("rust");
+
+    if show_ts {
+        obj.insert("functions".into(), stats.functions.into());
+        obj.insert("classes".into(), stats.classes.into());
+        obj.insert("interfaces".into(), stats.interfaces.into());
+        obj.insert("type_aliases".into(), stats.type_aliases.into());
+        obj.insert("enums".into(), stats.enums.into());
+        obj.insert("variables".into(), stats.variables.into());
+        obj.insert("components".into(), stats.components.into());
+        obj.insert("methods".into(), stats.methods.into());
+        obj.insert("properties".into(), stats.properties.into());
+        obj.insert("import_edges".into(), stats.import_edges.into());
+        obj.insert("external_packages".into(), stats.external_packages.into());
+        obj.insert("unresolved_imports".into(), stats.unresolved_imports.into());
+    }
+
+    if show_rust {
+        obj.insert("rust_fns".into(), stats.rust_fns.into());
+        obj.insert("rust_structs".into(), stats.rust_structs.into());
+        obj.insert("rust_enums".into(), stats.rust_enums.into());
+        obj.insert("rust_traits".into(), stats.rust_traits.into());
+        obj.insert("rust_impl_methods".into(), stats.rust_impl_methods.into());
+        obj.insert("rust_type_aliases".into(), stats.rust_type_aliases.into());
+        obj.insert("rust_consts".into(), stats.rust_consts.into());
+        obj.insert("rust_statics".into(), stats.rust_statics.into());
+        obj.insert("rust_macros".into(), stats.rust_macros.into());
+    }
+
+    serde_json::Value::Object(obj)
 }
 
 // ---------------------------------------------------------------------------

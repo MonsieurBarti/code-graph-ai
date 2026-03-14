@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -22,24 +23,35 @@ pub fn log_path(project_root: &Path) -> PathBuf {
 pub fn write_pid_file(project_root: &Path) -> Result<()> {
     let path = pid_path(project_root);
 
-    // Ensure .code-graph directory exists.
+    // Ensure .code-graph directory exists with restricted permissions.
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create directory {}", parent.display()))?;
+
+        // Restrict directory to owner-only access (0700).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = fs::Permissions::from_mode(0o700);
+            fs::set_permissions(parent, perms)
+                .with_context(|| format!("failed to set permissions on {}", parent.display()))?;
+        }
     }
 
+    // Create PID file with mode 0600 atomically via OpenOptions to avoid TOCTOU.
     let pid = std::process::id();
-    fs::write(&path, pid.to_string())
-        .with_context(|| format!("failed to write PID file {}", path.display()))?;
-
-    // Set file permissions to 0600 (owner read/write only).
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = fs::Permissions::from_mode(0o600);
-        fs::set_permissions(&path, perms)
-            .with_context(|| format!("failed to set permissions on {}", path.display()))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
     }
+    let mut file = opts
+        .open(&path)
+        .with_context(|| format!("failed to write PID file {}", path.display()))?;
+    write!(file, "{}", pid)
+        .with_context(|| format!("failed to write PID to {}", path.display()))?;
 
     Ok(())
 }

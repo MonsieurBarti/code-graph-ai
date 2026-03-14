@@ -36,9 +36,8 @@ pub fn query_daemon(project_root: &Path, request: &DaemonRequest) -> Result<Daem
     writer.flush().context("failed to flush request")?;
 
     // Read response as a single JSON line.
-    let reader = BufReader::new(stream);
+    let mut reader = BufReader::new(stream);
     let mut response_line = String::new();
-    let mut reader = reader;
     reader
         .read_line(&mut response_line)
         .context("failed to read response from daemon")?;
