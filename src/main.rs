@@ -7,6 +7,7 @@ mod language;
 mod mcp;
 mod output;
 mod parser;
+mod project;
 mod query;
 #[cfg(feature = "rag")]
 mod rag;
@@ -740,6 +741,8 @@ async fn main() -> Result<()> {
             format,
             language,
         } => {
+            let path = project::resolve_project_root(path);
+
             // Validate regex FIRST before the expensive index pipeline (Research Pitfall 4).
             regex::RegexBuilder::new(&symbol)
                 .case_insensitive(case_insensitive)
@@ -748,7 +751,7 @@ async fn main() -> Result<()> {
 
             let language_filter = parse_language_filter(language.as_deref())?;
 
-            let graph = build_graph(&path, false)?;
+            let graph = cache::load_or_build(&path, false)?;
             let results = query::find::find_symbol(
                 &graph,
                 &symbol,
@@ -779,8 +782,9 @@ async fn main() -> Result<()> {
             format,
             language,
         } => {
+            let path = project::resolve_project_root(path);
             let language_filter = parse_language_filter(language.as_deref())?;
-            let graph = build_graph(&path, false)?;
+            let graph = cache::load_or_build(&path, false)?;
             let stats = query::stats::project_stats(&graph);
             query::output::format_stats(&stats, &format, language_filter);
         }
@@ -794,6 +798,8 @@ async fn main() -> Result<()> {
             format,
             language,
         } => {
+            let path = project::resolve_project_root(path);
+
             // Validate regex FIRST before the expensive index pipeline.
             regex::RegexBuilder::new(&symbol)
                 .case_insensitive(case_insensitive)
@@ -802,7 +808,7 @@ async fn main() -> Result<()> {
 
             let language_filter = parse_language_filter(language.as_deref())?;
 
-            let graph = build_graph(&path, false)?;
+            let graph = cache::load_or_build(&path, false)?;
             let matches = query::find::match_symbols(&graph, &symbol, case_insensitive)?;
 
             if matches.is_empty() {
@@ -845,6 +851,8 @@ async fn main() -> Result<()> {
             format,
             language,
         } => {
+            let path = project::resolve_project_root(path);
+
             // Validate regex FIRST.
             regex::RegexBuilder::new(&symbol)
                 .case_insensitive(case_insensitive)
@@ -853,7 +861,7 @@ async fn main() -> Result<()> {
 
             let language_filter = parse_language_filter(language.as_deref())?;
 
-            let graph = build_graph(&path, false)?;
+            let graph = cache::load_or_build(&path, false)?;
             let matches = query::find::match_symbols(&graph, &symbol, case_insensitive)?;
 
             if matches.is_empty() {
@@ -881,9 +889,10 @@ async fn main() -> Result<()> {
             format,
             language,
         } => {
+            let path = project::resolve_project_root(path);
             let language_filter = parse_language_filter(language.as_deref())?;
 
-            let graph = build_graph(&path, false)?;
+            let graph = cache::load_or_build(&path, false)?;
             let mut cycles = query::circular::find_circular(&graph, &path);
 
             // Apply language filter: retain cycles where all files match the language.
@@ -905,6 +914,8 @@ async fn main() -> Result<()> {
             format,
             language,
         } => {
+            let path = project::resolve_project_root(path);
+
             // Validate regex FIRST before the expensive index pipeline.
             regex::RegexBuilder::new(&symbol)
                 .case_insensitive(case_insensitive)
@@ -913,7 +924,7 @@ async fn main() -> Result<()> {
 
             let language_filter = parse_language_filter(language.as_deref())?;
 
-            let graph = build_graph(&path, false)?;
+            let graph = cache::load_or_build(&path, false)?;
             let matches = query::find::match_symbols(&graph, &symbol, case_insensitive)?;
 
             if matches.is_empty() {
@@ -956,9 +967,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Mcp { path, watch } => {
-            let project_root = path.unwrap_or_else(|| {
-                std::env::current_dir().expect("cannot determine current directory")
-            });
+            let project_root = project::resolve_project_root(path);
             mcp::run(project_root, watch).await?;
         }
 
@@ -978,11 +987,13 @@ async fn main() -> Result<()> {
         Commands::Snapshot { action } => {
             match action {
                 cli::SnapshotAction::Create { name, path } => {
-                    let graph = build_graph(&path, false)?;
+                    let path = project::resolve_project_root(path);
+                    let graph = cache::load_or_build(&path, false)?;
                     crate::query::diff::create_snapshot(&graph, &path, &name)?;
                     println!("snapshot '{}' created", name);
                 }
                 cli::SnapshotAction::List { path } => {
+                    let path = project::resolve_project_root(path);
                     let snapshots = crate::query::diff::list_snapshots(&path)?;
                     if snapshots.is_empty() {
                         println!("no snapshots found");
@@ -997,6 +1008,7 @@ async fn main() -> Result<()> {
                     }
                 }
                 cli::SnapshotAction::Delete { name, path } => {
+                    let path = project::resolve_project_root(path);
                     crate::query::diff::delete_snapshot(&path, &name)?;
                     println!("snapshot '{}' deleted", name);
                 }
@@ -1013,7 +1025,8 @@ async fn main() -> Result<()> {
             depth,
             exclude,
         } => {
-            let graph = build_graph(&path, false)?;
+            let path = project::resolve_project_root(path);
+            let graph = cache::load_or_build(&path, false)?;
             let params = export::model::ExportParams {
                 format,
                 granularity,
@@ -1070,6 +1083,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Watch { path } => {
+            let path = project::resolve_project_root(path);
             eprintln!("Indexing {}...", path.display());
             let mut graph = build_graph(&path, false)?;
             eprintln!(
