@@ -2,6 +2,25 @@
 
 All notable changes to code-graph are documented in this file.
 
+## v3.0.0 (2026-03-14)
+
+**Added:**
+- Clone detection: identify structurally identical code via signature hashing across the codebase
+- Background daemon with IPC (`daemon start|stop|status`) for persistent indexing without blocking the CLI
+- Claude Code hooks integration (PreToolUse) replacing MCP-based tool dispatch
+- Multi-project registry with aliases (`project add|remove|list|show`) and `--project` flag on all query commands
+- Project auto-detection from current working directory (no explicit path required)
+- `setup --uninstall` flag to cleanly remove hooks and permissions
+
+**Changed:**
+- CLI-first architecture with 25 subcommands: index, find, refs, impact, circular, stats, context, watch, snapshot, serve, export, structure, file-summary, imports, dead-code, diff, diff-impact, decorators, clusters, flow, project, setup, daemon, daemon-run, rename
+- Token-optimized compact output moved from MCP tool responses to native CLI `--format compact` (default on all query commands)
+
+**Removed:**
+- MCP server and stdio transport (replaced by Claude Code hooks)
+- `rmcp` dependency and all MCP tool definitions
+- MCP configuration section (`[mcp]`) from code-graph.toml
+
 ## v2.0.0 (2026-03-03)
 
 **Added:**

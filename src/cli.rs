@@ -445,6 +445,31 @@ pub enum Commands {
         format: OutputFormat,
     },
 
+    /// Detect structural clones: groups of symbols with identical structural signatures.
+    ///
+    /// Hashes each symbol by (kind, body_size, outgoing edges, incoming edges, decorator count)
+    /// and groups symbols with identical hashes.
+    Clones {
+        /// Path to the project root (auto-detected from cwd when omitted).
+        path: Option<PathBuf>,
+
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
+
+        /// Minimum number of symbols in a clone group (default: 2).
+        #[arg(long, default_value_t = 2)]
+        min_group: usize,
+
+        /// Scope analysis to a specific directory (relative to project root).
+        #[arg(long)]
+        scope: Option<PathBuf>,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
+        format: OutputFormat,
+    },
+
     /// Compare two graph snapshots and show structural differences.
     Diff {
         /// Path to the project root (auto-detected from cwd when omitted).

@@ -1,4 +1,5 @@
 pub mod circular;
+pub mod clones;
 pub mod clusters;
 pub mod context;
 pub mod dead_code;

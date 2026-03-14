@@ -1404,6 +1404,42 @@ fn main() -> Result<()> {
             }
         }
 
+        Commands::Clones {
+            path,
+            project,
+            min_group,
+            scope,
+            format,
+        } => {
+            let path = resolve_project_or_path(project, path)?;
+
+            if let Some(result) = handle_daemon_response(try_daemon_query(
+                &path,
+                &daemon::protocol::DaemonRequest::Clones {
+                    scope: scope.clone(),
+                    min_group,
+                },
+            )) {
+                return result;
+            }
+
+            let graph = cache::load_or_build(&path, false)?;
+            let result = query::clones::find_clones(&graph, &path, scope.as_deref(), min_group);
+            match format {
+                cli::OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                }
+                cli::OutputFormat::Table => {
+                    let output = query::output::format_clones_table(&result, &path);
+                    println!("{}", output);
+                }
+                cli::OutputFormat::Compact => {
+                    let output = query::output::format_clones_to_string(&result, &path);
+                    println!("{}", output);
+                }
+            }
+        }
+
         Commands::Diff {
             path,
             project,
@@ -1460,7 +1496,7 @@ fn main() -> Result<()> {
 
             // Shell out to git diff --name-only
             let output = std::process::Command::new("git")
-                .args(["diff", "--name-only", &base_ref])
+                .args(["diff", "--name-only", "--", &base_ref])
                 .current_dir(&path)
                 .output()
                 .map_err(|e| anyhow::anyhow!("failed to run git: {}. Ensure git is in PATH.", e))?;
