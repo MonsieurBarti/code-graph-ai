@@ -190,6 +190,8 @@ pub async fn oauth_start_handler(State(state): State<AppState>) -> impl IntoResp
     const ANTHROPIC_AUTH_URL: &str = "https://claude.ai/oauth/authorize";
     const ANTHROPIC_TOKEN_URL: &str = "https://claude.ai/oauth/token";
     // Redirect URI must match what's configured in the Anthropic OAuth application.
+    // TODO: REDIRECT_URI is hardcoded to port 7070. If the server runs on a different port,
+    // OAuth callbacks will fail. Fix by passing the configured port via AppState.
     const REDIRECT_URI: &str = "http://localhost:7070/api/auth/oauth/callback";
 
     let client = match build_oauth_client(ANTHROPIC_AUTH_URL, ANTHROPIC_TOKEN_URL, REDIRECT_URI) {
@@ -272,6 +274,8 @@ pub async fn oauth_callback_handler(
     // Exchange authorization code for token.
     const ANTHROPIC_AUTH_URL: &str = "https://claude.ai/oauth/authorize";
     const ANTHROPIC_TOKEN_URL: &str = "https://claude.ai/oauth/token";
+    // TODO: REDIRECT_URI is hardcoded to port 7070. If the server runs on a different port,
+    // OAuth callbacks will fail. Fix by passing the configured port via AppState.
     const REDIRECT_URI: &str = "http://localhost:7070/api/auth/oauth/callback";
 
     let client = match build_oauth_client(ANTHROPIC_AUTH_URL, ANTHROPIC_TOKEN_URL, REDIRECT_URI) {
@@ -360,6 +364,7 @@ pub async fn ollama_models_handler(State(state): State<AppState>) -> impl IntoRe
 
 /// Minimal async HTTP GET using tokio TCP — avoids adding reqwest as a direct dep.
 async fn tokio_ollama_get(url: &str) -> Result<String, String> {
+    use std::net::ToSocketAddrs;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
@@ -369,6 +374,21 @@ async fn tokio_ollama_get(url: &str) -> Result<String, String> {
         .ok_or("Only http:// URLs supported")?;
     let (host_port, path) = url.split_once('/').unwrap_or((url, "api/tags"));
     let path = format!("/{}", path);
+
+    // Validate the resolved address is loopback to prevent SSRF.
+    let addrs: Vec<_> = host_port
+        .to_socket_addrs()
+        .map_err(|e| format!("DNS resolution failed: {}", e))?
+        .collect();
+    if addrs.is_empty() {
+        return Err("Could not resolve host".to_string());
+    }
+    if !addrs.iter().all(|a| a.ip().is_loopback()) {
+        return Err(
+            "Ollama host must resolve to loopback (127.0.0.1 or ::1), got non-loopback address"
+                .to_string(),
+        );
+    }
 
     let mut stream = TcpStream::connect(host_port)
         .await
@@ -444,9 +464,19 @@ fn build_oauth_client(
     )
 }
 
+/// Escape special HTML characters to prevent XSS injection.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+}
+
 /// Return an HTML error page with a link back to the chat panel.
 fn error_page(message: &str, back_link: Option<&str>) -> impl IntoResponse {
-    let back_href = back_link.unwrap_or("/");
+    let back_href = html_escape(back_link.unwrap_or("/"));
+    let message = html_escape(message);
     let html = format!(
         r#"<!DOCTYPE html>
 <html>
@@ -459,7 +489,7 @@ fn error_page(message: &str, back_link: Option<&str>) -> impl IntoResponse {
 </html>"#
     );
     (
-        StatusCode::OK,
+        StatusCode::BAD_REQUEST,
         [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
         html,
     )

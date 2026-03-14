@@ -375,6 +375,9 @@ pub enum Commands {
         #[arg(long)]
         path: Option<PathBuf>,
 
+        /// Path to the project root (auto-detected from cwd when omitted).
+        root: Option<PathBuf>,
+
         /// Use a registered project alias instead of a path.
         #[arg(long)]
         project: Option<String>,

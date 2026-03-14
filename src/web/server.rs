@@ -24,7 +24,6 @@ pub struct AppState {
     /// Broadcast sender for WebSocket push messages (e.g. "graph_updated").
     pub ws_tx: broadcast::Sender<String>,
     /// Single-use auth token required for API access. Generated at startup.
-    #[allow(dead_code)]
     pub auth_token: String,
 
     // ── RAG fields (only available when compiled with the `rag` feature) ──────
@@ -56,22 +55,42 @@ pub struct AppState {
 #[folder = "web/dist/"]
 struct WebAssets;
 
+const GRAPH_UPDATED_MSG: &str = r#"{"type":"graph_updated"}"#;
+
+/// Middleware to validate the auth token on API routes.
+async fn auth_middleware(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    // Skip auth for OPTIONS (preflight) requests.
+    if request.method() == axum::http::Method::OPTIONS {
+        return next.run(request).await;
+    }
+
+    let auth_header = request.headers().get(axum::http::header::AUTHORIZATION);
+    let expected = format!("Bearer {}", state.auth_token);
+
+    match auth_header.and_then(|v| v.to_str().ok()) {
+        Some(value) if value == expected => next.run(request).await,
+        _ => (StatusCode::UNAUTHORIZED, "Invalid or missing auth token").into_response(),
+    }
+}
+
 /// Build the axum Router with all routes and middleware.
 ///
 /// `port` is the TCP port the server listens on, used to derive the CORS
 /// allowed origin (`http://127.0.0.1:{port}`).
 pub fn build_router(state: AppState, port: u16) -> Router {
-    let router = Router::new()
+    let api_router = Router::new()
         .route("/api/graph", get(api::graph::handler))
         .route("/api/file", get(api::file::handler))
         .route("/api/search", get(api::search::handler))
-        .route("/api/stats", get(api::stats::handler))
-        .route("/ws", get(ws::handler))
-        .fallback(serve_asset);
+        .route("/api/stats", get(api::stats::handler));
 
     // Wire RAG routes when compiled with the `rag` feature.
     #[cfg(feature = "rag")]
-    let router = router
+    let api_router = api_router
         .route("/api/chat", axum::routing::post(api::chat::handler))
         .route(
             "/api/auth/status",
@@ -98,6 +117,17 @@ pub fn build_router(state: AppState, port: u16) -> Router {
             axum::routing::get(api::auth::ollama_models_handler),
         );
 
+    // Apply auth middleware to API routes only.
+    let api_router = api_router.layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        auth_middleware,
+    ));
+
+    let router = Router::new()
+        .merge(api_router)
+        .route("/ws", get(ws::handler))
+        .fallback(serve_asset);
+
     // Apply security headers middleware.
     let router = router.layer(axum::middleware::from_fn(security_headers));
 
@@ -123,37 +153,33 @@ async fn security_headers(
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
+    use axum::http::HeaderValue;
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
     headers.insert(
         "Content-Security-Policy",
-        "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
-            .parse()
-            .unwrap(),
+        HeaderValue::from_static(
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'",
+        ),
     );
-    headers.insert("X-Content-Type-Options", "nosniff".parse().unwrap());
-    headers.insert("X-Frame-Options", "DENY".parse().unwrap());
-    headers.insert("Referrer-Policy", "no-referrer".parse().unwrap());
+    headers.insert(
+        "X-Content-Type-Options",
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert("X-Frame-Options", HeaderValue::from_static("DENY"));
+    headers.insert("Referrer-Policy", HeaderValue::from_static("no-referrer"));
     response
 }
 
-/// Generate a random 32-character hex auth token.
+/// Generate a random 32-character hex auth token using the OS CSPRNG.
 fn generate_auth_token() -> String {
-    use std::collections::hash_map::RandomState;
-    use std::hash::{BuildHasher, Hasher};
-    let s = RandomState::new();
-    let mut h = s.build_hasher();
-    h.write_u128(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos(),
-    );
-    let a = h.finish();
-    let mut h2 = s.build_hasher();
-    h2.write_u64(a);
-    let b = h2.finish();
-    format!("{:016x}{:016x}", a, b)
+    use std::io::Read;
+    let mut bytes = [0u8; 16];
+    std::fs::File::open("/dev/urandom")
+        .expect("failed to open /dev/urandom")
+        .read_exact(&mut bytes)
+        .expect("failed to read random bytes");
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 /// Serve embedded frontend assets. Falls back to index.html for unknown paths (SPA routing).
@@ -163,10 +189,14 @@ async fn serve_asset(uri: axum::http::Uri) -> impl IntoResponse {
     // Try to serve the exact file first.
     if let Some(content) = WebAssets::get(path) {
         let mime = mime_guess::from_path(path).first_or_octet_stream();
+        let body = match content.data {
+            std::borrow::Cow::Borrowed(bytes) => Body::from(bytes),
+            std::borrow::Cow::Owned(vec) => Body::from(vec),
+        };
         Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, mime.as_ref())
-            .body(Body::from(content.data.to_vec()))
+            .body(body)
             .unwrap_or_else(|_| {
                 Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -176,10 +206,14 @@ async fn serve_asset(uri: axum::http::Uri) -> impl IntoResponse {
     } else {
         // SPA fallback: serve index.html for any unknown path.
         if let Some(index) = WebAssets::get("index.html") {
+            let body = match index.data {
+                std::borrow::Cow::Borrowed(bytes) => Body::from(bytes),
+                std::borrow::Cow::Owned(vec) => Body::from(vec),
+            };
             Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-                .body(Body::from(index.data.to_vec()))
+                .body(body)
                 .unwrap_or_else(|_| {
                     Response::builder()
                         .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -383,9 +417,8 @@ pub async fn serve(root: PathBuf, port: u16, ollama: bool) -> anyhow::Result<()>
                         }
                     }
 
-                    let msg = r#"{"type":"graph_updated"}"#.to_string();
                     // Ignore send errors — no clients connected is fine.
-                    let _ = watcher_tx.send(msg);
+                    let _ = watcher_tx.send(GRAPH_UPDATED_MSG.to_string());
                 }
             });
         }
@@ -453,7 +486,11 @@ mod tests {
         // depending on missing query params, but never 404).
         let routes = ["/api/graph", "/api/file", "/api/search", "/api/stats"];
         for path in routes {
-            let req = Request::builder().uri(path).body(Body::empty()).unwrap();
+            let req = Request::builder()
+                .uri(path)
+                .header("Authorization", "Bearer test-token")
+                .body(Body::empty())
+                .unwrap();
             let resp = app.clone().oneshot(req).await.unwrap();
             assert_ne!(
                 resp.status(),

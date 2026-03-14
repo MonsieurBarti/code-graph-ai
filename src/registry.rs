@@ -56,7 +56,7 @@ pub struct ProjectRegistry {
 fn registry_toml_path() -> PathBuf {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".to_string());
+        .expect("HOME or USERPROFILE environment variable must be set");
     PathBuf::from(home)
         .join(".code-graph")
         .join("projects.toml")
@@ -154,7 +154,7 @@ impl ProjectRegistry {
             added_at: now,
         };
 
-        registry.projects.insert(alias.to_string(), entry.clone());
+        registry.projects.insert(entry.alias.clone(), entry.clone());
 
         self.save(&registry)?;
 
