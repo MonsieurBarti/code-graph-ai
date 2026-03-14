@@ -1,6 +1,7 @@
 mod cache;
 mod cli;
 mod config;
+mod daemon;
 mod export;
 mod graph;
 mod language;
