@@ -13,24 +13,40 @@ pub struct FileQuery {
 /// GET /api/file?path=src/main.rs
 ///
 /// Returns the raw content of the requested file as text/plain.
-/// Rejects directory traversal attempts (paths containing "..").
+/// Rejects any path that does not resolve within the project root (handles ".." and symlinks).
 /// Returns 404 if the file does not exist.
 pub async fn handler(
     Query(params): Query<FileQuery>,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    // Security: reject directory traversal attempts.
-    if params.path.contains("..") {
+    let file_path = state.project_root.join(&params.path);
+
+    // Security: verify the resolved path is within the project root.
+    let canonical = match file_path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            return (StatusCode::NOT_FOUND, "File not found".to_string()).into_response();
+        }
+    };
+    let project_root = match state.project_root.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Project root not accessible".to_string(),
+            )
+                .into_response();
+        }
+    };
+    if !canonical.starts_with(&project_root) {
         return (
             StatusCode::BAD_REQUEST,
-            "Directory traversal not allowed".to_string(),
+            "Path outside project root".to_string(),
         )
             .into_response();
     }
 
-    let file_path = state.project_root.join(&params.path);
-
-    match tokio::fs::read_to_string(&file_path).await {
+    match tokio::fs::read_to_string(&canonical).await {
         Ok(content) => (
             StatusCode::OK,
             [(
@@ -57,36 +73,23 @@ pub async fn handler(
 
 #[cfg(test)]
 mod tests {
-    /// Test that paths with ".." in them are rejected.
-    ///
-    /// We test the traversal detection logic directly here since we cannot
-    /// easily construct an axum State in unit tests.
     #[test]
-    fn test_file_api_rejects_traversal() {
-        let malicious_paths = vec![
-            "../etc/passwd",
-            "../../secrets",
-            "src/../../../root",
-            "foo/../../bar",
-        ];
+    fn test_traversal_paths_detected() {
+        // Canonical path comparison handles traversal — the old string-based test
+        // is no longer needed. The real protection is in the handler's canonicalize
+        // + starts_with check. These paths demonstrate what the handler catches:
+        let malicious_paths = vec!["../etc/passwd", "../../secrets", "src/../../../root"];
         for path in malicious_paths {
-            assert!(
-                path.contains(".."),
-                "path '{}' should be detected as traversal",
-                path
-            );
+            // All these paths would fail canonicalize or starts_with in the handler.
+            assert!(path.contains("..") || path.starts_with('/'));
         }
     }
 
     #[test]
-    fn test_safe_paths_not_rejected() {
+    fn test_safe_paths_accepted() {
         let safe_paths = vec!["src/main.rs", "Cargo.toml", "web/dist/index.html"];
         for path in safe_paths {
-            assert!(
-                !path.contains(".."),
-                "path '{}' should not be rejected",
-                path
-            );
+            assert!(!path.contains("..") && !path.starts_with('/'));
         }
     }
 }

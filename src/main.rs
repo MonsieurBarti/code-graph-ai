@@ -11,6 +11,7 @@ mod project;
 mod query;
 #[cfg(feature = "rag")]
 mod rag;
+mod registry;
 mod resolver;
 mod setup;
 mod walker;
@@ -256,6 +257,10 @@ fn format_epoch_secs(secs: u64) -> String {
         }
         remaining -= md;
     }
+    // Fallback: if loop completed without break, it's December (month 12).
+    if m == 0 {
+        m = 12;
+    }
     let d = remaining + 1;
     format!(
         "{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
@@ -411,6 +416,49 @@ fn try_daemon_query(
         return None;
     }
     daemon::client::query_daemon(project_root, request).ok()
+}
+
+/// Handle a daemon response: print success data and return Ok(()),
+/// or print error and return None to fall through to local execution.
+fn handle_daemon_response(resp: Option<daemon::protocol::DaemonResponse>) -> Option<Result<()>> {
+    match resp? {
+        daemon::protocol::DaemonResponse::Success { data, .. } => {
+            match serde_json::to_string_pretty(&data) {
+                Ok(json) => {
+                    println!("{}", json);
+                    Some(Ok(()))
+                }
+                Err(e) => Some(Err(e.into())),
+            }
+        }
+        daemon::protocol::DaemonResponse::Error { message, .. } => {
+            eprintln!("daemon error: {}", message);
+            None
+        }
+    }
+}
+
+/// Resolve the project root path from either a `--project` alias or the standard `path` option.
+///
+/// When `--project <alias>` is provided, look up the alias in the registry and use that path.
+/// Otherwise, fall back to `project::resolve_project_root(path)` (auto-detect from cwd).
+fn resolve_project_or_path(
+    project_alias: Option<String>,
+    path: Option<PathBuf>,
+) -> Result<PathBuf> {
+    if let Some(alias) = project_alias {
+        let reg = registry::ProjectRegistry::new();
+        match reg.get(&alias) {
+            Some(entry) => Ok(entry.path),
+            None => anyhow::bail!(
+                "project alias '{}' not found — register it with: code-graph project add {} /path/to/project",
+                alias,
+                alias
+            ),
+        }
+    } else {
+        Ok(project::resolve_project_root(path))
+    }
 }
 
 fn main() -> Result<()> {
@@ -660,12 +708,12 @@ fn main() -> Result<()> {
 
                         // Embed in batches of 256 (fastembed default batch size).
                         let batch_size = 256;
+                        let rt = tokio::runtime::Runtime::new()?;
                         for (batch_idx, chunk) in symbols.chunks(batch_size).enumerate() {
                             let start = batch_idx * batch_size;
                             let end = (start + chunk.len()).min(total);
                             eprint!("\rEmbedding [{}/{}] ...", end, total);
 
-                            let rt = tokio::runtime::Runtime::new()?;
                             let embeddings =
                                 rt.block_on(rag::embedding::embed_symbols(&engine, chunk))?;
 
@@ -716,6 +764,7 @@ fn main() -> Result<()> {
 
         Commands::Find {
             path,
+            project,
             symbol,
             case_insensitive,
             kind,
@@ -723,7 +772,7 @@ fn main() -> Result<()> {
             format,
             language,
         } => {
-            let path = project::resolve_project_root(path);
+            let path = resolve_project_or_path(project, path)?;
 
             // Validate regex FIRST before the expensive index pipeline (Research Pitfall 4).
             regex::RegexBuilder::new(&symbol)
@@ -733,7 +782,7 @@ fn main() -> Result<()> {
 
             let language_filter = parse_language_filter(language.as_deref())?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &path,
                 &daemon::protocol::DaemonRequest::Find {
                     symbol: symbol.clone(),
@@ -742,16 +791,8 @@ fn main() -> Result<()> {
                     file: file.clone(),
                     language: language.clone(),
                 },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             let graph = cache::load_or_build(&path, false)?;
@@ -782,27 +823,20 @@ fn main() -> Result<()> {
 
         Commands::Stats {
             path,
+            project,
             format,
             language,
         } => {
-            let path = project::resolve_project_root(path);
+            let path = resolve_project_or_path(project, path)?;
             let language_filter = parse_language_filter(language.as_deref())?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &path,
                 &daemon::protocol::DaemonRequest::Stats {
                     language: language.clone(),
                 },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             let graph = cache::load_or_build(&path, false)?;
@@ -812,6 +846,7 @@ fn main() -> Result<()> {
 
         Commands::Refs {
             path,
+            project,
             symbol,
             case_insensitive,
             kind: _,
@@ -819,7 +854,7 @@ fn main() -> Result<()> {
             format,
             language,
         } => {
-            let path = project::resolve_project_root(path);
+            let path = resolve_project_or_path(project, path)?;
 
             // Validate regex FIRST before the expensive index pipeline.
             regex::RegexBuilder::new(&symbol)
@@ -829,7 +864,7 @@ fn main() -> Result<()> {
 
             let language_filter = parse_language_filter(language.as_deref())?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &path,
                 &daemon::protocol::DaemonRequest::Refs {
                     symbol: symbol.clone(),
@@ -838,16 +873,8 @@ fn main() -> Result<()> {
                     file: None,
                     language: language.clone(),
                 },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             let graph = cache::load_or_build(&path, false)?;
@@ -887,13 +914,14 @@ fn main() -> Result<()> {
 
         Commands::Impact {
             path,
+            project,
             symbol,
             case_insensitive,
             tree,
             format,
             language,
         } => {
-            let path = project::resolve_project_root(path);
+            let path = resolve_project_or_path(project, path)?;
 
             // Validate regex FIRST.
             regex::RegexBuilder::new(&symbol)
@@ -903,7 +931,7 @@ fn main() -> Result<()> {
 
             let language_filter = parse_language_filter(language.as_deref())?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &path,
                 &daemon::protocol::DaemonRequest::Impact {
                     symbol: symbol.clone(),
@@ -911,16 +939,8 @@ fn main() -> Result<()> {
                     tree,
                     language: language.clone(),
                 },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             let graph = cache::load_or_build(&path, false)?;
@@ -948,27 +968,20 @@ fn main() -> Result<()> {
 
         Commands::Circular {
             path,
+            project,
             format,
             language,
         } => {
-            let path = project::resolve_project_root(path);
+            let path = resolve_project_or_path(project, path)?;
             let language_filter = parse_language_filter(language.as_deref())?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &path,
                 &daemon::protocol::DaemonRequest::Circular {
                     language: language.clone(),
                 },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             let graph = cache::load_or_build(&path, false)?;
@@ -988,12 +1001,13 @@ fn main() -> Result<()> {
 
         Commands::Context {
             path,
+            project,
             symbol,
             case_insensitive,
             format,
             language,
         } => {
-            let path = project::resolve_project_root(path);
+            let path = resolve_project_or_path(project, path)?;
 
             // Validate regex FIRST before the expensive index pipeline.
             regex::RegexBuilder::new(&symbol)
@@ -1003,23 +1017,15 @@ fn main() -> Result<()> {
 
             let language_filter = parse_language_filter(language.as_deref())?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &path,
                 &daemon::protocol::DaemonRequest::Context {
                     symbol: symbol.clone(),
                     case_insensitive,
                     language: language.clone(),
                 },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             let graph = cache::load_or_build(&path, false)?;
@@ -1069,19 +1075,11 @@ fn main() -> Result<()> {
                 cli::SnapshotAction::Create { name, path } => {
                     let path = project::resolve_project_root(path);
 
-                    if let Some(resp) = try_daemon_query(
+                    if let Some(result) = handle_daemon_response(try_daemon_query(
                         &path,
                         &daemon::protocol::DaemonRequest::SnapshotCreate { name: name.clone() },
-                    ) {
-                        match resp {
-                            daemon::protocol::DaemonResponse::Success { data, .. } => {
-                                println!("{}", serde_json::to_string_pretty(&data)?);
-                                return Ok(());
-                            }
-                            daemon::protocol::DaemonResponse::Error { message, .. } => {
-                                eprintln!("daemon error: {}", message);
-                            }
-                        }
+                    )) {
+                        return result;
                     }
 
                     let graph = cache::load_or_build(&path, false)?;
@@ -1113,6 +1111,7 @@ fn main() -> Result<()> {
 
         Commands::Export {
             path,
+            project,
             format,
             granularity,
             stdout,
@@ -1121,9 +1120,9 @@ fn main() -> Result<()> {
             depth,
             exclude,
         } => {
-            let path = project::resolve_project_root(path);
+            let path = resolve_project_or_path(project, path)?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &path,
                 &daemon::protocol::DaemonRequest::Export {
                     format: format!("{:?}", format).to_lowercase(),
@@ -1134,16 +1133,8 @@ fn main() -> Result<()> {
                     depth,
                     exclude: exclude.clone(),
                 },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             let graph = cache::load_or_build(&path, false)?;
@@ -1283,27 +1274,21 @@ fn main() -> Result<()> {
 
         Commands::Structure {
             path,
+            root,
+            project,
             depth,
             format,
         } => {
-            let project_root = project::resolve_project_root(None);
+            let project_root = resolve_project_or_path(project, root)?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &project_root,
                 &daemon::protocol::DaemonRequest::Structure {
                     path: path.clone(),
                     depth,
                 },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             let graph = cache::load_or_build(&project_root, false)?;
@@ -1320,22 +1305,19 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::FileSummary { file, path, format } => {
-            let path = project::resolve_project_root(path);
+        Commands::FileSummary {
+            file,
+            path,
+            project,
+            format,
+        } => {
+            let path = resolve_project_or_path(project, path)?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &path,
                 &daemon::protocol::DaemonRequest::FileSummary { file: file.clone() },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             let graph = cache::load_or_build(&path, false)?;
@@ -1356,22 +1338,19 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::Imports { file, path, format } => {
-            let path = project::resolve_project_root(path);
+        Commands::Imports {
+            file,
+            path,
+            project,
+            format,
+        } => {
+            let path = resolve_project_or_path(project, path)?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &path,
                 &daemon::protocol::DaemonRequest::Imports { file: file.clone() },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             let graph = cache::load_or_build(&path, false)?;
@@ -1397,26 +1376,19 @@ fn main() -> Result<()> {
 
         Commands::DeadCode {
             path,
+            project,
             scope,
             format,
         } => {
-            let path = project::resolve_project_root(path);
+            let path = resolve_project_or_path(project, path)?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &path,
                 &daemon::protocol::DaemonRequest::DeadCode {
                     scope: scope.clone(),
                 },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             let graph = cache::load_or_build(&path, false)?;
@@ -1434,28 +1406,21 @@ fn main() -> Result<()> {
 
         Commands::Diff {
             path,
+            project,
             from,
             to,
             format,
         } => {
-            let path = project::resolve_project_root(path);
+            let path = resolve_project_or_path(project, path)?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &path,
                 &daemon::protocol::DaemonRequest::Diff {
                     from: from.clone(),
                     to: to.clone(),
                 },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             let graph = cache::load_or_build(&path, false)?;
@@ -1479,25 +1444,18 @@ fn main() -> Result<()> {
         Commands::DiffImpact {
             base_ref,
             path,
+            project,
             format,
         } => {
-            let path = project::resolve_project_root(path);
+            let path = resolve_project_or_path(project, path)?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &path,
                 &daemon::protocol::DaemonRequest::DiffImpact {
                     base_ref: base_ref.clone(),
                 },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             // Shell out to git diff --name-only
@@ -1546,29 +1504,22 @@ fn main() -> Result<()> {
         Commands::Decorators {
             pattern,
             path,
+            project,
             language,
             framework,
             format,
         } => {
-            let path = project::resolve_project_root(path);
+            let path = resolve_project_or_path(project, path)?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &path,
                 &daemon::protocol::DaemonRequest::Decorators {
                     pattern: pattern.clone(),
                     language: language.clone(),
                     framework: framework.clone(),
                 },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             let graph = cache::load_or_build(&path, false)?;
@@ -1592,26 +1543,19 @@ fn main() -> Result<()> {
 
         Commands::Clusters {
             path,
+            project,
             scope,
             format,
         } => {
-            let path = project::resolve_project_root(path);
+            let path = resolve_project_or_path(project, path)?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &path,
                 &daemon::protocol::DaemonRequest::Clusters {
                     scope: scope.clone(),
                 },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             let graph = cache::load_or_build(&path, false)?;
@@ -1636,13 +1580,14 @@ fn main() -> Result<()> {
             entry,
             target,
             path,
+            project,
             max_paths,
             max_depth,
             format,
         } => {
-            let path = project::resolve_project_root(path);
+            let path = resolve_project_or_path(project, path)?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &path,
                 &daemon::protocol::DaemonRequest::Flow {
                     entry: entry.clone(),
@@ -1650,16 +1595,8 @@ fn main() -> Result<()> {
                     max_paths,
                     max_depth,
                 },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             let graph = cache::load_or_build(&path, false)?;
@@ -1675,6 +1612,43 @@ fn main() -> Result<()> {
             }
         }
 
+        Commands::Project { action } => match action {
+            cli::ProjectAction::Add { alias, path } => {
+                let reg = registry::ProjectRegistry::new();
+                let entry = reg.add(&alias, &path)?;
+                println!("Registered {} -> {}", entry.alias, entry.path.display());
+            }
+            cli::ProjectAction::Remove { alias } => {
+                let reg = registry::ProjectRegistry::new();
+                reg.remove(&alias)?;
+                println!("Removed {}", alias);
+            }
+            cli::ProjectAction::List => {
+                let reg = registry::ProjectRegistry::new();
+                let entries = reg.list();
+                if entries.is_empty() {
+                    println!("No projects registered");
+                } else {
+                    for entry in &entries {
+                        println!("  {:<20} {}", entry.alias, entry.path.display());
+                    }
+                }
+            }
+            cli::ProjectAction::Show { alias } => {
+                let reg = registry::ProjectRegistry::new();
+                match reg.get(&alias) {
+                    Some(entry) => {
+                        println!("Alias:    {}", entry.alias);
+                        println!("Path:     {}", entry.path.display());
+                        println!("Added at: {}", format_epoch_secs(entry.added_at));
+                    }
+                    None => {
+                        anyhow::bail!("project alias '{}' not found", alias);
+                    }
+                }
+            }
+        },
+
         Commands::Setup { global, uninstall } => {
             setup::run(global, uninstall)?;
         }
@@ -1683,26 +1657,19 @@ fn main() -> Result<()> {
             symbol,
             new_name,
             path,
+            project,
             format,
         } => {
-            let path = project::resolve_project_root(path);
+            let path = resolve_project_or_path(project, path)?;
 
-            if let Some(resp) = try_daemon_query(
+            if let Some(result) = handle_daemon_response(try_daemon_query(
                 &path,
                 &daemon::protocol::DaemonRequest::Rename {
                     symbol: symbol.clone(),
                     new_name: new_name.clone(),
                 },
-            ) {
-                match resp {
-                    daemon::protocol::DaemonResponse::Success { data, .. } => {
-                        println!("{}", serde_json::to_string_pretty(&data)?);
-                        return Ok(());
-                    }
-                    daemon::protocol::DaemonResponse::Error { message, .. } => {
-                        eprintln!("daemon error: {}", message);
-                    }
-                }
+            )) {
+                return result;
             }
 
             let graph = cache::load_or_build(&path, false)?;

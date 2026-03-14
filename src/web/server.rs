@@ -24,7 +24,6 @@ pub struct AppState {
     /// Broadcast sender for WebSocket push messages (e.g. "graph_updated").
     pub ws_tx: broadcast::Sender<String>,
     /// Single-use auth token required for API access. Generated at startup.
-    #[allow(dead_code)]
     pub auth_token: String,
 
     // ── RAG fields (only available when compiled with the `rag` feature) ──────
@@ -56,19 +55,42 @@ pub struct AppState {
 #[folder = "web/dist/"]
 struct WebAssets;
 
+const GRAPH_UPDATED_MSG: &str = r#"{"type":"graph_updated"}"#;
+
+/// Middleware to validate the auth token on API routes.
+async fn auth_middleware(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    // Skip auth for OPTIONS (preflight) requests.
+    if request.method() == axum::http::Method::OPTIONS {
+        return next.run(request).await;
+    }
+
+    let auth_header = request.headers().get(axum::http::header::AUTHORIZATION);
+    let expected = format!("Bearer {}", state.auth_token);
+
+    match auth_header.and_then(|v| v.to_str().ok()) {
+        Some(value) if value == expected => next.run(request).await,
+        _ => (StatusCode::UNAUTHORIZED, "Invalid or missing auth token").into_response(),
+    }
+}
+
 /// Build the axum Router with all routes and middleware.
-pub fn build_router(state: AppState) -> Router {
-    let router = Router::new()
+///
+/// `port` is the TCP port the server listens on, used to derive the CORS
+/// allowed origin (`http://127.0.0.1:{port}`).
+pub fn build_router(state: AppState, port: u16) -> Router {
+    let api_router = Router::new()
         .route("/api/graph", get(api::graph::handler))
         .route("/api/file", get(api::file::handler))
         .route("/api/search", get(api::search::handler))
-        .route("/api/stats", get(api::stats::handler))
-        .route("/ws", get(ws::handler))
-        .fallback(serve_asset);
+        .route("/api/stats", get(api::stats::handler));
 
     // Wire RAG routes when compiled with the `rag` feature.
     #[cfg(feature = "rag")]
-    let router = router
+    let api_router = api_router
         .route("/api/chat", axum::routing::post(api::chat::handler))
         .route(
             "/api/auth/status",
@@ -95,16 +117,24 @@ pub fn build_router(state: AppState) -> Router {
             axum::routing::get(api::auth::ollama_models_handler),
         );
 
+    // Apply auth middleware to API routes only.
+    let api_router = api_router.layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        auth_middleware,
+    ));
+
+    let router = Router::new()
+        .merge(api_router)
+        .route("/ws", get(ws::handler))
+        .fallback(serve_asset);
+
     // Apply security headers middleware.
     let router = router.layer(axum::middleware::from_fn(security_headers));
 
-    // Fix: Restrict CORS to expected local origin instead of wildcard.
+    // CORS: allow the same origin the server is bound to.
+    let origin = format!("http://127.0.0.1:{port}");
     let cors = CorsLayer::new()
-        .allow_origin(
-            "http://127.0.0.1:3000"
-                .parse::<axum::http::HeaderValue>()
-                .unwrap(),
-        )
+        .allow_origin(origin.parse::<axum::http::HeaderValue>().unwrap())
         .allow_methods([
             axum::http::Method::GET,
             axum::http::Method::POST,
@@ -123,37 +153,33 @@ async fn security_headers(
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
+    use axum::http::HeaderValue;
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
     headers.insert(
         "Content-Security-Policy",
-        "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
-            .parse()
-            .unwrap(),
+        HeaderValue::from_static(
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'",
+        ),
     );
-    headers.insert("X-Content-Type-Options", "nosniff".parse().unwrap());
-    headers.insert("X-Frame-Options", "DENY".parse().unwrap());
-    headers.insert("Referrer-Policy", "no-referrer".parse().unwrap());
+    headers.insert(
+        "X-Content-Type-Options",
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert("X-Frame-Options", HeaderValue::from_static("DENY"));
+    headers.insert("Referrer-Policy", HeaderValue::from_static("no-referrer"));
     response
 }
 
-/// Generate a random 32-character hex auth token.
+/// Generate a random 32-character hex auth token using the OS CSPRNG.
 fn generate_auth_token() -> String {
-    use std::collections::hash_map::RandomState;
-    use std::hash::{BuildHasher, Hasher};
-    let s = RandomState::new();
-    let mut h = s.build_hasher();
-    h.write_u128(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos(),
-    );
-    let a = h.finish();
-    let mut h2 = s.build_hasher();
-    h2.write_u64(a);
-    let b = h2.finish();
-    format!("{:016x}{:016x}", a, b)
+    use std::io::Read;
+    let mut bytes = [0u8; 16];
+    std::fs::File::open("/dev/urandom")
+        .expect("failed to open /dev/urandom")
+        .read_exact(&mut bytes)
+        .expect("failed to read random bytes");
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 /// Serve embedded frontend assets. Falls back to index.html for unknown paths (SPA routing).
@@ -163,10 +189,14 @@ async fn serve_asset(uri: axum::http::Uri) -> impl IntoResponse {
     // Try to serve the exact file first.
     if let Some(content) = WebAssets::get(path) {
         let mime = mime_guess::from_path(path).first_or_octet_stream();
+        let body = match content.data {
+            std::borrow::Cow::Borrowed(bytes) => Body::from(bytes),
+            std::borrow::Cow::Owned(vec) => Body::from(vec),
+        };
         Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, mime.as_ref())
-            .body(Body::from(content.data.to_vec()))
+            .body(body)
             .unwrap_or_else(|_| {
                 Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -176,10 +206,14 @@ async fn serve_asset(uri: axum::http::Uri) -> impl IntoResponse {
     } else {
         // SPA fallback: serve index.html for any unknown path.
         if let Some(index) = WebAssets::get("index.html") {
+            let body = match index.data {
+                std::borrow::Cow::Borrowed(bytes) => Body::from(bytes),
+                std::borrow::Cow::Owned(vec) => Body::from(vec),
+            };
             Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-                .body(Body::from(index.data.to_vec()))
+                .body(body)
                 .unwrap_or_else(|_| {
                     Response::builder()
                         .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -383,9 +417,8 @@ pub async fn serve(root: PathBuf, port: u16, ollama: bool) -> anyhow::Result<()>
                         }
                     }
 
-                    let msg = r#"{"type":"graph_updated"}"#.to_string();
                     // Ignore send errors — no clients connected is fine.
-                    let _ = watcher_tx.send(msg);
+                    let _ = watcher_tx.send(GRAPH_UPDATED_MSG.to_string());
                 }
             });
         }
@@ -394,7 +427,7 @@ pub async fn serve(root: PathBuf, port: u16, ollama: bool) -> anyhow::Result<()>
         }
     }
 
-    let router = build_router(state);
+    let router = build_router(state, port);
     // Bind to localhost only — not exposed on all interfaces.
     let addr = format!("127.0.0.1:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -402,4 +435,214 @@ pub async fn serve(root: PathBuf, port: u16, ollama: bool) -> anyhow::Result<()>
     println!("Auth token: {auth_token}");
     axum::serve(listener, router).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt; // oneshot
+
+    /// Helper: build an AppState with an empty CodeGraph for testing.
+    fn test_state() -> AppState {
+        let (ws_tx, _) = broadcast::channel::<String>(16);
+        AppState {
+            graph: Arc::new(RwLock::new(CodeGraph::new())),
+            project_root: PathBuf::from("/tmp/test-project"),
+            ws_tx,
+            auth_token: "test-token".to_string(),
+            #[cfg(feature = "rag")]
+            vector_store: Arc::new(RwLock::new(None)),
+            #[cfg(feature = "rag")]
+            embedding_engine: Arc::new(None),
+            #[cfg(feature = "rag")]
+            session_store: Arc::new(tokio::sync::Mutex::new(
+                crate::rag::session::SessionStore::new(10),
+            )),
+            #[cfg(feature = "rag")]
+            auth_state: Arc::new(RwLock::new(crate::rag::auth::AuthState {
+                provider: crate::rag::auth::LlmProvider::Claude {
+                    api_key: String::new(),
+                },
+            })),
+            #[cfg(feature = "rag")]
+            pkce_state: Arc::new(tokio::sync::Mutex::new(
+                crate::web::api::auth::PkceState::new(),
+            )),
+        }
+    }
+
+    /// Verify build_router() produces a router with the expected API routes
+    /// (/api/graph, /api/file, /api/search, /api/stats, /ws).
+    /// Each route must return a non-404 status (the fallback returns 404 for
+    /// unknown paths when no embedded index.html exists in test context).
+    #[tokio::test]
+    async fn test_build_router_has_expected_routes() {
+        let state = test_state();
+        let app = build_router(state, 7070);
+
+        // These API routes exist — they should NOT fall through to the
+        // fallback handler. We expect a non-404 response (likely 200 or 400
+        // depending on missing query params, but never 404).
+        let routes = ["/api/graph", "/api/file", "/api/search", "/api/stats"];
+        for path in routes {
+            let req = Request::builder()
+                .uri(path)
+                .header("Authorization", "Bearer test-token")
+                .body(Body::empty())
+                .unwrap();
+            let resp = app.clone().oneshot(req).await.unwrap();
+            assert_ne!(
+                resp.status(),
+                StatusCode::NOT_FOUND,
+                "route {path} should exist (got 404)"
+            );
+        }
+
+        // /ws requires a WebSocket upgrade — sending a plain GET should return
+        // a non-404 status (axum returns 400 or 405 for non-upgrade requests).
+        let req = Request::builder().uri("/ws").body(Body::empty()).unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_ne!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "route /ws should exist (got 404)"
+        );
+    }
+
+    /// Verify CORS uses the server port, not a hardcoded port.
+    /// A preflight request from the correct origin should succeed.
+    #[tokio::test]
+    async fn test_cors_allows_server_origin() {
+        let state = test_state();
+        let app = build_router(state, 7070);
+
+        // Preflight OPTIONS request from the correct origin.
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/api/graph")
+            .header("Origin", "http://127.0.0.1:7070")
+            .header("Access-Control-Request-Method", "GET")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let acl = resp
+            .headers()
+            .get("access-control-allow-origin")
+            .map(|v| v.to_str().unwrap().to_string());
+        assert_eq!(
+            acl.as_deref(),
+            Some("http://127.0.0.1:7070"),
+            "CORS should allow the server's own origin"
+        );
+    }
+
+    /// Verify the CORS allowed origin is the server's port, NOT the old hardcoded 3000.
+    /// tower-http CorsLayer with a static origin always returns that origin in the
+    /// `Access-Control-Allow-Origin` header; the browser enforces the mismatch.
+    /// So we verify the header value is 7070, not 3000.
+    #[tokio::test]
+    async fn test_cors_origin_is_server_port_not_3000() {
+        let state = test_state();
+        let app = build_router(state, 7070);
+
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/api/graph")
+            .header("Origin", "http://127.0.0.1:3000")
+            .header("Access-Control-Request-Method", "GET")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        let acl = resp
+            .headers()
+            .get("access-control-allow-origin")
+            .map(|v| v.to_str().unwrap().to_string());
+        // The allowed origin must be the server port (7070), not the requester's (3000).
+        assert_ne!(
+            acl.as_deref(),
+            Some("http://127.0.0.1:3000"),
+            "CORS must not allow the old hardcoded port 3000"
+        );
+        assert_eq!(
+            acl.as_deref(),
+            Some("http://127.0.0.1:7070"),
+            "CORS allowed origin should be the server's own port"
+        );
+    }
+
+    /// Verify CORS origin adapts to a custom port.
+    #[tokio::test]
+    async fn test_cors_custom_port() {
+        let state = test_state();
+        let app = build_router(state, 9999);
+
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/api/stats")
+            .header("Origin", "http://127.0.0.1:9999")
+            .header("Access-Control-Request-Method", "GET")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        let acl = resp
+            .headers()
+            .get("access-control-allow-origin")
+            .map(|v| v.to_str().unwrap().to_string());
+        assert_eq!(
+            acl.as_deref(),
+            Some("http://127.0.0.1:9999"),
+            "CORS should reflect the port passed to build_router"
+        );
+    }
+
+    /// Ensure none of the web module source files (outside tests) contain MCP references.
+    /// This is a static assertion guarding against accidental MCP re-introduction.
+    /// Forbidden terms are constructed at runtime to avoid false positives from this
+    /// test's own source code.
+    #[test]
+    fn test_no_mcp_references_in_web_module() {
+        let web_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/web");
+        // Build forbidden strings at runtime so they don't appear as literals in
+        // this source file (which would cause the check to flag itself).
+        let forbidden: Vec<String> = vec![
+            format!("r{}cp", "m"),      // "rmcp"
+            format!("{}Server", "Mcp"), // "McpServer"
+            ["m", "c", "p"].join(""),   // "mcp"
+        ];
+        for entry in walkdir(&web_dir) {
+            // Skip test modules — only production code matters.
+            let content = std::fs::read_to_string(&entry).unwrap_or_default();
+            // Strip everything after `#[cfg(test)]` to ignore test code.
+            let prod_content = if let Some(pos) = content.find("#[cfg(test)]") {
+                &content[..pos]
+            } else {
+                &content
+            };
+            for term in &forbidden {
+                assert!(
+                    !prod_content.contains(term.as_str()),
+                    "file {} contains forbidden MCP reference '{}'",
+                    entry.display(),
+                    term,
+                );
+            }
+        }
+    }
+
+    /// Recursively collect all .rs files under `dir`.
+    fn walkdir(dir: &std::path::Path) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    files.extend(walkdir(&path));
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    files.push(path);
+                }
+            }
+        }
+        files
+    }
 }

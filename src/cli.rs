@@ -24,6 +24,30 @@ pub enum DaemonAction {
     },
 }
 
+/// Action for the `project` subcommand.
+#[derive(Subcommand, Debug)]
+pub enum ProjectAction {
+    /// Register a project with an alias.
+    Add {
+        /// Alias for the project (alphanumeric and hyphens, 1-64 chars).
+        alias: String,
+        /// Path to the project root directory.
+        path: PathBuf,
+    },
+    /// Remove a registered project by alias.
+    Remove {
+        /// Alias of the project to remove.
+        alias: String,
+    },
+    /// List all registered projects.
+    List,
+    /// Show details of a registered project.
+    Show {
+        /// Alias of the project to show.
+        alias: String,
+    },
+}
+
 /// Action for the `snapshot` subcommand.
 #[derive(Subcommand, Debug)]
 pub enum SnapshotAction {
@@ -120,6 +144,10 @@ pub enum Commands {
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
 
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
+
         /// Case-insensitive pattern matching.
         #[arg(short = 'i', long)]
         case_insensitive: bool,
@@ -150,6 +178,10 @@ pub enum Commands {
 
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
+
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
 
         /// Case-insensitive pattern matching.
         #[arg(short = 'i', long)]
@@ -182,6 +214,10 @@ pub enum Commands {
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
 
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
+
         /// Case-insensitive pattern matching.
         #[arg(short = 'i', long)]
         case_insensitive: bool,
@@ -207,6 +243,10 @@ pub enum Commands {
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
 
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
+
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
         format: OutputFormat,
@@ -220,6 +260,10 @@ pub enum Commands {
     Stats {
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
+
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
 
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
@@ -239,6 +283,10 @@ pub enum Commands {
 
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
+
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
 
         /// Case-insensitive pattern matching.
         #[arg(short = 'i', long)]
@@ -288,6 +336,10 @@ pub enum Commands {
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
 
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
+
         /// Output format: dot (default) or mermaid.
         #[arg(long, value_enum, default_value_t = export::model::ExportFormat::Dot)]
         format: export::model::ExportFormat,
@@ -323,6 +375,13 @@ pub enum Commands {
         #[arg(long)]
         path: Option<PathBuf>,
 
+        /// Path to the project root (auto-detected from cwd when omitted).
+        root: Option<PathBuf>,
+
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
+
         /// Maximum directory depth to display (default: 3).
         #[arg(long, default_value_t = 3)]
         depth: usize,
@@ -341,6 +400,10 @@ pub enum Commands {
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
 
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
+
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
         format: OutputFormat,
@@ -354,6 +417,10 @@ pub enum Commands {
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
 
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
+
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
         format: OutputFormat,
@@ -364,6 +431,10 @@ pub enum Commands {
     DeadCode {
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
+
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
 
         /// Scope analysis to a specific directory (relative to project root).
         #[arg(long)]
@@ -378,6 +449,10 @@ pub enum Commands {
     Diff {
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
+
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
 
         /// Name of the base snapshot.
         #[arg(long)]
@@ -401,6 +476,10 @@ pub enum Commands {
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
 
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
+
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
         format: OutputFormat,
@@ -413,6 +492,10 @@ pub enum Commands {
 
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
+
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
 
         /// Filter by language (rust/rs, typescript/ts, javascript/js, python/py).
         #[arg(long = "language", alias = "lang")]
@@ -431,6 +514,10 @@ pub enum Commands {
     Clusters {
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
+
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
 
         /// Scope analysis to a specific directory (relative to project root).
         #[arg(long)]
@@ -452,6 +539,10 @@ pub enum Commands {
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
 
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
+
         /// Maximum number of paths to return (default: 3).
         #[arg(long, default_value_t = 3)]
         max_paths: usize,
@@ -463,6 +554,12 @@ pub enum Commands {
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
         format: OutputFormat,
+    },
+
+    /// Manage the project registry (add, remove, list, show).
+    Project {
+        #[command(subcommand)]
+        action: ProjectAction,
     },
 
     /// Install Claude Code hooks for transparent code-graph integration.
@@ -502,6 +599,10 @@ pub enum Commands {
 
         /// Path to the project root (auto-detected from cwd when omitted).
         path: Option<PathBuf>,
+
+        /// Use a registered project alias instead of a path.
+        #[arg(long)]
+        project: Option<String>,
 
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
@@ -581,6 +682,34 @@ mod tests {
                 assert!(!no_embeddings, "--no-embeddings should default to false");
             }
             _ => panic!("expected Index command"),
+        }
+    }
+
+    /// Verify that `code-graph serve` parses with default port and path.
+    #[test]
+    #[cfg(feature = "web")]
+    fn test_serve_parses_defaults() {
+        let cli = Cli::parse_from(["code-graph", "serve"]);
+        match cli.command {
+            Commands::Serve { path, port, .. } => {
+                assert_eq!(path, PathBuf::from("."));
+                assert_eq!(port, 7070);
+            }
+            _ => panic!("expected Serve command"),
+        }
+    }
+
+    /// Verify that `code-graph serve /tmp --port 8080` parses correctly.
+    #[test]
+    #[cfg(feature = "web")]
+    fn test_serve_custom_port_and_path() {
+        let cli = Cli::parse_from(["code-graph", "serve", "/tmp", "--port", "8080"]);
+        match cli.command {
+            Commands::Serve { path, port, .. } => {
+                assert_eq!(path, PathBuf::from("/tmp"));
+                assert_eq!(port, 8080);
+            }
+            _ => panic!("expected Serve command"),
         }
     }
 
@@ -674,6 +803,171 @@ mod tests {
                 assert_eq!(path, PathBuf::from("/tmp/myproject"));
             }
             _ => panic!("expected DaemonRun command"),
+        }
+    }
+
+    // ── Project subcommand tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_project_add_parses() {
+        let cli = Cli::parse_from(["code-graph", "project", "add", "myproj", "/path/to/proj"]);
+        match cli.command {
+            Commands::Project { action } => match action {
+                ProjectAction::Add { alias, path } => {
+                    assert_eq!(alias, "myproj");
+                    assert_eq!(path, PathBuf::from("/path/to/proj"));
+                }
+                _ => panic!("expected Add action"),
+            },
+            _ => panic!("expected Project command"),
+        }
+    }
+
+    #[test]
+    fn test_project_remove_parses() {
+        let cli = Cli::parse_from(["code-graph", "project", "remove", "myproj"]);
+        match cli.command {
+            Commands::Project { action } => match action {
+                ProjectAction::Remove { alias } => {
+                    assert_eq!(alias, "myproj");
+                }
+                _ => panic!("expected Remove action"),
+            },
+            _ => panic!("expected Project command"),
+        }
+    }
+
+    #[test]
+    fn test_project_list_parses() {
+        let cli = Cli::parse_from(["code-graph", "project", "list"]);
+        match cli.command {
+            Commands::Project { action } => match action {
+                ProjectAction::List => {}
+                _ => panic!("expected List action"),
+            },
+            _ => panic!("expected Project command"),
+        }
+    }
+
+    #[test]
+    fn test_project_show_parses() {
+        let cli = Cli::parse_from(["code-graph", "project", "show", "myproj"]);
+        match cli.command {
+            Commands::Project { action } => match action {
+                ProjectAction::Show { alias } => {
+                    assert_eq!(alias, "myproj");
+                }
+                _ => panic!("expected Show action"),
+            },
+            _ => panic!("expected Project command"),
+        }
+    }
+
+    // ── --project flag on query commands ──────────────────────────────────
+
+    #[test]
+    fn test_find_with_project_flag() {
+        let cli = Cli::parse_from(["code-graph", "find", "MySymbol", "--project", "myproj"]);
+        match cli.command {
+            Commands::Find {
+                symbol,
+                project,
+                path,
+                ..
+            } => {
+                assert_eq!(symbol, "MySymbol");
+                assert_eq!(project, Some("myproj".to_string()));
+                assert!(path.is_none());
+            }
+            _ => panic!("expected Find command"),
+        }
+    }
+
+    #[test]
+    fn test_find_without_project_flag() {
+        let cli = Cli::parse_from(["code-graph", "find", "MySymbol"]);
+        match cli.command {
+            Commands::Find { project, .. } => {
+                assert!(project.is_none());
+            }
+            _ => panic!("expected Find command"),
+        }
+    }
+
+    #[test]
+    fn test_refs_with_project_flag() {
+        let cli = Cli::parse_from(["code-graph", "refs", "MySymbol", "--project", "myproj"]);
+        match cli.command {
+            Commands::Refs { project, .. } => {
+                assert_eq!(project, Some("myproj".to_string()));
+            }
+            _ => panic!("expected Refs command"),
+        }
+    }
+
+    #[test]
+    fn test_impact_with_project_flag() {
+        let cli = Cli::parse_from(["code-graph", "impact", "MySymbol", "--project", "myproj"]);
+        match cli.command {
+            Commands::Impact { project, .. } => {
+                assert_eq!(project, Some("myproj".to_string()));
+            }
+            _ => panic!("expected Impact command"),
+        }
+    }
+
+    #[test]
+    fn test_stats_with_project_flag() {
+        let cli = Cli::parse_from(["code-graph", "stats", "--project", "myproj"]);
+        match cli.command {
+            Commands::Stats { project, .. } => {
+                assert_eq!(project, Some("myproj".to_string()));
+            }
+            _ => panic!("expected Stats command"),
+        }
+    }
+
+    #[test]
+    fn test_context_with_project_flag() {
+        let cli = Cli::parse_from(["code-graph", "context", "MySymbol", "--project", "myproj"]);
+        match cli.command {
+            Commands::Context { project, .. } => {
+                assert_eq!(project, Some("myproj".to_string()));
+            }
+            _ => panic!("expected Context command"),
+        }
+    }
+
+    #[test]
+    fn test_circular_with_project_flag() {
+        let cli = Cli::parse_from(["code-graph", "circular", "--project", "myproj"]);
+        match cli.command {
+            Commands::Circular { project, .. } => {
+                assert_eq!(project, Some("myproj".to_string()));
+            }
+            _ => panic!("expected Circular command"),
+        }
+    }
+
+    #[test]
+    fn test_dead_code_with_project_flag() {
+        let cli = Cli::parse_from(["code-graph", "dead-code", "--project", "myproj"]);
+        match cli.command {
+            Commands::DeadCode { project, .. } => {
+                assert_eq!(project, Some("myproj".to_string()));
+            }
+            _ => panic!("expected DeadCode command"),
+        }
+    }
+
+    #[test]
+    fn test_rename_with_project_flag() {
+        let cli = Cli::parse_from(["code-graph", "rename", "old", "new", "--project", "myproj"]);
+        match cli.command {
+            Commands::Rename { project, .. } => {
+                assert_eq!(project, Some("myproj".to_string()));
+            }
+            _ => panic!("expected Rename command"),
         }
     }
 }
