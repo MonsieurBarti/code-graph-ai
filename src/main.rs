@@ -1496,7 +1496,7 @@ fn main() -> Result<()> {
 
             // Shell out to git diff --name-only
             let output = std::process::Command::new("git")
-                .args(["diff", "--name-only", &base_ref])
+                .args(["diff", "--name-only", "--", &base_ref])
                 .current_dir(&path)
                 .output()
                 .map_err(|e| anyhow::anyhow!("failed to run git: {}. Ensure git is in PATH.", e))?;

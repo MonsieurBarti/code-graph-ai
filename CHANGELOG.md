@@ -5,9 +5,9 @@ All notable changes to code-graph are documented in this file.
 ## v3.0.0 (2026-03-14)
 
 **Added:**
-- Clone detection: identify duplicate and near-duplicate code blocks across the codebase
+- Clone detection: identify structurally identical code via signature hashing across the codebase
 - Background daemon with IPC (`daemon start|stop|status`) for persistent indexing without blocking the CLI
-- Claude Code hooks integration (PreToolUse/PostToolUse) replacing MCP-based tool dispatch
+- Claude Code hooks integration (PreToolUse) replacing MCP-based tool dispatch
 - Multi-project registry with aliases (`project add|remove|list|show`) and `--project` flag on all query commands
 - Project auto-detection from current working directory (no explicit path required)
 - `setup --uninstall` flag to cleanly remove hooks and permissions

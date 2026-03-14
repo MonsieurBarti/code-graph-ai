@@ -504,14 +504,16 @@ fn dispatch_query(
         DaemonRequest::Refs {
             symbol,
             case_insensitive,
-            kind: _,
-            file: _,
+            kind,
+            file,
             language,
         } => dispatch_refs(
             graph,
             project_root,
             symbol,
             *case_insensitive,
+            kind,
+            file.as_deref(),
             language.as_deref(),
         ),
 
@@ -663,6 +665,8 @@ fn dispatch_refs(
     project_root: &Path,
     symbol: &str,
     case_insensitive: bool,
+    kind_filter: &[String],
+    file_filter: Option<&Path>,
     language: Option<&str>,
 ) -> DaemonResponse {
     let language_filter = match parse_lang(language) {
@@ -685,6 +689,27 @@ fn dispatch_refs(
         .collect();
 
     let mut results = crate::query::refs::find_refs(graph, symbol, &all_indices, project_root);
+
+    // Apply kind filter (e.g. "import", "call")
+    if !kind_filter.is_empty() {
+        results.retain(|r| {
+            let kind_str = match r.ref_kind {
+                crate::query::refs::RefKind::Import => "import",
+                crate::query::refs::RefKind::Call => "call",
+            };
+            kind_filter.iter().any(|k| k.eq_ignore_ascii_case(kind_str))
+        });
+    }
+
+    // Apply file filter
+    if let Some(file) = file_filter {
+        let abs_file = if file.is_absolute() {
+            file.to_path_buf()
+        } else {
+            project_root.join(file)
+        };
+        results.retain(|r| r.file_path.starts_with(&abs_file));
+    }
 
     if let Some(lang) = language_filter {
         results.retain(|r| file_language_matches(&r.file_path, lang));

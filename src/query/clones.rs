@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use petgraph::Direction;
@@ -17,9 +16,9 @@ use crate::graph::{
 
 /// Structural signature of a symbol for clone detection.
 ///
-/// Two symbols with the same `StructuralHash` are considered structural clones.
+/// Two symbols with the same `StructuralSignature` are considered structural clones.
 /// Components: (SymbolKind, body_size, outgoing_edge_count, incoming_edge_count, decorator_count).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct StructuralSignature {
     kind: SymbolKind,
     body_size: usize,
@@ -28,11 +27,40 @@ struct StructuralSignature {
     decorator_count: usize,
 }
 
-/// Compute a u64 hash from a `StructuralSignature`.
-fn compute_structural_hash(sig: &StructuralSignature) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    sig.hash(&mut hasher);
-    hasher.finish()
+/// Compute a deterministic u64 hash from a `StructuralSignature`.
+///
+/// Uses multiply-and-xor combining so the result is stable across runs
+/// (unlike `DefaultHasher` which is randomly seeded).
+fn deterministic_signature_hash(sig: &StructuralSignature) -> u64 {
+    let kind_val: u64 = match sig.kind {
+        SymbolKind::Function => 1,
+        SymbolKind::Class => 2,
+        SymbolKind::Interface => 3,
+        SymbolKind::Variable => 4,
+        SymbolKind::TypeAlias => 5,
+        SymbolKind::Enum => 6,
+        SymbolKind::Trait => 7,
+        SymbolKind::Method => 8,
+        SymbolKind::Struct => 9,
+        SymbolKind::Component => 10,
+        SymbolKind::Property => 11,
+        SymbolKind::ImplMethod => 12,
+        SymbolKind::Const => 13,
+        SymbolKind::Static => 14,
+        SymbolKind::Macro => 15,
+    };
+    // FNV-1a-style deterministic combine
+    let mut h: u64 = 0xcbf29ce484222325;
+    let mix = |h: &mut u64, v: u64| {
+        *h ^= v;
+        *h = h.wrapping_mul(0x100000001b3);
+    };
+    mix(&mut h, kind_val);
+    mix(&mut h, sig.body_size as u64);
+    mix(&mut h, sig.outgoing_edges as u64);
+    mix(&mut h, sig.incoming_edges as u64);
+    mix(&mut h, sig.decorator_count as u64);
+    h
 }
 
 /// A single symbol member within a clone group.
@@ -100,24 +128,8 @@ pub fn find_clones(
         }
     };
 
-    // Build a map: symbol NodeIndex -> file info (path)
-    // We iterate all Symbol nodes, find their containing file via incoming Contains edge.
-    let mut sym_to_file: HashMap<petgraph::stable_graph::NodeIndex, PathBuf> = HashMap::new();
-
-    for node_idx in graph.graph.node_indices() {
-        if let GraphNode::Symbol(_) = &graph.graph[node_idx] {
-            for edge in graph.graph.edges_directed(node_idx, Direction::Incoming) {
-                if matches!(edge.weight(), EdgeKind::Contains)
-                    && let GraphNode::File(fi) = &graph.graph[edge.source()]
-                {
-                    sym_to_file.insert(node_idx, fi.path.clone());
-                    break;
-                }
-            }
-        }
-    }
-
-    // Group symbols by structural hash
+    // Single pass: for each Symbol node, find its containing file via incoming
+    // Contains edge, check scope, compute the structural signature, and group.
     let mut hash_groups: HashMap<u64, (StructuralSignature, Vec<CloneMember>)> = HashMap::new();
     let mut total_symbols_analyzed: usize = 0;
 
@@ -127,29 +139,41 @@ pub fn find_clones(
             _ => continue,
         };
 
-        // Get file path for this symbol
-        let file_path = match sym_to_file.get(&node_idx) {
+        // Walk incoming edges to find the containing file
+        let file_path = graph
+            .graph
+            .edges_directed(node_idx, Direction::Incoming)
+            .find_map(|edge| {
+                if matches!(edge.weight(), EdgeKind::Contains)
+                    && let GraphNode::File(fi) = &graph.graph[edge.source()]
+                {
+                    return Some(fi.path.clone());
+                }
+                None
+            });
+
+        let file_path = match file_path {
             Some(p) => p,
             None => continue, // orphan symbol, skip
         };
 
         // Check scope
-        if !in_scope(file_path) {
+        if !in_scope(&file_path) {
             continue;
         }
 
         total_symbols_analyzed += 1;
 
-        // Compute structural signature
+        // Compute structural signature and deterministic hash
         let sig = compute_signature(graph, node_idx, sym);
-        let hash = compute_structural_hash(&sig);
+        let hash = deterministic_signature_hash(&sig);
 
         let kind_str = crate::query::find::kind_to_str(&sym.kind).to_string();
         let body_size = sig.body_size;
         let member = CloneMember {
             name: sym.name.clone(),
             kind: kind_str,
-            file: file_path.clone(),
+            file: file_path,
             line: sym.line,
             body_size,
         };

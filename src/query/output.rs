@@ -20,6 +20,7 @@ fn language_of_file(path: &Path) -> &'static str {
         "js" | "jsx" => "JavaScript",
         "rs" => "Rust",
         "py" => "Python",
+        "go" => "Go",
         _ => "Unknown",
     }
 }
@@ -35,14 +36,15 @@ fn is_mixed_language<F: Fn(&T) -> &Path, T>(items: &[T], get_path: F) -> bool {
         .any(|i| language_of_file(get_path(i)) != first_lang)
 }
 
-/// Sort key for language grouping: JavaScript < Python < Rust < TypeScript < Unknown.
+/// Sort key for language grouping: Go < JavaScript < Python < Rust < TypeScript < Unknown.
 fn language_sort_key(lang: &str) -> u8 {
     match lang {
-        "JavaScript" => 1,
-        "Python" => 2,
-        "Rust" => 3,
-        "TypeScript" => 4,
-        _ => 5,
+        "Go" => 1,
+        "JavaScript" => 2,
+        "Python" => 3,
+        "Rust" => 4,
+        "TypeScript" => 5,
+        _ => 6,
     }
 }
 
@@ -2481,7 +2483,7 @@ pub fn format_clones_table(result: &crate::query::clones::CloneGroupResult, root
                     .file
                     .strip_prefix(root)
                     .unwrap_or(&m.file)
-                    .to_string_lossy()
+                    .as_os_str()
                     .len();
                 (nw.max(m.name.len()), fw.max(file_len))
             });
